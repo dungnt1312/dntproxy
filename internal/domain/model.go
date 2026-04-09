@@ -9,11 +9,12 @@ type ModelInfo struct {
 
 // Combo represents a named group of models with fallback/round-robin.
 type Combo struct {
-	ID        string   `json:"id"`
-	Name      string   `json:"name"`
-	Models    []string `json:"models"`
-	CreatedAt string   `json:"createdAt,omitempty"`
-	UpdatedAt string   `json:"updatedAt,omitempty"`
+	ID            string   `json:"id"`
+	Name          string   `json:"name"`
+	Models        []string `json:"models"`
+	ConnectionIDs []string `json:"connectionIds,omitempty"` // optional: restrict to specific connections
+	CreatedAt     string   `json:"createdAt,omitempty"`
+	UpdatedAt     string   `json:"updatedAt,omitempty"`
 }
 
 // AliasMap is model alias → "provider/model" string.

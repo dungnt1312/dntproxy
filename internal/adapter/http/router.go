@@ -34,6 +34,9 @@ func NewRouter(store port.CredentialStore) *gin.Engine {
 	// Dashboard API endpoints
 	RegisterAPIRoutes(r, store)
 
+	// Auth flow endpoints (Builder ID, IDC, Social Login, Fetch Models)
+	RegisterAuthRoutes(r, store)
+
 	// Health check
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})

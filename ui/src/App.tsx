@@ -6,6 +6,8 @@ import Combos from './pages/combos'
 import Models from './pages/models'
 import Keys from './pages/keys'
 import Settings from './pages/settings'
+import Logs from './pages/logs'
+import Backup from './pages/backup'
 
 export default function App() {
   return (
@@ -18,6 +20,8 @@ export default function App() {
           <Route path="/models" element={<Models />} />
           <Route path="/keys" element={<Keys />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/logs" element={<Logs />} />
+          <Route path="/backup" element={<Backup />} />
         </Route>
       </Routes>
     </BrowserRouter>

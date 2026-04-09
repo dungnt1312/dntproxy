@@ -3,9 +3,12 @@ package openai
 import (
 	"fmt"
 	"io"
+	"log"
 	"net/http"
+	"time"
 
 	"github.com/dungnt/dntproxy/internal/domain"
+	"github.com/dungnt/dntproxy/internal/logger"
 )
 
 const defaultOpenAIBaseURL = "https://api.openai.com"
@@ -46,17 +49,42 @@ func (e *Executor) Execute(model string, body []byte, credentials *domain.Creden
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
 
+	log.Printf("[OPENAI] --> %s | conn=%s | model=%s", url, credentials.ConnectionName, model)
+	if apiKey != "" {
+		log.Printf("[OPENAI]     Authorization: Bearer %s", maskedToken(apiKey))
+	}
+	appLogger := logger.Get()
+	appLogger.AddOpenAI("--> %s | conn=%s | model=%s", url, credentials.ConnectionName, model)
+
+	start := time.Now()
+
 	client := &http.Client{}
 	resp, err := client.Do(req)
+	duration := time.Since(start)
+
 	if err != nil {
+		errMsg := fmt.Sprintf("openai request failed: %s", err)
+		log.Printf("[OPENAI] <-- %s | conn=%s | model=%s | status=502 | duration=%s | error=%s",
+			url, credentials.ConnectionName, model, duration, err)
+		appLogger.AddError("OPENAI", "<-- %s | conn=%s | model=%s | status=502 | duration=%s | error=%s",
+			url, credentials.ConnectionName, model, duration, errMsg)
 		return nil, 502, fmt.Errorf("openai request failed: %w", err)
 	}
 
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+
+	log.Printf("[OPENAI] <-- %s | conn=%s | model=%s | status=%d | duration=%s | body_size=%d",
+		url, credentials.ConnectionName, model, resp.StatusCode, duration, len(bodyBytes))
+	appLogger.AddOpenAI("<-- %s | conn=%s | model=%s | status=%d | duration=%s | body_size=%d",
+		url, credentials.ConnectionName, model, resp.StatusCode, duration, len(bodyBytes))
+
 	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
 		return nil, resp.StatusCode, fmt.Errorf("openai returned %d: %s", resp.StatusCode, string(bodyBytes))
 	}
+
+	// Restore body for streaming
+	resp.Body = io.NopCloser(newBytesReader(bodyBytes))
 
 	// OpenAI-compatible responses are already SSE formatted, pass through directly
 	return resp.Body, 200, nil
@@ -79,4 +107,11 @@ func (r *bytesReader) Read(p []byte) (int, error) {
 	n := copy(p, r.data[r.pos:])
 	r.pos += n
 	return n, nil
+}
+
+func maskedToken(token string) string {
+	if len(token) <= 8 {
+		return "***"
+	}
+	return token[:4] + "***" + token[len(token)-4:]
 }

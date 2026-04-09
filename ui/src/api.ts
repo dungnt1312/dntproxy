@@ -26,12 +26,40 @@ export const api = {
   updateConnection: (id: string, data: Record<string, unknown>) =>
     request(`/connections/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   detectKiroToken: () => request('/connections/detect-kiro', { method: 'POST' }),
+  resetCooldown: (id: string) => request(`/connections/${id}/reset-cooldown`, { method: 'POST' }),
+
+  // Kiro Auth Flows
+  startBuilderID: () => request('/auth/kiro/start-builderid', { method: 'POST' }),
+  startIDC: (data: { startUrl: string; region?: string }) =>
+    request('/auth/kiro/start-idc', { method: 'POST', body: JSON.stringify(data) }),
+  pollAuth: (sessionId: string) =>
+    request('/auth/kiro/poll', { method: 'POST', body: JSON.stringify({ sessionId }) }),
+  startSocialLogin: (provider: 'google' | 'github') =>
+    request('/auth/kiro/start-social', { method: 'POST', body: JSON.stringify({ provider }) }),
+  exchangeSocialCode: (data: { sessionId: string; callbackUrl?: string; code?: string }) =>
+    request('/auth/kiro/exchange-social', { method: 'POST', body: JSON.stringify(data) }),
+
+  // OpenAI OAuth (PKCE)
+  startOpenAIOAuth: () => request('/auth/openai/start', { method: 'POST' }),
+  pollOpenAIOAuth: (sessionId: string) =>
+    request('/auth/openai/exchange', { method: 'POST', body: JSON.stringify({ sessionId }) }),
+
+  // Fetch models from provider API
+  fetchConnectionModels: (id: string) =>
+    request(`/connections/${id}/fetch-models`, { method: 'POST', body: JSON.stringify({}) }),
+
+  // Test a specific model through a connection
+  testModel: (id: string, model: string) =>
+    request(`/connections/${id}/test-model`, { method: 'POST', body: JSON.stringify({ model }) }),
 
   // Combos
   getCombos: () => request('/combos'),
-  createCombo: (data: { name: string; models: string[] }) =>
+  createCombo: (data: { name: string; models?: string[]; connectionIds?: string[] }) =>
     request('/combos', { method: 'POST', body: JSON.stringify(data) }),
+  updateCombo: (id: string, data: Record<string, unknown>) =>
+    request(`/combos/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteCombo: (id: string) => request(`/combos/${id}`, { method: 'DELETE' }),
+  checkQuota: (id: string) => request(`/connections/${id}/check-quota`, { method: 'POST' }),
 
   // Aliases
   getAliases: () => request('/aliases'),
@@ -51,4 +79,19 @@ export const api = {
 
   // Models
   getModels: () => request('/models'),
+
+  // Logs
+  getLogs: () => fetch('/api/logs').then(r => r.json()),
+  clearLogs: () => fetch('/api/logs/clear', { method: 'POST' }),
+
+  // Backup
+  exportBackup: (mask?: boolean) => {
+    const url = mask ? '/api/backup/export?mask=true' : '/api/backup/export'
+    return fetch(url).then(async r => {
+      if (!r.ok) throw new Error('Export failed')
+      return r.json()
+    })
+  },
+  importBackup: (data: unknown, mode: string) =>
+    request('/backup/import', { method: 'POST', body: JSON.stringify({ ...data as object, mode }) }),
 };

@@ -15,7 +15,8 @@ BACKEND_PID=$!
 
 echo "🎨 Starting UI dev server..."
 cd ui
-npm run dev &
+bun i
+bun run build
 UI_PID=$!
 cd ..
 

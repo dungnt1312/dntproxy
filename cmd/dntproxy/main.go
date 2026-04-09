@@ -4,9 +4,12 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
+	"syscall"
 
 	httpAdapter "github.com/dungnt/dntproxy/internal/adapter/http"
 	"github.com/dungnt/dntproxy/internal/adapter/storage"
+	"github.com/dungnt/dntproxy/internal/service"
 	"github.com/spf13/cobra"
 )
 
@@ -55,6 +58,9 @@ func main() {
 	// Key commands
 	rootCmd.AddCommand(buildKeyCmd())
 
+	// Backup commands
+	rootCmd.AddCommand(buildBackupCmd())
+
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
@@ -75,7 +81,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	port := 20128
+	port := 20199
 	if cfg.Settings.Port > 0 {
 		port = cfg.Settings.Port
 	}
@@ -88,9 +94,31 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	router := httpAdapter.NewRouter(store)
 
+	scheduler := service.NewTokenRefreshScheduler(store)
+	go scheduler.Start()
+
 	addr := fmt.Sprintf(":%d", port)
 	log.Printf("[dntproxy] v%s starting on http://localhost%s", version, addr)
 	log.Printf("[dntproxy] OpenAI-compatible API: http://localhost%s/v1", addr)
 
-	return router.Run(addr)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- router.Run(addr)
+	}()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	select {
+	case sig := <-sigCh:
+		log.Printf("[dntproxy] Received signal %s, shutting down...", sig)
+	case err := <-errCh:
+		if err != nil {
+			log.Printf("[dntproxy] Server error: %s", err)
+		}
+	}
+
+	scheduler.Stop()
+	log.Printf("[dntproxy] Shutdown complete")
+	return nil
 }

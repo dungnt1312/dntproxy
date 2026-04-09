@@ -4,9 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
+	"time"
 
 	"github.com/dungnt/dntproxy/internal/domain"
+	"github.com/dungnt/dntproxy/internal/logger"
 	"github.com/google/uuid"
 )
 
@@ -63,18 +66,46 @@ func (e *Executor) Execute(model string, body []byte, credentials *domain.Creden
 		req.Header.Set("Authorization", "Bearer "+credentials.AccessToken)
 	}
 
+	reqID := uuid.New().String()
+	appLogger := logger.Get()
+
+	log.Printf("[KIRO] --> %s %s | conn=%s | model=%s | req_id=%s",
+		req.Method, kiroBaseURL, credentials.ConnectionName, model, reqID)
+	log.Printf("[KIRO]     Authorization: Bearer %s*** | Content-Type: %s",
+		maskedToken(credentials.AccessToken), req.Header.Get("Content-Type"))
+	appLogger.AddKiro("--> %s %s | conn=%s | model=%s | req_id=%s",
+		req.Method, kiroBaseURL, credentials.ConnectionName, model, reqID)
+
+	start := time.Now()
+
 	// Execute request
 	client := &http.Client{}
 	resp, err := client.Do(req)
+	duration := time.Since(start)
+
 	if err != nil {
+		errMsg := fmt.Sprintf("kiro request failed: %s", err)
+		log.Printf("[KIRO] <-- %s | conn=%s | model=%s | status=502 | duration=%s | req_id=%s | error=%s",
+			kiroBaseURL, credentials.ConnectionName, model, duration, reqID, err)
+		appLogger.AddError("KIRO", "<-- %s | conn=%s | model=%s | status=502 | duration=%s | req_id=%s | error=%s",
+			kiroBaseURL, credentials.ConnectionName, model, duration, reqID, errMsg)
 		return nil, 502, fmt.Errorf("kiro request failed: %w", err)
 	}
 
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+
+	log.Printf("[KIRO] <-- %s | conn=%s | model=%s | status=%d | duration=%s | req_id=%s | body_size=%d",
+		kiroBaseURL, credentials.ConnectionName, model, resp.StatusCode, duration, reqID, len(bodyBytes))
+	appLogger.AddKiro("<-- %s | conn=%s | model=%s | status=%d | duration=%s | req_id=%s | body_size=%d",
+		kiroBaseURL, credentials.ConnectionName, model, resp.StatusCode, duration, reqID, len(bodyBytes))
+
 	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
 		return nil, resp.StatusCode, fmt.Errorf("kiro returned %d: %s", resp.StatusCode, string(bodyBytes))
 	}
+
+	// Restore body for streaming
+	resp.Body = io.NopCloser(newBytesReader(bodyBytes))
 
 	// Create a pipe to transform EventStream → SSE
 	pr, pw := io.Pipe()
@@ -123,6 +154,13 @@ func (e *Executor) Execute(model string, body []byte, credentials *domain.Creden
 	}()
 
 	return pr, 200, nil
+}
+
+func maskedToken(token string) string {
+	if len(token) <= 8 {
+		return "***"
+	}
+	return token[:4] + "***" + token[len(token)-4:]
 }
 
 // bytesReader wraps a byte slice as an io.Reader.

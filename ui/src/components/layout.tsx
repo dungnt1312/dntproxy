@@ -1,5 +1,5 @@
 import { Outlet, NavLink } from 'react-router-dom'
-import { LayoutDashboard, Link2, Layers, Box, KeyRound, Settings } from 'lucide-react'
+import { LayoutDashboard, Link2, Layers, Box, KeyRound, Settings, Terminal, Database } from 'lucide-react'
 
 const nav = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
@@ -7,6 +7,8 @@ const nav = [
   { to: '/combos', icon: Layers, label: 'Combos' },
   { to: '/models', icon: Box, label: 'Models' },
   { to: '/keys', icon: KeyRound, label: 'API Keys' },
+  { to: '/logs', icon: Terminal, label: 'Logs' },
+  { to: '/backup', icon: Database, label: 'Backup' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ]
 

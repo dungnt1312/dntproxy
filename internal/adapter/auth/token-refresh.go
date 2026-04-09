@@ -4,7 +4,10 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -161,4 +164,63 @@ func getStringFromMap(m map[string]interface{}, key string) string {
 		}
 	}
 	return ""
+}
+
+// RefreshOpenAIToken refreshes the OpenAI OAuth token using the refresh_token grant type.
+func RefreshOpenAIToken(conn *domain.ProviderConnection, store port.CredentialStore) (*domain.ProviderConnection, error) {
+	if conn.RefreshToken == "" {
+		return nil, fmt.Errorf("no refresh token available")
+	}
+
+	formData := url.Values{
+		"grant_type":    {"refresh_token"},
+		"client_id":     {"app_EMoamEEZ73f0CkXaXp7hrann"},
+		"refresh_token": {conn.RefreshToken},
+	}
+
+	resp, err := http.Post("https://auth.openai.com/oauth/token", "application/x-www-form-urlencoded", strings.NewReader(formData.Encode()))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("token refresh failed (%d): %s", resp.StatusCode, string(body))
+	}
+
+	var tokens struct {
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+		IDToken      string `json:"id_token"`
+		ExpiresIn    int    `json:"expires_in"`
+		TokenType    string `json:"token_type"`
+	}
+	if err := json.Unmarshal(body, &tokens); err != nil {
+		return nil, err
+	}
+
+	conn.AccessToken = tokens.AccessToken
+	if tokens.RefreshToken != "" {
+		conn.RefreshToken = tokens.RefreshToken
+	}
+	if tokens.IDToken != "" {
+		if conn.ProviderSpecificData == nil {
+			conn.ProviderSpecificData = make(map[string]interface{})
+		}
+		conn.ProviderSpecificData["idToken"] = tokens.IDToken
+	}
+
+	expiresIn := tokens.ExpiresIn
+	if expiresIn == 0 {
+		expiresIn = 3600
+	}
+	conn.ExpiresIn = expiresIn
+	conn.ExpiresAt = time.Now().Add(time.Duration(expiresIn) * time.Second).UTC().Format(time.RFC3339)
+	conn.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+
+	// Save
+	store.UpdateConnection(conn)
+	log.Printf("[TOKEN] OpenAI Token refreshed and persisted for %s", conn.Name)
+	return conn, nil
 }

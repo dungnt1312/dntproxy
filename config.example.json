@@ -1,0 +1,12 @@
+{
+  "providerConnections": [],
+  "combos": [],
+  "modelAliases": {},
+  "apiKeys": [],
+  "settings": {
+    "stickyRoundRobinLimit": 3,
+    "comboStrategy": "fallback",
+    "requireApiKey": false,
+    "port": 20199
+  }
+}

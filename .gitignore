@@ -1,0 +1,21 @@
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+*.tmp
+/dntproxy
+/dist/
+/vendor/
+.env
+db.json
+
+# UI
+ui/node_modules/
+ui/dist/
+ui/.bun/
+
+# Data
+*.lock.json

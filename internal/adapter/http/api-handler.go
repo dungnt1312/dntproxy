@@ -1749,25 +1749,37 @@ func apiExportBackup(store port.CredentialStore) gin.HandlerFunc {
 func apiImportBackup(store port.CredentialStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req struct {
-			Mode string `json:"mode"` // "replace" or "merge"
+			Mode                string                     `json:"mode"`
+			Version             string                     `json:"version"`
+			ExportedAt          string                     `json:"exportedAt"`
+			ProviderConnections []ProviderConnectionBackup `json:"providerConnections"`
+			Combos              []ComboBackup              `json:"combos"`
+			ModelAliases        domain.AliasMap            `json:"modelAliases"`
+			APIKeys             []APIKeyBackup             `json:"apiKeys"`
+			Settings            domain.Settings            `json:"settings"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(400, gin.H{"error": "Invalid request body"})
+			c.JSON(400, gin.H{"error": "Invalid backup data: " + err.Error()})
 			return
 		}
 
-		if req.Mode == "" {
-			req.Mode = "merge"
+		mode := req.Mode
+		if mode == "" {
+			mode = "merge"
 		}
-		if req.Mode != "replace" && req.Mode != "merge" {
+		if mode != "replace" && mode != "merge" {
 			c.JSON(400, gin.H{"error": "Invalid mode. Must be 'replace' or 'merge'"})
 			return
 		}
 
-		var backup BackupData
-		if err := c.ShouldBindJSON(&backup); err != nil {
-			c.JSON(400, gin.H{"error": "Invalid backup data: " + err.Error()})
-			return
+		backup := BackupData{
+			Version:             req.Version,
+			ExportedAt:          req.ExportedAt,
+			ProviderConnections: req.ProviderConnections,
+			Combos:              req.Combos,
+			ModelAliases:        req.ModelAliases,
+			APIKeys:             req.APIKeys,
+			Settings:            req.Settings,
 		}
 
 		cfg, err := store.Load()
@@ -1779,7 +1791,7 @@ func apiImportBackup(store port.CredentialStore) gin.HandlerFunc {
 		imported := 0
 		skipped := 0
 
-		if req.Mode == "replace" {
+		if mode == "replace" {
 			cfg.ProviderConnections = nil
 			cfg.Combos = nil
 			cfg.ModelAliases = nil
@@ -1793,7 +1805,7 @@ func apiImportBackup(store port.CredentialStore) gin.HandlerFunc {
 				continue
 			}
 
-			if req.Mode == "merge" {
+			if mode == "merge" {
 				found := false
 				for i, existing := range cfg.ProviderConnections {
 					if existing.ID == conn.ID {
@@ -1984,13 +1996,13 @@ func apiImportBackup(store port.CredentialStore) gin.HandlerFunc {
 			return
 		}
 
-		log.Printf("[BACKUP] Imported %d items (%d skipped) in mode=%s", imported, skipped, req.Mode)
+		log.Printf("[BACKUP] Imported %d items (%d skipped) in mode=%s", imported, skipped, mode)
 
 		c.JSON(200, gin.H{
 			"ok":       true,
 			"imported": imported,
 			"skipped":  skipped,
-			"mode":     req.Mode,
+			"mode":     mode,
 		})
 	}
 }

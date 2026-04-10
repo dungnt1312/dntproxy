@@ -33,7 +33,6 @@ trap cleanup SIGINT SIGTERM
 echo ""
 echo "✅ Dev environment ready!"
 echo "   Backend:  http://localhost:$PORT"
-echo "   UI:       http://localhost:5173"
 echo ""
 echo "Press Ctrl+C to stop all services."
 

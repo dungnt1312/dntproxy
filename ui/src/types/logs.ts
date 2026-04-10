@@ -16,6 +16,8 @@ export interface LogEntry {
   message: string
   error?: string
   bodySize?: number
+  requestBody?: string
+  responseBody?: string
   inputTokens?: number
   outputTokens?: number
   totalTokens?: number

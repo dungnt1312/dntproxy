@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Plus, X, Search, Check } from 'lucide-react'
-import { MODELS_CONFIG, PROVIDER_CONFIGS, getModelsByProvider, getModelIdPrefixForProvider } from '../models-config'
+import { MODELS_CONFIG, getModelsByProvider, getModelIdPrefixForProvider } from '../models-config'
 
 interface ModelSelectorProps {
   selected: string[]
@@ -64,29 +64,25 @@ export default function ModelSelector({
     setShowCustomInput(false)
   }
 
-  const providerConfig = provider ? PROVIDER_CONFIGS[provider] : null
-
   return (
     <div className="space-y-3">
       {/* Selected known model tags */}
       {selectedKnownModels.length > 0 && (
-        <div className="flex flex-wrap gap-2 p-3 bg-[var(--accent)]/10 rounded-lg border border-[var(--accent)]/30">
-          <span className="text-xs text-[var(--accent)] w-full mb-1">Allowed models:</span>
+        <div className="flex flex-wrap gap-2 p-3 bg-[var(--accent-glow)] rounded-xl border border-[var(--accent)]/20">
+          <span className="text-[10px] text-[var(--accent)] w-full mb-0.5 font-medium uppercase tracking-wide">Allowed models:</span>
           {selectedKnownModels.map((modelId) => {
-            const config = providerConfig || PROVIDER_CONFIGS.other
             return (
               <span
                 key={modelId}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-[var(--accent)]/20 border border-[var(--accent)]/40 rounded-lg text-xs"
+                className="inline-flex items-center gap-1 px-2 py-0.5 bg-[var(--accent)]/15 border border-[var(--accent)]/25 rounded-md text-[11px] font-mono"
               >
-                <span>{config.icon}</span>
-                <span className="text-blue-200">{modelId}</span>
+                <span className="text-[var(--text-muted)]">{modelId}</span>
                 <button
                   onClick={() => removeModel(modelId)}
                   aria-label={`Remove allowed model ${modelId}`}
-                  className="ml-0.5 hover:bg-[var(--accent)]/30 rounded-sm p-0.5 transition-colors"
+                  className="ml-0.5 hover:bg-[var(--accent)]/20 rounded-sm p-0.5 transition-colors cursor-pointer"
                 >
-                  <X size={12} className="text-blue-200" />
+                  <X size={10} className="text-[var(--accent)]" />
                 </button>
               </span>
             )
@@ -96,23 +92,21 @@ export default function ModelSelector({
 
       {/* Custom models tags */}
       {customModels.length > 0 && (
-        <div className="flex flex-wrap gap-2 p-3 bg-purple-500/10 rounded-lg border border-purple-500/30">
-          <span className="text-xs text-purple-400 w-full mb-1">Custom models:</span>
+        <div className="flex flex-wrap gap-2 p-3 bg-[var(--purple-glow)] rounded-xl border border-[var(--purple)]/20">
+          <span className="text-[10px] text-[var(--purple)] w-full mb-0.5 font-medium uppercase tracking-wide">Custom models:</span>
           {customModels.map((modelId) => {
-            const config = providerConfig || PROVIDER_CONFIGS.other
             return (
               <span
                 key={modelId}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-purple-500/20 border border-purple-500/40 rounded-lg text-xs"
+                className="inline-flex items-center gap-1 px-2 py-0.5 bg-[var(--purple)]/15 border border-[var(--purple)]/25 rounded-md text-[11px] font-mono"
               >
-                <span>{config.icon}</span>
-                <span className="text-purple-300">{modelId}</span>
+                <span className="text-[var(--text-muted)]">{modelId}</span>
                 <button
                   onClick={() => removeModel(modelId)}
                   aria-label={`Remove custom model ${modelId}`}
-                  className="ml-0.5 hover:bg-purple-500/30 rounded-sm p-0.5 transition-colors"
+                  className="ml-0.5 hover:bg-[var(--purple)]/20 rounded-sm p-0.5 transition-colors cursor-pointer"
                 >
-                  <X size={12} className="text-purple-400" />
+                  <X size={10} className="text-[var(--purple)]" />
                 </button>
               </span>
             )
@@ -122,15 +116,15 @@ export default function ModelSelector({
 
       {/* Status indicator */}
       {isAllAllowed ? (
-        <div className="text-xs text-green-400 bg-green-500/10 rounded-lg px-3 py-2 border border-green-500/30">
-          All models allowed. Select models below to restrict this connection.
+        <div className="chip chip-success text-xs w-full justify-center py-2">
+          All models allowed. Select models below to restrict.
         </div>
       ) : (
-        <div className="flex items-center justify-between text-xs text-[var(--text-muted)] bg-[var(--bg)] rounded-lg px-3 py-2 border border-[var(--border)]">
+        <div className="flex items-center justify-between text-xs text-[var(--text-muted)] glass-sm px-3 py-2">
           <span>Restricted to {selected.length} selected model(s).</span>
           <button
             onClick={() => onChange([])}
-            className="text-[var(--accent)] hover:text-[var(--accent-hover)] transition-colors"
+            className="text-[var(--accent)] hover:text-[var(--accent-hover)] transition-colors cursor-pointer font-medium"
           >
             Clear restrictions
           </button>
@@ -139,20 +133,20 @@ export default function ModelSelector({
 
       {/* Search */}
       <div className="relative">
-        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
+        <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-dim)]" />
         <input
           type="text"
           value={searchQuery}
           onChange={e => setSearchQuery(e.target.value)}
           placeholder="Search models..."
-          className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-lg pl-9 pr-3 py-2 text-sm focus:border-[var(--accent)] outline-none"
+          className="glass-input w-full pl-9 text-xs"
         />
       </div>
 
       {/* Model list - checked = allowed */}
-      <div className="max-h-64 overflow-y-auto space-y-1 bg-[var(--bg)] rounded-lg border border-[var(--border)] p-2">
+      <div className="max-h-64 overflow-y-auto space-y-0.5 glass-sm p-1.5">
         {filteredModels.length === 0 && (
-          <p className="text-sm text-[var(--text-muted)] py-4 text-center">No models found</p>
+          <p className="text-xs text-[var(--text-dim)] py-4 text-center">No models found</p>
         )}
         {filteredModels.map((model) => {
           const isSelected = isSelectedModel(model.id)
@@ -160,23 +154,23 @@ export default function ModelSelector({
             <button
               key={model.id}
               onClick={() => toggleModel(model.id)}
-              className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left text-sm transition-colors ${
+              className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left text-xs cursor-pointer transition-all ${
                 isSelected
-                  ? 'text-[var(--text)] bg-[var(--accent)]/10'
-                  : 'text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--bg-hover)]'
+                  ? 'text-[var(--text)] bg-[var(--accent-glow)]'
+                  : 'text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-white/[0.03]'
               }`}
             >
               <span
-                className={`w-5 h-5 border-2 rounded flex items-center justify-center transition-colors ${
+                className={`w-4 h-4 border-2 rounded flex items-center justify-center transition-colors shrink-0 ${
                   isSelected
                     ? 'border-[var(--accent)] bg-[var(--accent)]'
                     : 'border-[var(--border)]'
                 }`}
               >
-                {isSelected && <Check size={12} className="text-white" />}
+                {isSelected && <Check size={10} className="text-white" />}
               </span>
-              <span className="flex-1 font-medium font-mono">{model.id}</span>
-              {isSelected && <span className="text-xs text-[var(--accent)]">selected</span>}
+              <span className="flex-1 font-mono truncate">{model.id}</span>
+              {isSelected && <span className="text-[10px] text-[var(--accent)] shrink-0">selected</span>}
             </button>
           )
         })}
@@ -195,13 +189,13 @@ export default function ModelSelector({
                 if (e.key === 'Escape') setShowCustomInput(false)
               }}
               placeholder={modelIdPrefix ? `${modelIdPrefix}/model-name` : 'provider/model-name'}
-              className="flex-1 bg-[var(--bg)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm font-mono focus:border-[var(--accent)] outline-none"
+              className="glass-input flex-1 text-xs font-mono"
               autoFocus
             />
             <button
               onClick={addCustomModel}
               disabled={!customInput.trim()}
-              className="px-3 py-2 bg-[var(--accent)] hover:bg-[var(--accent-hover)] disabled:opacity-50 rounded-lg text-sm transition-colors"
+              className="btn-primary text-xs py-2"
             >
               Add
             </button>
@@ -210,7 +204,7 @@ export default function ModelSelector({
                 setShowCustomInput(false)
                 setCustomInput('')
               }}
-              className="px-3 py-2 bg-[var(--bg)] hover:bg-[var(--bg-hover)] rounded-lg text-sm transition-colors"
+              className="btn-ghost text-xs py-2"
             >
               Cancel
             </button>
@@ -218,9 +212,9 @@ export default function ModelSelector({
         ) : (
           <button
             onClick={() => setShowCustomInput(true)}
-            className="flex items-center gap-2 text-sm text-purple-400 hover:text-purple-300 transition-colors"
+            className="flex items-center gap-1.5 text-xs text-[var(--purple)] hover:text-[var(--purple)] font-medium transition-colors cursor-pointer"
           >
-            <Plus size={14} />
+            <Plus size={13} />
             Add custom model
           </button>
         )}

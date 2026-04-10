@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react'
 import { api } from '../api'
-import { Download, Upload, Database, AlertTriangle, CheckCircle } from 'lucide-react'
+import { Download, Upload, AlertTriangle, CheckCircle, Loader2 } from 'lucide-react'
 
 interface BackupStats {
   connections: number
@@ -80,45 +80,48 @@ export default function Backup() {
 
   return (
     <div className="max-w-2xl">
-      <h2 className="text-2xl font-bold mb-6 flex items-center gap-2">
-        <Database size={24} />
-        Backup & Restore
-      </h2>
+      <div className="page-header">
+        <div>
+          <h2 className="page-title">Backup & Restore</h2>
+          <p className="page-subtitle">Export or import your proxy configuration.</p>
+        </div>
+      </div>
 
-      <div className="space-y-6">
+      <div className="space-y-5">
         {/* Export Section */}
-        <div className="bg-[var(--bg-card)] rounded-lg border border-[var(--border)] p-5">
-          <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-            <Download size={18} />
+        <div className="glass p-5">
+          <h3 className="text-base font-semibold mb-3 flex items-center gap-2" style={{ fontFamily: 'var(--font-heading)' }}>
+            <Download size={16} className="text-[var(--accent)]" />
             Export Backup
           </h3>
-          <p className="text-sm text-[var(--text-muted)] mb-4">
+          <p className="text-xs text-[var(--text-muted)] mb-4">
             Download all your connections, combos, aliases, and settings as a JSON file.
           </p>
           <div className="flex gap-3">
             <button
               onClick={() => handleExport(false)}
               disabled={loading}
-              className="flex-1 bg-[var(--accent)] text-white px-4 py-2 rounded-lg hover:opacity-90 disabled:opacity-50 text-sm font-medium"
+              className="btn-primary flex-1"
             >
+              {loading && <Loader2 size={14} className="animate-spin" />}
               Export (with tokens)
             </button>
             <button
               onClick={() => handleExport(true)}
               disabled={loading}
-              className="flex-1 bg-[var(--bg-hover)] text-[var(--text)] px-4 py-2 rounded-lg hover:bg-[var(--border)] disabled:opacity-50 text-sm font-medium border border-[var(--border)]"
+              className="btn-ghost flex-1"
             >
               Export (masked)
             </button>
           </div>
 
           {exportStats && (
-            <div className="mt-4 p-3 bg-green-900/20 rounded-lg border border-green-800">
-              <div className="flex items-center gap-2 text-green-400 text-sm font-medium mb-2">
-                <CheckCircle size={16} />
+            <div className="mt-4 glass-sm p-3 border-[var(--success)]/20 animate-slide-up">
+              <div className="flex items-center gap-2 text-[var(--success)] text-xs font-medium mb-2">
+                <CheckCircle size={14} />
                 Export successful
               </div>
-              <div className="grid grid-cols-4 gap-2 text-xs text-[var(--text-muted)]">
+              <div className="grid grid-cols-4 gap-2 text-[10px] text-[var(--text-muted)]">
                 <span>{exportStats.connections} connections</span>
                 <span>{exportStats.combos} combos</span>
                 <span>{exportStats.aliases} aliases</span>
@@ -129,17 +132,17 @@ export default function Backup() {
         </div>
 
         {/* Import Section */}
-        <div className="bg-[var(--bg-card)] rounded-lg border border-[var(--border)] p-5">
-          <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-            <Upload size={18} />
+        <div className="glass p-5">
+          <h3 className="text-base font-semibold mb-3 flex items-center gap-2" style={{ fontFamily: 'var(--font-heading)' }}>
+            <Upload size={16} className="text-[var(--purple)]" />
             Import Backup
           </h3>
-          <p className="text-sm text-[var(--text-muted)] mb-4">
+          <p className="text-xs text-[var(--text-muted)] mb-4">
             Restore from a previously exported backup file.
           </p>
 
           <div className="mb-4">
-            <label className="text-sm text-[var(--text-muted)] mb-2 block">Import mode:</label>
+            <label className="text-xs text-[var(--text-muted)] mb-2 block font-medium">Import mode:</label>
             <div className="flex gap-4">
               <label className="flex items-center gap-2 text-sm cursor-pointer">
                 <input
@@ -148,10 +151,10 @@ export default function Backup() {
                   value="merge"
                   checked={importMode === 'merge'}
                   onChange={() => setImportMode('merge')}
-                  className="accent-[var(--accent)]"
+                  className="accent-[var(--accent)] cursor-pointer"
                 />
                 <span>Merge</span>
-                <span className="text-[var(--text-muted)] text-xs">(add to existing)</span>
+                <span className="chip chip-muted text-[10px]">add to existing</span>
               </label>
               <label className="flex items-center gap-2 text-sm cursor-pointer">
                 <input
@@ -160,10 +163,10 @@ export default function Backup() {
                   value="replace"
                   checked={importMode === 'replace'}
                   onChange={() => setImportMode('replace')}
-                  className="accent-[var(--accent)]"
+                  className="accent-[var(--accent)] cursor-pointer"
                 />
                 <span>Replace</span>
-                <span className="text-[var(--text-muted)] text-xs">(overwrite all)</span>
+                <span className="chip chip-danger text-[10px]">overwrite all</span>
               </label>
             </div>
           </div>
@@ -179,18 +182,19 @@ export default function Backup() {
           <button
             onClick={handleImport}
             disabled={loading}
-            className="w-full bg-[var(--accent)] text-white px-4 py-2 rounded-lg hover:opacity-90 disabled:opacity-50 text-sm font-medium"
+            className="btn-primary w-full"
           >
+            {loading && <Loader2 size={14} className="animate-spin" />}
             Select Backup File
           </button>
 
           {importResult && (
-            <div className="mt-4 p-3 bg-green-900/20 rounded-lg border border-green-800">
-              <div className="flex items-center gap-2 text-green-400 text-sm font-medium mb-2">
-                <CheckCircle size={16} />
+            <div className="mt-4 glass-sm p-3 border-[var(--success)]/20 animate-slide-up">
+              <div className="flex items-center gap-2 text-[var(--success)] text-xs font-medium mb-1">
+                <CheckCircle size={14} />
                 Import successful
               </div>
-              <div className="text-xs text-[var(--text-muted)]">
+              <div className="text-[10px] text-[var(--text-muted)]">
                 {importResult.imported} items imported, {importResult.skipped} skipped (mode: {importResult.mode})
               </div>
             </div>
@@ -198,12 +202,12 @@ export default function Backup() {
         </div>
 
         {/* Warning */}
-        <div className="bg-yellow-900/20 rounded-lg border border-yellow-800 p-4">
+        <div className="glass-sm p-4 border-[var(--warning)]/15">
           <div className="flex items-start gap-3">
-            <AlertTriangle size={18} className="text-yellow-400 shrink-0 mt-0.5" />
-            <div className="text-sm">
-              <p className="text-yellow-400 font-medium mb-1">Security Notice</p>
-              <p className="text-[var(--text-muted)]">
+            <AlertTriangle size={16} className="text-[var(--warning)] shrink-0 mt-0.5" />
+            <div className="text-xs">
+              <p className="text-[var(--warning)] font-medium mb-1">Security Notice</p>
+              <p className="text-[var(--text-muted)] leading-relaxed">
                 Backup files contain sensitive data (API keys, tokens). Store them securely and never share publicly.
                 When exporting with "masked" option, tokens and API keys will be redacted.
               </p>
@@ -213,9 +217,9 @@ export default function Backup() {
 
         {/* Error Display */}
         {error && (
-          <div className="bg-red-900/20 rounded-lg border border-red-800 p-4">
-            <div className="flex items-center gap-2 text-red-400 text-sm font-medium">
-              <AlertTriangle size={16} />
+          <div className="glass-sm p-4 border-[var(--danger)]/20 animate-slide-up">
+            <div className="flex items-center gap-2 text-[var(--danger)] text-xs font-medium">
+              <AlertTriangle size={14} />
               {error}
             </div>
           </div>

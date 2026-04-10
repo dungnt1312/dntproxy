@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Terminal } from 'lucide-react'
+
 import { api } from '../api'
 import LogConnectionList from '../components/log-connection-list'
 import LogFilterBar from '../components/log-filter-bar'
@@ -70,16 +70,16 @@ export default function Logs() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between gap-3">
-        <h2 className="text-2xl font-bold flex items-center gap-2">
-          <Terminal size={24} />
-          Logs
-        </h2>
-        <span className="text-sm text-[var(--text-muted)]">30-day retention</span>
+      <div className="page-header mb-0">
+        <div>
+          <h2 className="page-title flex items-center gap-2">Logs</h2>
+          <p className="page-subtitle">Request timeline with payload and cost tracking.</p>
+        </div>
+        <span className="chip chip-muted text-[10px]">30-day retention</span>
       </div>
 
       <LogSummaryBar summary={summary} />
-      <p className="text-xs text-[var(--text-muted)]">
+      <p className="text-[10px] text-[var(--text-dim)] -mt-2">
         Cost is estimated from local model price profiles; Kiro billing can differ from token API pricing.
       </p>
       <LogFilterBar
@@ -99,8 +99,8 @@ export default function Logs() {
         />
         <main className="flex-1 min-w-0 space-y-2">
           <div className="flex flex-col gap-1 border-b border-[var(--border)] pb-2">
-            <h3 className="text-sm font-semibold">Request timeline</h3>
-            <p className="text-xs text-[var(--text-muted)]">
+            <h3 className="text-sm font-semibold" style={{ fontFamily: 'var(--font-heading)' }}>Request timeline</h3>
+            <p className="text-[10px] text-[var(--text-dim)]">
               Payload previews are captured as separate response events and capped before being stored.
             </p>
           </div>

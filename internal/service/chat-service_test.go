@@ -30,8 +30,10 @@ func TestHandleChat_ComboSinglePass_NoDuplicateExecution(t *testing.T) {
 		"conn-1|model-b": {Status: 200, Body: "data: {\"id\":\"ok\"}\n\ndata: [DONE]\n\n"},
 	})
 
-	svc := NewChatService(store)
-	svc.kiroExecutor = exec
+	registry := newTestProviderRegistry()
+	registry.RegisterExecutor("kiro", exec)
+
+	svc := NewChatService(store, registry)
 
 	result := svc.HandleChat([]byte(`{"model":"coder-combo","messages":[{"role":"user","content":"hi"}]}`), "coder-combo", "req-1")
 	if result.StatusCode != 200 || result.Stream == nil {
@@ -68,8 +70,10 @@ func TestHandleChat_Client400_DoesNotFallbackOrCooldown(t *testing.T) {
 		"conn-2|model-a": {Status: 200, Body: "data: [DONE]\n\n"},
 	})
 
-	svc := NewChatService(store)
-	svc.kiroExecutor = exec
+	registry := newTestProviderRegistry()
+	registry.RegisterExecutor("kiro", exec)
+
+	svc := NewChatService(store, registry)
 
 	result := svc.HandleChat([]byte(`{"model":"kiro/model-a","messages":[]}`), "kiro/model-a", "req-2")
 	if result.StatusCode != 400 {
@@ -101,8 +105,10 @@ func TestHandleChat_RateLimit_FallbackToNextAccount(t *testing.T) {
 		"conn-2|model-a": {Status: 200, Body: "data: [DONE]\n\n"},
 	})
 
-	svc := NewChatService(store)
-	svc.kiroExecutor = exec
+	registry := newTestProviderRegistry()
+	registry.RegisterExecutor("kiro", exec)
+
+	svc := NewChatService(store, registry)
 
 	result := svc.HandleChat([]byte(`{"model":"kiro/model-a","messages":[]}`), "kiro/model-a", "req-3")
 	if result.StatusCode != 200 || result.Stream == nil {
@@ -137,8 +143,10 @@ func TestHandleChat_UnsupportedModel_Returns400WithoutExecution(t *testing.T) {
 
 	exec := newFakeExecutor(map[string]fakeExecuteResponse{})
 
-	svc := NewChatService(store)
-	svc.kiroExecutor = exec
+	registry := newTestProviderRegistry()
+	registry.RegisterExecutor("kiro", exec)
+
+	svc := NewChatService(store, registry)
 
 	result := svc.HandleChat([]byte(`{"model":"kiro/model-b","messages":[]}`), "kiro/model-b", "req-4")
 	if result.StatusCode != 400 {

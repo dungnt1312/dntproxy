@@ -8,7 +8,10 @@ import (
 	"sync"
 
 	"github.com/dungnt/dntproxy/internal/domain"
+	"github.com/dungnt/dntproxy/internal/port"
 )
+
+// === Test CredentialStore ===
 
 type testCredentialStore struct {
 	mu  sync.Mutex
@@ -119,6 +122,34 @@ func (s *testCredentialStore) GetModelRegistry() (*domain.ModelRegistry, error) 
 	defer s.mu.Unlock()
 	return s.cfg.ModelRegistry, nil
 }
+
+// === Test ProviderRegistry ===
+
+type testProviderRegistry struct {
+	executors map[string]port.ProviderExecutor
+}
+
+func newTestProviderRegistry() *testProviderRegistry {
+	return &testProviderRegistry{executors: make(map[string]port.ProviderExecutor)}
+}
+
+func (r *testProviderRegistry) GetExecutor(provider string) port.ProviderExecutor {
+	return r.executors[provider]
+}
+
+func (r *testProviderRegistry) RegisterExecutor(provider string, executor port.ProviderExecutor) {
+	r.executors[provider] = executor
+}
+
+func (r *testProviderRegistry) SupportedProviders() []string {
+	providers := make([]string, 0, len(r.executors))
+	for p := range r.executors {
+		providers = append(providers, p)
+	}
+	return providers
+}
+
+// === Fake Executor ===
 
 type fakeExecuteCall struct {
 	ConnectionID string

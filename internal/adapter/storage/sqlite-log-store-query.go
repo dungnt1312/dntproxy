@@ -20,7 +20,8 @@ func (s *SQLiteLogStore) List(ctx context.Context, query domain.LogQuery) ([]dom
 		COALESCE(connection_id, ''), COALESCE(connection_name, ''), COALESCE(model, ''),
 		COALESCE(request_id, ''), COALESCE(message, ''), COALESCE(error, ''), body_size,
 		input_tokens, output_tokens, total_tokens, COALESCE(usage_source, ''),
-		cost_input, cost_output, cost_total, currency, COALESCE(metadata_json, '')
+		cost_input, cost_output, cost_total, currency, COALESCE(metadata_json, ''),
+		COALESCE(request_body, ''), COALESCE(response_body, '')
 		FROM request_logs `+where+` ORDER BY timestamp_ms DESC LIMIT ?`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list logs: %w", err)
@@ -152,7 +153,8 @@ func scanLogEntry(row logScanner) (*domain.LogEntry, error) {
 		&entry.DurationMs, &entry.ConnectionID, &entry.ConnectionName, &entry.Model,
 		&entry.RequestID, &entry.Message, &entry.Error, &entry.BodySize, &entry.InputTokens,
 		&entry.OutputTokens, &entry.TotalTokens, &entry.UsageSource, &entry.CostInput,
-		&entry.CostOutput, &entry.CostTotal, &entry.Currency, &entry.MetadataJSON); err != nil {
+		&entry.CostOutput, &entry.CostTotal, &entry.Currency, &entry.MetadataJSON,
+		&entry.RequestBody, &entry.ResponseBody); err != nil {
 		return nil, err
 	}
 	return &entry, nil

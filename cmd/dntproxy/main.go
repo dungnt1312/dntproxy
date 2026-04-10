@@ -11,6 +11,9 @@ import (
 	"time"
 
 	httpAdapter "github.com/dungnt/dntproxy/internal/adapter/http"
+	"github.com/dungnt/dntproxy/internal/adapter/kiro"
+	openaiAdapter "github.com/dungnt/dntproxy/internal/adapter/openai"
+	"github.com/dungnt/dntproxy/internal/adapter/provider"
 	"github.com/dungnt/dntproxy/internal/adapter/storage"
 	"github.com/dungnt/dntproxy/internal/logger"
 	"github.com/dungnt/dntproxy/internal/service"
@@ -103,7 +106,14 @@ func runServe(cmd *cobra.Command, args []string) error {
 		port = p
 	}
 
-	router := httpAdapter.NewRouter(store)
+	// Create provider registry and register all known providers.
+	// To add a new provider: just add one more RegisterExecutor call here.
+	providers := provider.NewRegistry()
+	providers.RegisterExecutor("kiro", kiro.NewExecutor())
+	providers.RegisterExecutor("openai", openaiAdapter.NewExecutor())
+	providers.RegisterExecutor("openai-compatible", openaiAdapter.NewExecutor())
+
+	router := httpAdapter.NewRouter(store, providers)
 
 	scheduler := service.NewTokenRefreshScheduler(store)
 	go scheduler.Start()

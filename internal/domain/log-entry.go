@@ -19,6 +19,8 @@ type LogEntry struct {
 	Message        string  `json:"message"`
 	Error          string  `json:"error,omitempty"`
 	BodySize       int     `json:"bodySize,omitempty"`
+	RequestBody    string  `json:"requestBody,omitempty"`
+	ResponseBody   string  `json:"responseBody,omitempty"`
 	InputTokens    int     `json:"inputTokens,omitempty"`
 	OutputTokens   int     `json:"outputTokens,omitempty"`
 	TotalTokens    int     `json:"totalTokens,omitempty"`

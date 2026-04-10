@@ -2,6 +2,14 @@ import { useEffect, useState, useRef } from 'react'
 import { api } from '../api'
 import { Send, Bot, User, Loader2, Trash2, ChevronDown } from 'lucide-react'
 import { getModelName, PROVIDER_CONFIGS, getProviderFromModelId } from '../models-config'
+import { AwsLogo, OpenAILogo } from '../components/connections/helpers'
+
+function ModelIcon({ provider }: { provider: string }) {
+  if (provider === 'kiro') return <AwsLogo size={14} />
+  if (provider === 'openai') return <OpenAILogo size={14} />
+  const cfg = PROVIDER_CONFIGS[provider]
+  return <span className="text-[10px] font-bold opacity-60">{cfg?.icon || 'OT'}</span>
+}
 
 interface Message {
   role: 'user' | 'assistant' | 'system'
@@ -146,38 +154,38 @@ export default function Playground() {
 
   return (
     <div className="flex flex-col h-[calc(100vh-48px-48px)]">
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-2xl font-bold">Playground</h2>
+      <div className="page-header mb-3">
+        <h2 className="page-title">Playground</h2>
         <div className="flex items-center gap-2">
           <div ref={dropdownRef} className="relative">
             <button
               onClick={() => setShowModelDropdown(!showModelDropdown)}
-              className="flex items-center gap-2 px-3 py-2 bg-[var(--bg-card)] border border-[var(--border)] rounded-lg text-sm hover:border-[var(--accent)] transition-colors min-w-[200px]"
+              className="glass-sm flex items-center gap-2 px-3 py-2 text-xs hover:border-[var(--border-hover)] transition-all min-w-[200px] cursor-pointer"
             >
-              <span className="flex-1 text-left truncate">
+              <span className="flex-1 text-left truncate flex items-center gap-1.5">
                 {selectedModel ? (
                   <>
-                    <span className="mr-1">{PROVIDER_CONFIGS[getProviderFromModelId(selectedModel)]?.icon || '📦'}</span>
+                    <ModelIcon provider={getProviderFromModelId(selectedModel)} />
                     {getModelName(selectedModel)}
                   </>
                 ) : 'Select model'}
               </span>
-              <ChevronDown size={14} className={`transition-transform ${showModelDropdown ? 'rotate-180' : ''}`} />
+              <ChevronDown size={13} className={`transition-transform text-[var(--text-dim)] ${showModelDropdown ? 'rotate-180' : ''}`} />
             </button>
             {showModelDropdown && (
-              <div className="absolute top-full left-0 mt-1 w-full bg-[var(--bg-card)] border border-[var(--border)] rounded-lg shadow-xl z-50 max-h-64 overflow-y-auto">
+              <div className="absolute top-full left-0 mt-1 w-full glass shadow-xl z-50 max-h-64 overflow-y-auto animate-fade-in">
                 {models.length === 0 ? (
-                  <div className="px-3 py-2 text-sm text-[var(--text-muted)]">No models available</div>
+                  <div className="px-3 py-2 text-xs text-[var(--text-dim)]">No models available</div>
                 ) : (
                   models.map(model => (
                     <button
                       key={model}
                       onClick={() => { setSelectedModel(model); setShowModelDropdown(false) }}
-                      className={`w-full px-3 py-2 text-left text-sm hover:bg-[var(--bg-hover)] flex items-center gap-2 ${
-                        model === selectedModel ? 'text-[var(--accent)]' : ''
+                      className={`w-full px-3 py-2 text-left text-xs hover:bg-white/[0.04] flex items-center gap-2 transition-colors cursor-pointer ${
+                        model === selectedModel ? 'text-[var(--accent)] bg-[var(--accent-glow)]' : 'text-[var(--text-muted)]'
                       }`}
                     >
-                      <span>{PROVIDER_CONFIGS[getProviderFromModelId(model)]?.icon || '📦'}</span>
+                      <ModelIcon provider={getProviderFromModelId(model)} />
                       <span className="flex-1 truncate">{getModelName(model)}</span>
                     </button>
                   ))
@@ -187,36 +195,36 @@ export default function Playground() {
           </div>
           <button
             onClick={clearChat}
-            className="p-2 hover:bg-[var(--bg-card)] rounded-lg transition-colors"
+            className="btn-icon"
             title="Clear chat"
           >
-            <Trash2 size={18} className="text-[var(--text-muted)]" />
+            <Trash2 size={16} />
           </button>
         </div>
       </div>
 
       {error && (
-        <div className="mb-4 p-3 bg-red-900/30 border border-red-800 rounded-lg text-red-400 text-sm">
+        <div className="mb-3 glass-sm p-3 border-[var(--danger)]/20 text-[var(--danger)] text-xs animate-slide-up">
           {error}
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto bg-[var(--bg-card)] rounded-xl border border-[var(--border)] mb-4 p-4 space-y-4">
+      <div className="flex-1 overflow-y-auto glass mb-4 p-4 space-y-4">
         {messages.map((msg, i) => (
-          <div key={i} className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
-            <div className={`shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${
-              msg.role === 'user' ? 'bg-[var(--accent)]' : 'bg-[var(--bg-hover)]'
+          <div key={i} className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''} animate-fade-in`}>
+            <div className={`shrink-0 w-8 h-8 rounded-xl flex items-center justify-center ${
+              msg.role === 'user' ? 'bg-gradient-to-br from-[var(--accent)] to-[#7c3aed]' : 'bg-white/[0.05] border border-[var(--border)]'
             }`}>
-              {msg.role === 'user' ? <User size={16} /> : <Bot size={16} />}
+              {msg.role === 'user' ? <User size={14} className="text-white" /> : <Bot size={14} className="text-[var(--text-muted)]" />}
             </div>
             <div className={`flex-1 max-w-[80%] ${msg.role === 'user' ? 'text-right' : ''}`}>
-              <div className={`inline-block px-4 py-2 rounded-2xl ${
+              <div className={`inline-block px-4 py-2.5 ${
                 msg.role === 'user'
-                  ? 'bg-[var(--accent)] text-white rounded-tr-sm'
-                  : 'bg-[var(--bg-hover)] rounded-tl-sm'
+                  ? 'bg-gradient-to-br from-[var(--accent)] to-[#7c3aed] text-white rounded-2xl rounded-tr-md shadow-lg shadow-[var(--accent)]/10'
+                  : 'glass-sm rounded-2xl rounded-tl-md'
               }`}>
-                <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
-                {msg.streaming && <Loader2 size={14} className="inline animate-spin ml-2" />}
+                <p className="text-sm whitespace-pre-wrap leading-relaxed">{msg.content}</p>
+                {msg.streaming && <Loader2 size={12} className="inline animate-spin ml-1 opacity-60" />}
               </div>
             </div>
           </div>
@@ -230,16 +238,15 @@ export default function Playground() {
           onChange={e => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="Type your message... (Enter to send, Shift+Enter for newline)"
-          className="flex-1 bg-[var(--bg-card)] border border-[var(--border)] rounded-xl px-4 py-3 text-sm resize-none h-14 focus:outline-none focus:border-[var(--accent)] transition-colors"
+          className="glass-input flex-1 resize-none h-14"
           disabled={loading}
         />
         <button
           onClick={handleSend}
           disabled={loading || !input.trim()}
-          className="px-6 py-3 bg-[var(--accent)] hover:bg-[var(--accent-hover)] disabled:opacity-50 disabled:cursor-not-allowed rounded-xl transition-colors flex items-center gap-2"
+          className="btn-primary px-6 py-3 rounded-xl"
         >
-          <Send size={18} />
-          Send
+          <Send size={16} />
         </button>
       </div>
     </div>

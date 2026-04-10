@@ -3,49 +3,55 @@ package service
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 
-	"github.com/dungnt/dntproxy/internal/adapter/kiro"
-	openaiAdapter "github.com/dungnt/dntproxy/internal/adapter/openai"
 	"github.com/dungnt/dntproxy/internal/port"
 )
 
 // ChatService orchestrates: resolve model -> get credentials -> execute -> stream.
+// Implements port.ChatService.
 type ChatService struct {
-	resolver        *ModelResolver
-	accountSelector *AccountSelector
+	resolver        port.ModelResolver
+	accountSelector port.AccountSelector
 	comboHandler    *ComboHandler
-	kiroExecutor    port.ProviderExecutor
-	openaiExecutor  port.ProviderExecutor
+	providers       port.ProviderRegistry
 	store           port.CredentialStore
 }
 
 // NewChatService creates a new ChatService.
-func NewChatService(store port.CredentialStore) *ChatService {
+func NewChatService(
+	store port.CredentialStore,
+	providers port.ProviderRegistry,
+) *ChatService {
 	return &ChatService{
 		resolver:        NewModelResolver(store),
 		accountSelector: NewAccountSelector(store),
 		comboHandler:    NewComboHandler(),
-		kiroExecutor:    kiro.NewExecutor(),
-		openaiExecutor:  openaiAdapter.NewExecutor(),
+		providers:       providers,
 		store:           store,
 	}
 }
 
-// ChatResult is the result of a chat request.
-type ChatResult struct {
-	// Stream is the SSE stream reader (nil on error).
-	Stream io.ReadCloser
-	// StatusCode is the HTTP status code.
-	StatusCode int
-	// Error message (empty on success).
-	Error string
+// NewChatServiceWithDeps creates a ChatService with explicit dependencies (for testing).
+func NewChatServiceWithDeps(
+	resolver port.ModelResolver,
+	accountSelector port.AccountSelector,
+	comboHandler *ComboHandler,
+	providers port.ProviderRegistry,
+	store port.CredentialStore,
+) *ChatService {
+	return &ChatService{
+		resolver:        resolver,
+		accountSelector: accountSelector,
+		comboHandler:    comboHandler,
+		providers:       providers,
+		store:           store,
+	}
 }
 
 // HandleChat processes a chat completion request.
-func (s *ChatService) HandleChat(body []byte, modelStr string, requestID string) *ChatResult {
+func (s *ChatService) HandleChat(body []byte, modelStr string, requestID string) *port.ChatResult {
 	comboModels, err := s.resolver.GetComboModels(modelStr)
 	if err != nil {
 		log.Printf("[CHAT] Error checking combo: %s", err)
@@ -58,7 +64,7 @@ func (s *ChatService) HandleChat(body []byte, modelStr string, requestID string)
 	return s.handleSingleModel(body, modelStr, requestID)
 }
 
-func (s *ChatService) handleComboChat(body []byte, comboName string, models []string, requestID string) *ChatResult {
+func (s *ChatService) handleComboChat(body []byte, comboName string, models []string, requestID string) *port.ChatResult {
 	settings, _ := s.store.GetSettings()
 	strategy := "fallback"
 	if settings != nil && settings.ComboStrategy != "" {
@@ -93,7 +99,7 @@ func (s *ChatService) handleComboChat(body []byte, comboName string, models []st
 	}
 
 	if result != nil && result.OK && result.Stream != nil {
-		return &ChatResult{Stream: result.Stream, StatusCode: http.StatusOK}
+		return &port.ChatResult{Stream: result.Stream, StatusCode: http.StatusOK}
 	}
 
 	if result != nil {
@@ -105,20 +111,20 @@ func (s *ChatService) handleComboChat(body []byte, comboName string, models []st
 		if msg == "" {
 			msg = "All combo models unavailable"
 		}
-		return &ChatResult{StatusCode: status, Error: msg}
+		return &port.ChatResult{StatusCode: status, Error: msg}
 	}
 
 	if err != nil {
-		return &ChatResult{StatusCode: http.StatusServiceUnavailable, Error: err.Error()}
+		return &port.ChatResult{StatusCode: http.StatusServiceUnavailable, Error: err.Error()}
 	}
 
-	return &ChatResult{StatusCode: http.StatusServiceUnavailable, Error: "All combo models unavailable"}
+	return &port.ChatResult{StatusCode: http.StatusServiceUnavailable, Error: "All combo models unavailable"}
 }
 
-func (s *ChatService) handleSingleModel(body []byte, modelStr string, requestID string) *ChatResult {
+func (s *ChatService) handleSingleModel(body []byte, modelStr string, requestID string) *port.ChatResult {
 	modelInfo, err := s.resolver.Resolve(modelStr)
 	if err != nil {
-		return &ChatResult{StatusCode: http.StatusBadRequest, Error: fmt.Sprintf("resolve model: %s", err)}
+		return &port.ChatResult{StatusCode: http.StatusBadRequest, Error: fmt.Sprintf("resolve model: %s", err)}
 	}
 
 	if modelInfo.Provider == "" {
@@ -126,7 +132,7 @@ func (s *ChatService) handleSingleModel(body []byte, modelStr string, requestID 
 		if comboModels != nil {
 			return s.handleComboChat(body, modelStr, comboModels, requestID)
 		}
-		return &ChatResult{StatusCode: http.StatusBadRequest, Error: "Invalid model format"}
+		return &port.ChatResult{StatusCode: http.StatusBadRequest, Error: "Invalid model format"}
 	}
 
 	provider := modelInfo.Provider
@@ -134,14 +140,14 @@ func (s *ChatService) handleSingleModel(body []byte, modelStr string, requestID 
 
 	log.Printf("[ROUTING] %s -> %s/%s", modelStr, provider, model)
 
-	executor := s.getExecutor(provider)
+	executor := s.providers.GetExecutor(provider)
 	if executor == nil {
-		return &ChatResult{StatusCode: http.StatusBadRequest, Error: fmt.Sprintf("Provider '%s' not supported", provider)}
+		return &port.ChatResult{StatusCode: http.StatusBadRequest, Error: fmt.Sprintf("Provider '%s' not supported", provider)}
 	}
 
 	var bodyMap map[string]interface{}
 	if err := json.Unmarshal(body, &bodyMap); err != nil {
-		return &ChatResult{StatusCode: http.StatusBadRequest, Error: "Invalid JSON body"}
+		return &port.ChatResult{StatusCode: http.StatusBadRequest, Error: "Invalid JSON body"}
 	}
 	bodyMap["model"] = model
 	updatedBody, _ := json.Marshal(bodyMap)
@@ -154,7 +160,7 @@ func (s *ChatService) handleSingleModel(body []byte, modelStr string, requestID 
 			if mapped := mapSelectionErrorToChatResult(err); mapped != nil {
 				return mapped
 			}
-			return &ChatResult{StatusCode: http.StatusServiceUnavailable, Error: "All accounts unavailable"}
+			return &port.ChatResult{StatusCode: http.StatusServiceUnavailable, Error: "All accounts unavailable"}
 		}
 
 		log.Printf("[AUTH] Using %s account: %s", provider, creds.ConnectionName)
@@ -162,7 +168,7 @@ func (s *ChatService) handleSingleModel(body []byte, modelStr string, requestID 
 		stream, status, execErr := executor.Execute(model, updatedBody, creds, requestID)
 		if execErr == nil && status == http.StatusOK {
 			s.accountSelector.ClearError(creds.ConnectionID, model)
-			return &ChatResult{Stream: stream, StatusCode: http.StatusOK}
+			return &port.ChatResult{Stream: stream, StatusCode: http.StatusOK}
 		}
 
 		errMsg := ""
@@ -173,24 +179,12 @@ func (s *ChatService) handleSingleModel(body []byte, modelStr string, requestID 
 
 		if !shouldFallbackToNextAccount(status, errMsg) {
 			statusCode, message := normalizeExecutorFailure(status, errMsg)
-			return &ChatResult{StatusCode: statusCode, Error: message}
+			return &port.ChatResult{StatusCode: statusCode, Error: message}
 		}
 
 		if err := s.accountSelector.MarkUnavailable(creds.ConnectionID, status, errMsg, model); err != nil {
 			log.Printf("[AUTH] Failed marking account unavailable (%s): %s", creds.ConnectionName, err)
 		}
 		excludeIDs[creds.ConnectionID] = true
-	}
-}
-
-// getExecutor returns the appropriate executor for a provider.
-func (s *ChatService) getExecutor(provider string) port.ProviderExecutor {
-	switch provider {
-	case "kiro":
-		return s.kiroExecutor
-	case "openai", "openai-compatible":
-		return s.openaiExecutor
-	default:
-		return nil
 	}
 }

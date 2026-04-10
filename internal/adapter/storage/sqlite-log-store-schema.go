@@ -38,7 +38,9 @@ func (s *SQLiteLogStore) migrate(ctx context.Context) error {
 			cost_output REAL DEFAULT 0,
 			cost_total REAL DEFAULT 0,
 			currency TEXT DEFAULT 'USD',
-			metadata_json TEXT
+			metadata_json TEXT,
+			request_body TEXT,
+			response_body TEXT
 		)`,
 		`CREATE TABLE IF NOT EXISTS model_prices (
 			id TEXT PRIMARY KEY,
@@ -61,6 +63,16 @@ func (s *SQLiteLogStore) migrate(ctx context.Context) error {
 		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
 			return fmt.Errorf("migrate log db: %w", err)
 		}
+	}
+
+	// Graceful column additions for existing databases (SQLite ignores
+	// duplicate column errors, so we swallow them here).
+	for _, altStmt := range []string{
+		`ALTER TABLE request_logs ADD COLUMN request_body TEXT`,
+		`ALTER TABLE request_logs ADD COLUMN response_body TEXT`,
+	} {
+		// SQLite returns an error if the column already exists — ignore it.
+		s.db.ExecContext(ctx, altStmt) //nolint:errcheck
 	}
 
 	return s.seedPrices(ctx)

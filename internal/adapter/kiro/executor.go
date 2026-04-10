@@ -70,8 +70,8 @@ func (e *Executor) Execute(model string, body []byte, credentials *domain.Creden
 
 	log.Printf("[KIRO] --> %s %s | conn=%s | model=%s | req_id=%s",
 		req.Method, kiroBaseURL, credentials.ConnectionName, model, requestID)
-	log.Printf("[KIRO]     Authorization: Bearer %s*** | Content-Type: %s",
-		maskedToken(credentials.AccessToken), req.Header.Get("Content-Type"))
+	log.Printf("[KIRO]     Authorization: Bearer %s | Content-Type: %s | body_size=%d",
+		maskedToken(credentials.AccessToken), req.Header.Get("Content-Type"), len(payloadBytes))
 	appLogger.AddEntry(domain.LogEntry{
 		Provider:       "KIRO",
 		Direction:      "outbound",
@@ -83,6 +83,7 @@ func (e *Executor) Execute(model string, body []byte, credentials *domain.Creden
 		RequestID:      requestID,
 		Message:        "Kiro request sent",
 		BodySize:       len(payloadBytes),
+		RequestBody:    truncateBody(payloadBytes, 8192),
 	})
 
 	start := time.Now()
@@ -113,13 +114,43 @@ func (e *Executor) Execute(model string, body []byte, credentials *domain.Creden
 		return nil, 502, fmt.Errorf("kiro request failed: %w", err)
 	}
 
-	bodyBytes, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		
+		respBodyStr := "Unknown error"
+		if err == nil {
+			respBodyStr = string(bodyBytes)
+		}
 
-	log.Printf("[KIRO] <-- %s | conn=%s | model=%s | status=%d | duration=%s | req_id=%s | body_size=%d",
-		kiroBaseURL, credentials.ConnectionName, model, resp.StatusCode, duration, requestID, len(bodyBytes))
-	responseEntry := domain.LogEntry{
-		Level:          responseLevel(resp.StatusCode),
+		log.Printf("[KIRO] <-- %s | conn=%s | model=%s | status=%d | duration=%s | req_id=%s | error body_size=%d",
+			kiroBaseURL, credentials.ConnectionName, model, resp.StatusCode, duration, requestID, len(bodyBytes))
+		log.Printf("[KIRO] ERROR body: %s", respBodyStr)
+
+		appLogger.AddEntry(domain.LogEntry{
+			Level:          "ERROR",
+			Provider:       "KIRO",
+			Direction:      "response",
+			Path:           kiroBaseURL,
+			StatusCode:     resp.StatusCode,
+			DurationMs:     duration.Milliseconds(),
+			ConnectionID:   credentials.ConnectionID,
+			ConnectionName: credentials.ConnectionName,
+			Model:          model,
+			RequestID:      requestID,
+			Message:        "Kiro response error",
+			BodySize:       len(bodyBytes),
+			Error:          respBodyStr,
+			ResponseBody:   truncateBody(bodyBytes, 8192),
+		})
+		return nil, resp.StatusCode, fmt.Errorf("kiro returned %d: %s", resp.StatusCode, respBodyStr)
+	}
+
+	log.Printf("[KIRO] <-- %s | conn=%s | model=%s | status=%d | duration=%s | req_id=%s | stream_started=true",
+		kiroBaseURL, credentials.ConnectionName, model, resp.StatusCode, duration, requestID)
+		
+	appLogger.AddEntry(domain.LogEntry{
+		Level:          "INFO",
 		Provider:       "KIRO",
 		Direction:      "response",
 		Path:           kiroBaseURL,
@@ -129,19 +160,8 @@ func (e *Executor) Execute(model string, body []byte, credentials *domain.Creden
 		ConnectionName: credentials.ConnectionName,
 		Model:          model,
 		RequestID:      requestID,
-		Message:        "Kiro response received",
-		BodySize:       len(bodyBytes),
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		responseEntry.Error = string(bodyBytes)
-		appLogger.AddEntry(responseEntry)
-		return nil, resp.StatusCode, fmt.Errorf("kiro returned %d: %s", resp.StatusCode, string(bodyBytes))
-	}
-	appLogger.AddEntry(responseEntry)
-
-	// Restore body for streaming
-	resp.Body = io.NopCloser(newBytesReader(bodyBytes))
+		Message:        "Kiro response stream started",
+	})
 
 	// Create a pipe to transform EventStream → SSE
 	pr, pw := io.Pipe()
@@ -218,6 +238,15 @@ func maskedToken(token string) string {
 		return "***"
 	}
 	return token[:4] + "***" + token[len(token)-4:]
+}
+
+// truncateBody returns at most maxBytes of the body as a string, with a suffix
+// indicating truncation when needed.
+func truncateBody(b []byte, maxBytes int) string {
+	if len(b) <= maxBytes {
+		return string(b)
+	}
+	return string(b[:maxBytes]) + fmt.Sprintf("... [truncated %d bytes]", len(b)-maxBytes)
 }
 
 func responseLevel(status int) string {

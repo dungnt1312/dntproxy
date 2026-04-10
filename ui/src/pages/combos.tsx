@@ -1,10 +1,13 @@
 import { useEffect, useState, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { api } from '../api'
-import { Plus, Trash2, Users, Layers, Pencil, Check, Loader2, X } from 'lucide-react'
+import { Plus, Trash2, Users, Layers, Pencil, Check, Loader2, X, ChevronRight, Link2, ArrowRight } from 'lucide-react'
 import ModelSelector from '../components/ModelSelector'
 import { getModelName } from '../models-config'
+import { getProviderLabel } from '../components/connections/helpers'
 
 export default function Combos() {
+  const navigate = useNavigate()
   const [combos, setCombos] = useState<any[]>([])
   const [conns, setConns] = useState<any[]>([])
   const [showAdd, setShowAdd] = useState(false)
@@ -32,8 +35,6 @@ export default function Combos() {
       const conn = conns.find(c => c.id === id)
       if (conn?.supportedModels?.length > 0) {
         conn.supportedModels.forEach((m: string) => {
-          // SupportedModels stores bare IDs like "claude-sonnet-4.5"
-          // MODELS_CONFIG uses "provider/model-id" format
           union.add(m.includes('/') ? m : `${conn.provider}/${m}`)
         })
       }
@@ -117,9 +118,17 @@ export default function Combos() {
   const ConnSelector = ({
     selected, onToggle,
   }: { selected: string[]; onToggle: (id: string) => void }) => (
-    <div className="max-h-44 overflow-y-auto rounded-lg border border-[var(--border)] divide-y divide-[var(--border)] bg-[var(--bg)]">
+    <div className="max-h-44 overflow-y-auto glass-sm divide-y divide-[var(--border)]">
       {conns.length === 0 && (
-        <p className="text-xs text-[var(--text-muted)] px-3 py-3">No connections yet — add some under Connections.</p>
+        <div className="px-3 py-3 text-center">
+          <p className="text-xs text-[var(--text-dim)] mb-2">No connections available</p>
+          <button
+            onClick={() => navigate('/connections')}
+            className="text-xs text-[var(--accent)] hover:text-[var(--accent-hover)] font-medium cursor-pointer flex items-center gap-1 mx-auto"
+          >
+            <Link2 size={10} /> Add connections <ChevronRight size={10} />
+          </button>
+        </div>
       )}
       {conns.map(c => {
         const isSelected = selected.includes(c.id)
@@ -127,23 +136,23 @@ export default function Combos() {
         return (
           <label
             key={c.id}
-            className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer text-sm ${
-              isSelected ? 'bg-[var(--accent)]/8' : 'hover:bg-[var(--bg-hover)]'
+            className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer text-sm transition-colors ${
+              isSelected ? 'bg-[var(--accent-glow)]' : 'hover:bg-white/[0.02]'
             }`}
           >
             <input
               type="checkbox"
               checked={isSelected}
               onChange={() => onToggle(c.id)}
-              className="accent-[var(--accent)] w-3.5 h-3.5 shrink-0"
+              className="accent-[var(--accent)] w-3.5 h-3.5 shrink-0 cursor-pointer"
             />
             <span className="truncate font-medium min-w-0">{c.name}</span>
-            <span className="text-xs text-[var(--text-muted)] shrink-0">{c.provider}</span>
+            <span className="chip chip-muted text-[10px] shrink-0">{getProviderLabel(c.provider)}</span>
             {isRL && (
-              <span className="text-[10px] text-amber-500 shrink-0" title="Rate limited">RL</span>
+              <span className="chip chip-warning text-[10px] shrink-0">RL</span>
             )}
             {!c.isActive && (
-              <span className="text-[10px] text-[var(--text-muted)] shrink-0">off</span>
+              <span className="chip chip-muted text-[10px] shrink-0">off</span>
             )}
           </label>
         )
@@ -173,15 +182,15 @@ export default function Combos() {
             value={nameVal}
             onChange={e => setNameVal(e.target.value)}
             placeholder="e.g. fast-fallback"
-            className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm focus:border-[var(--accent)] outline-none"
+            className="glass-input w-full"
           />
         </div>
 
-        <details className="group rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 open:pb-3">
-          <summary className="cursor-pointer list-none text-xs font-medium text-[var(--text-muted)] hover:text-[var(--text)] flex items-center gap-2 [&::-webkit-details-marker]:hidden">
-            <Users size={12} className="opacity-70 shrink-0" />
+        <details className="group glass-sm p-3 open:pb-3">
+          <summary className="cursor-pointer list-none text-xs font-medium text-[var(--text-muted)] hover:text-[var(--text)] flex items-center gap-2 [&::-webkit-details-marker]:hidden transition-colors">
+            <Users size={12} className="opacity-60 shrink-0" />
             <span>Pin specific connections</span>
-            <span className="font-normal text-[var(--text-muted)]">(optional)</span>
+            <span className="chip chip-muted text-[10px] ml-1">optional</span>
           </summary>
           <div className="pt-3 space-y-2">
             <ConnSelector
@@ -189,10 +198,10 @@ export default function Combos() {
               onToggle={id => toggleConn(id, connIDs, setConnIDs)}
             />
             {connIDs.length > 0 && (
-              <p className="text-xs text-[var(--text-muted)]">
+              <p className="text-xs text-[var(--text-dim)]">
                 {allowedModels
-                  ? `Model picker limited to ${allowedModels.length} id(s) from those accounts.`
-                  : 'Those accounts place no model restriction — full catalog below.'}
+                  ? `Model picker limited to ${allowedModels.length} model(s) from selected accounts.`
+                  : 'Selected accounts have no model restriction — full catalog below.'}
               </p>
             )}
           </div>
@@ -200,7 +209,7 @@ export default function Combos() {
 
         <div>
           <label className="flex items-center gap-1.5 text-xs font-medium text-[var(--text-muted)] mb-1.5">
-            <Layers size={12} className="opacity-70" />
+            <Layers size={12} className="opacity-60" />
             Models (fallback order)
           </label>
           <ModelSelector
@@ -212,12 +221,12 @@ export default function Combos() {
 
         {error && <p className="text-sm text-[var(--danger)]">{error}</p>}
 
-        <div className="flex flex-wrap gap-2 pt-1 border-t border-[var(--border)]">
+        <div className="flex flex-wrap gap-2 pt-3 border-t border-[var(--border)]">
           <button
             type="button"
             onClick={onSave}
             disabled={loading}
-            className="flex items-center gap-1.5 px-4 py-2 bg-[var(--accent)] hover:bg-[var(--accent-hover)] rounded-lg text-sm disabled:opacity-50 transition-colors"
+            className="btn-primary"
           >
             {loading ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
             {loading ? 'Saving…' : saveLabel}
@@ -225,7 +234,7 @@ export default function Combos() {
           <button
             type="button"
             onClick={onCancel}
-            className="px-4 py-2 bg-[var(--bg)] hover:bg-[var(--bg-hover)] rounded-lg text-sm text-[var(--text-muted)] transition-colors"
+            className="btn-ghost"
           >
             Cancel
           </button>
@@ -235,36 +244,43 @@ export default function Combos() {
   }
 
   const ModalChrome = ({
-    title, subtitle, titleId, onClose, children,
-  }: { title: string; subtitle?: string; titleId: string; onClose: () => void; children: React.ReactNode }) => (
+    title, subtitle, titleId, icon, onClose, children,
+  }: { title: string; subtitle?: string; titleId: string; icon?: React.ReactNode; onClose: () => void; children: React.ReactNode }) => (
     <div
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/50 backdrop-blur-[2px]"
+      className="modal-overlay"
       role="dialog"
       aria-modal="true"
       aria-labelledby={titleId}
       onClick={onClose}
     >
       <div
-        className="bg-[var(--bg-card)] border border-[var(--border)] sm:rounded-xl w-full sm:max-w-lg max-h-[min(92vh,720px)] flex flex-col shadow-xl"
+        className="modal-content sm:max-w-lg"
         onClick={e => e.stopPropagation()}
       >
-        <div className="flex items-start justify-between gap-3 px-4 pt-4 pb-3 border-b border-[var(--border)] shrink-0">
-          <div className="min-w-0">
-            <h3 id={titleId} className="text-lg font-semibold leading-tight">{title}</h3>
-            {subtitle && (
-              <p className="text-xs text-[var(--text-muted)] mt-1">{subtitle}</p>
+        <div className="modal-header">
+          <div className="flex items-center gap-3 min-w-0">
+            {icon && (
+              <div className="w-10 h-10 rounded-xl bg-[var(--purple-glow)] border border-[var(--purple)]/20 flex items-center justify-center shrink-0">
+                {icon}
+              </div>
             )}
+            <div className="min-w-0">
+              <h3 id={titleId} className="modal-title">{title}</h3>
+              {subtitle && (
+                <p className="modal-subtitle">{subtitle}</p>
+              )}
+            </div>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="p-2 rounded-lg hover:bg-[var(--bg-hover)] text-[var(--text-muted)] shrink-0"
+            className="btn-icon shrink-0"
             aria-label="Close"
           >
             <X size={18} />
           </button>
         </div>
-        <div className="overflow-y-auto px-4 py-4 flex-1 min-h-0">
+        <div className="modal-body">
           {children}
         </div>
       </div>
@@ -272,18 +288,19 @@ export default function Combos() {
   )
 
   return (
-    <div className="max-w-3xl">
-      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-6">
+    <div className="max-w-4xl">
+      {/* Header */}
+      <div className="page-header">
         <div>
-          <h2 className="text-2xl font-bold tracking-tight">Combos</h2>
-          <p className="text-sm text-[var(--text-muted)] mt-1 max-w-md">
-            Named model fallback chains for routing. Use the API with the combo name as the model id.
+          <h2 className="page-title">Combos</h2>
+          <p className="page-subtitle">
+            Named model fallback chains. Use the combo name as the model ID in your API calls.
           </p>
         </div>
         <button
           type="button"
           onClick={openCreate}
-          className="flex items-center justify-center gap-1.5 px-4 py-2 bg-[var(--accent)] hover:bg-[var(--accent-hover)] rounded-lg text-sm transition-colors shrink-0"
+          className="btn-primary shrink-0"
         >
           <Plus size={16} /> New combo
         </button>
@@ -294,6 +311,7 @@ export default function Combos() {
           title="New combo"
           subtitle="Pick a name, add models in order, optionally pin accounts."
           titleId="combo-dialog-new"
+          icon={<Layers size={18} className="text-[var(--purple)]" />}
           onClose={closeCreate}
         >
           <ComboForm
@@ -312,6 +330,7 @@ export default function Combos() {
           title="Edit combo"
           subtitle="Changes apply to new requests immediately."
           titleId="combo-dialog-edit"
+          icon={<Pencil size={16} className="text-[var(--purple)]" />}
           onClose={cancelEdit}
         >
           <ComboForm
@@ -326,65 +345,118 @@ export default function Combos() {
       )}
 
       {combos.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-[var(--border)] bg-[var(--bg-card)]/50 px-6 py-10 text-center">
-          <p className="text-[var(--text-muted)] text-sm">No combos yet.</p>
+        <div className="empty-state">
+          <div className="empty-state-icon" style={{ background: 'var(--purple-glow)', color: 'var(--purple)' }}>
+            <Layers size={24} />
+          </div>
+          <h3>No combos yet</h3>
+          <p>
+            Create a model fallback chain to automatically retry requests with different models.
+          </p>
           <button
             type="button"
             onClick={openCreate}
-            className="mt-3 text-sm text-[var(--accent)] hover:underline"
+            className="btn-primary"
           >
-            Create your first combo
+            <Plus size={16} /> Create your first combo
           </button>
         </div>
       ) : (
-        <ul className="space-y-2" role="list">
+        <ul className="space-y-3" role="list">
           {combos.map((c: any) => {
             const nModels = c.models?.length ?? 0
             const nConns = c.connectionIds?.length ?? 0
-            const summaryParts: string[] = []
-            if (nModels > 0) summaryParts.push(`${nModels} model${nModels !== 1 ? 's' : ''}`)
-            summaryParts.push(
-              nConns > 0
-                ? `${nConns} pinned account${nConns !== 1 ? 's' : ''}`
-                : 'Any active account',
-            )
+            const pinnedConns = nConns > 0 
+              ? c.connectionIds.map((id: string) => conns.find(cn => cn.id === id)).filter(Boolean)
+              : []
 
             return (
               <li
                 key={c.id}
-                className="rounded-xl border border-[var(--border)] bg-[var(--bg-card)] px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-3"
+                className="glass p-4 flex flex-col sm:flex-row sm:items-center gap-3 transition-all hover:border-[var(--border-hover)] group"
               >
                 <div className="min-w-0 flex-1">
-                  <p className="font-medium truncate">{c.name}</p>
-                  <p className="text-xs text-[var(--text-muted)] mt-0.5">{summaryParts.join(' · ')}</p>
+                  <div className="flex items-center gap-2 mb-1">
+                    <p className="font-semibold truncate" style={{ fontFamily: 'var(--font-heading)' }}>{c.name}</p>
+                    <span className="chip chip-muted text-[10px]">
+                      {nModels} model{nModels !== 1 ? 's' : ''}
+                    </span>
+                    {nConns > 0 && (
+                      <span className="chip chip-accent text-[10px]">
+                        <Link2 size={8} /> {nConns} pinned
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Model chain visualization */}
                   {nModels > 0 && (
-                    <p className="text-[11px] text-[var(--text-muted)] font-mono truncate mt-1.5" title={c.models.join(', ')}>
-                      {c.models.slice(0, 3).map((m: string) => getModelName(m)).join(' → ')}
-                      {nModels > 3 ? ' …' : ''}
-                    </p>
+                    <div className="flex items-center gap-1 mt-2 flex-wrap">
+                      {c.models.slice(0, 4).map((m: string, i: number) => (
+                        <span key={i} className="flex items-center gap-1">
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-mono bg-white/[0.04] text-[var(--text-muted)] border border-[var(--border)]">
+                            {getModelName(m)}
+                          </span>
+                          {i < Math.min(nModels, 4) - 1 && (
+                            <ArrowRight size={10} className="text-[var(--text-dim)]" />
+                          )}
+                        </span>
+                      ))}
+                      {nModels > 4 && (
+                        <span className="text-[10px] text-[var(--text-dim)]">+{nModels - 4} more</span>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Pinned connections */}
+                  {pinnedConns.length > 0 && (
+                    <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                      <span className="text-[10px] text-[var(--text-dim)]">via:</span>
+                      {pinnedConns.slice(0, 3).map((cn: any) => (
+                        <span key={cn.id} className="chip chip-muted text-[10px]">
+                          {cn.name}
+                        </span>
+                      ))}
+                      {pinnedConns.length > 3 && (
+                        <span className="text-[10px] text-[var(--text-dim)]">+{pinnedConns.length - 3}</span>
+                      )}
+                    </div>
                   )}
                 </div>
-                <div className="flex items-center gap-1 shrink-0 sm:pl-2">
+
+                <div className="flex items-center gap-1 shrink-0 sm:pl-2 opacity-60 group-hover:opacity-100 transition-opacity">
                   <button
                     type="button"
                     onClick={() => startEdit(c)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm hover:bg-[var(--bg-hover)] text-[var(--text-muted)] hover:text-[var(--text)]"
+                    className="btn-ghost text-xs px-3 py-1.5"
                   >
-                    <Pencil size={14} /> Edit
+                    <Pencil size={13} /> Edit
                   </button>
                   <button
                     type="button"
                     onClick={() => handleDelete(c.id)}
-                    className="p-2 rounded-lg hover:bg-[var(--bg-hover)] text-[var(--danger)]"
+                    className="btn-icon text-[var(--danger)] hover:bg-[var(--danger-glow)]"
                     title="Delete combo"
                   >
-                    <Trash2 size={16} />
+                    <Trash2 size={15} />
                   </button>
                 </div>
               </li>
             )
           })}
         </ul>
+      )}
+
+      {/* Quick links */}
+      {combos.length > 0 && (
+        <div className="glass-sm p-4 mt-6 flex items-center justify-between text-xs text-[var(--text-muted)]">
+          <span>Tip: Use combo name as model ID in your API calls, e.g. <code className="bg-white/[0.05] px-1.5 py-0.5 rounded text-[var(--accent)] font-mono">{combos[0]?.name}</code></span>
+          <button 
+            onClick={() => navigate('/models')}
+            className="text-[var(--accent)] hover:text-[var(--accent-hover)] font-medium flex items-center gap-1 cursor-pointer"
+          >
+            View all models <ChevronRight size={12} />
+          </button>
+        </div>
       )}
     </div>
   )

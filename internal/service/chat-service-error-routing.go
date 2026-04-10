@@ -4,6 +4,8 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+
+	"github.com/dungnt/dntproxy/internal/port"
 )
 
 func shouldFallbackToNextAccount(status int, errorText string) bool {
@@ -45,7 +47,7 @@ func normalizeExecutorFailure(status int, errMsg string) (int, string) {
 	return status, message
 }
 
-func mapSelectionErrorToChatResult(err error) *ChatResult {
+func mapSelectionErrorToChatResult(err error) *port.ChatResult {
 	var selErr *AccountSelectionError
 	if !errors.As(err, &selErr) {
 		return nil
@@ -53,12 +55,12 @@ func mapSelectionErrorToChatResult(err error) *ChatResult {
 
 	switch selErr.Kind {
 	case SelectionErrNoActiveCredentials:
-		return &ChatResult{StatusCode: http.StatusNotFound, Error: selErr.Error()}
+		return &port.ChatResult{StatusCode: http.StatusNotFound, Error: selErr.Error()}
 	case SelectionErrUnsupportedModel:
-		return &ChatResult{StatusCode: http.StatusBadRequest, Error: selErr.Error()}
+		return &port.ChatResult{StatusCode: http.StatusBadRequest, Error: selErr.Error()}
 	case SelectionErrRateLimited, SelectionErrModelLocked:
-		return &ChatResult{StatusCode: http.StatusTooManyRequests, Error: selErr.Error()}
+		return &port.ChatResult{StatusCode: http.StatusTooManyRequests, Error: selErr.Error()}
 	default:
-		return &ChatResult{StatusCode: http.StatusServiceUnavailable, Error: selErr.Error()}
+		return &port.ChatResult{StatusCode: http.StatusServiceUnavailable, Error: selErr.Error()}
 	}
 }

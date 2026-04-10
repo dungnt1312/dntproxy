@@ -13,14 +13,14 @@ import (
 )
 
 // NewRouter creates and configures the Gin router.
-func NewRouter(store port.CredentialStore) *gin.Engine {
+func NewRouter(store port.CredentialStore, providers port.ProviderRegistry) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.Use(gin.Recovery())
 	r.Use(corsMiddleware())
 	r.Use(requestLogger())
 
-	chatService := service.NewChatService(store)
+	chatService := service.NewChatService(store, providers)
 
 	// OpenAI-compatible endpoints
 	v1 := r.Group("/v1")
@@ -32,7 +32,7 @@ func NewRouter(store port.CredentialStore) *gin.Engine {
 	}
 
 	// Dashboard API endpoints
-	RegisterAPIRoutes(r, store)
+	RegisterAPIRoutes(r, store, providers)
 
 	// Auth flow endpoints (Builder ID, IDC, Social Login, Fetch Models)
 	RegisterAuthRoutes(r, store)
@@ -109,7 +109,7 @@ func serveStaticUI(r *gin.Engine) {
 func corsMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Header("Access-Control-Allow-Origin", "*")
-		c.Header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		c.Header("Access-Control-Allow-Headers", "*")
 
 		if c.Request.Method == "OPTIONS" {

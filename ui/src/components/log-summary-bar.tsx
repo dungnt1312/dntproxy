@@ -17,23 +17,30 @@ function formatCost(value = 0, currency = 'USD') {
   }).format(value)
 }
 
+const statConfig = [
+  { label: 'Requests', icon: Activity, colorClass: 'stat-card-blue' },
+  { label: 'Errors', icon: TriangleAlert, colorClass: 'stat-card-danger' },
+  { label: 'Tokens', icon: Zap, colorClass: 'stat-card-green' },
+  { label: 'Est. Cost', icon: DollarSign, colorClass: 'stat-card-amber' },
+]
+
 export default function LogSummaryBar({ summary }: LogSummaryBarProps) {
-  const items = [
-    { label: 'Requests', value: formatNumber(summary?.requests), icon: Activity },
-    { label: 'Errors', value: formatNumber(summary?.errors), icon: TriangleAlert },
-    { label: 'Tokens', value: formatNumber(summary?.totalTokens), icon: Zap },
-    { label: 'Estimated cost', value: formatCost(summary?.costTotal, summary?.currency || 'USD'), icon: DollarSign },
+  const values = [
+    formatNumber(summary?.requests),
+    formatNumber(summary?.errors),
+    formatNumber(summary?.totalTokens),
+    formatCost(summary?.costTotal, summary?.currency || 'USD'),
   ]
 
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-      {items.map(item => (
-        <div key={item.label} className="border border-[var(--border)] bg-[var(--bg-card)] rounded-lg p-3">
-          <div className="flex items-center gap-2 text-[var(--text-muted)] text-xs uppercase">
-            <item.icon size={14} />
+      {statConfig.map((item, i) => (
+        <div key={item.label} className={`glass stat-card ${item.colorClass} cursor-default`}>
+          <div className="flex items-center gap-2 text-[var(--text-dim)] text-[10px] uppercase font-bold tracking-wider mb-1">
+            <item.icon size={12} />
             {item.label}
           </div>
-          <div className="mt-2 text-xl font-semibold">{item.value}</div>
+          <div className="text-xl font-bold" style={{ fontFamily: 'var(--font-heading)' }}>{values[i]}</div>
         </div>
       ))}
     </div>

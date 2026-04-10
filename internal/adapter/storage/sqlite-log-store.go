@@ -66,13 +66,15 @@ func (s *SQLiteLogStore) Insert(ctx context.Context, entry *domain.LogEntry) err
 	_, err = s.db.ExecContext(ctx, `INSERT INTO request_logs
 		(id, timestamp_ms, timestamp, level, provider, direction, method, path, status_code, duration_ms,
 		 connection_id, connection_name, model, request_id, message, error, body_size, input_tokens,
-		 output_tokens, total_tokens, usage_source, cost_input, cost_output, cost_total, currency, metadata_json)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 output_tokens, total_tokens, usage_source, cost_input, cost_output, cost_total, currency, metadata_json,
+		 request_body, response_body)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		entry.ID, entry.TimestampMs, entry.Timestamp, entry.Level, entry.Provider, entry.Direction,
 		entry.Method, entry.Path, entry.StatusCode, entry.DurationMs, entry.ConnectionID,
 		entry.ConnectionName, entry.Model, entry.RequestID, entry.Message, entry.Error,
 		entry.BodySize, entry.InputTokens, entry.OutputTokens, entry.TotalTokens, entry.UsageSource,
-		entry.CostInput, entry.CostOutput, entry.CostTotal, entry.Currency, entry.MetadataJSON)
+		entry.CostInput, entry.CostOutput, entry.CostTotal, entry.Currency, entry.MetadataJSON,
+		entry.RequestBody, entry.ResponseBody)
 	if err != nil {
 		return fmt.Errorf("insert log: %w", err)
 	}

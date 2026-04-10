@@ -52,8 +52,8 @@ export const api = {
 
   // OpenAI OAuth (PKCE)
   startOpenAIOAuth: () => request('/auth/openai/start', { method: 'POST' }),
-  pollOpenAIOAuth: (sessionId: string) =>
-    request('/auth/openai/exchange', { method: 'POST', body: JSON.stringify({ sessionId }) }),
+  pollOpenAIOAuth: (sessionId: string, callbackUrl?: string) =>
+    request('/auth/openai/exchange', { method: 'POST', body: JSON.stringify({ sessionId, callbackUrl }) }),
 
   // Fetch models from provider API
   fetchConnectionModels: (id: string) =>

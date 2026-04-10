@@ -92,8 +92,13 @@ func (s *AccountSelector) SelectCredentials(provider string, excludeIDs map[stri
 		}
 		nonExcludedCount++
 
-		// Skip connections that don't support this model
-		if !conn.SupportsModel(model) {
+		// Skip connections that don't support this model.
+		// Exception: OpenAI OAuth connections (ChatGPT tokens) use the Codex Responses API
+		// which accepts any ChatGPT model slug — the upstream validates the model.
+		// Their stored supportedModels list contains ChatGPT slugs (e.g. "gpt-4o", "o4-mini")
+		// that don't match standard API IDs, so skipping this check here is correct.
+		isOpenAIOAuth := conn.Provider == "openai" && conn.AuthType == "oauth"
+		if !isOpenAIOAuth && !conn.SupportsModel(model) {
 			continue
 		}
 		supportedCount++

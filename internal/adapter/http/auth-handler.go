@@ -658,7 +658,8 @@ func authOpenAIStart() gin.HandlerFunc {
 func authOpenAIExchange(store port.CredentialStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req struct {
-			SessionID string `json:"sessionId"`
+			SessionID   string `json:"sessionId"`
+			CallbackURL string `json:"callbackUrl"` // optional manual paste
 		}
 		if err := c.ShouldBindJSON(&req); err != nil || req.SessionID == "" {
 			c.JSON(400, gin.H{"error": "sessionId is required"})
@@ -673,7 +674,26 @@ func authOpenAIExchange(store port.CredentialStore) gin.HandlerFunc {
 			return
 		}
 
-		// Check if callback was received
+		// If user manually pasted the callback URL, inject the code into the session
+		if req.CallbackURL != "" {
+			parsed, parseErr := url.Parse(req.CallbackURL)
+			if parseErr != nil {
+				c.JSON(400, gin.H{"error": "Invalid callback URL: " + parseErr.Error()})
+				return
+			}
+			manualCode := parsed.Query().Get("code")
+			if manualCode == "" {
+				c.JSON(400, gin.H{"error": "No 'code' parameter found in the callback URL"})
+				return
+			}
+			openaiSessionsMu.Lock()
+			sess.Code = manualCode
+			sess.Done = true
+			sess.Error = ""
+			openaiSessionsMu.Unlock()
+		}
+
+		// Check if callback was received (auto or manual)
 		openaiSessionsMu.Lock()
 		done := sess.Done
 		code := sess.Code

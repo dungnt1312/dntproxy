@@ -24,6 +24,14 @@ function parseMetadata(value?: string): LogMetadata {
   }
 }
 
+function prettyJSON(raw: string): string {
+  try {
+    return JSON.stringify(JSON.parse(raw), null, 2)
+  } catch {
+    return raw
+  }
+}
+
 function formatTime(value: string) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value || '-'
@@ -39,10 +47,18 @@ function formatCost(value = 0, currency = 'USD') {
   }).format(value)
 }
 
-function statusClass(status?: number, level?: string) {
-  if (level === 'ERROR' || (status && status >= 400)) return 'border-red-500/30 bg-red-500/10 text-[var(--danger)]'
-  if (status && status >= 200 && status < 300) return 'border-emerald-500/30 bg-emerald-500/10 text-[var(--success)]'
-  return 'border-[var(--border)] bg-[var(--bg-hover)] text-[var(--text-muted)]'
+function statusChipClass(status?: number, level?: string) {
+  if (level === 'ERROR' || (status && status >= 400)) return 'chip-danger'
+  if (status && status >= 200 && status < 300) return 'chip-success'
+  return 'chip-muted'
+}
+
+function directionColor(direction?: string) {
+  if (direction === 'inbound') return 'var(--accent)'
+  if (direction === 'outbound') return 'var(--purple)'
+  if (direction === 'response') return 'var(--success)'
+  if (direction === 'usage') return 'var(--warning)'
+  return 'var(--text-dim)'
 }
 
 function titleFor(log: LogEntry) {
@@ -80,57 +96,80 @@ function LogEvent({ log }: { log: LogEntry }) {
   const metrics = metricLine(log)
 
   return (
-    <article className={`border border-[var(--border)] bg-[var(--bg-card)] rounded-lg p-3 ${log.level === 'ERROR' ? 'border-red-500/40' : ''}`}>
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="font-semibold">{titleFor(log)}</span>
-            <span className="text-xs text-[var(--text-muted)] font-mono">{formatTime(log.timestamp)}</span>
-            <span className={`text-xs border rounded px-2 py-0.5 font-mono ${statusClass(log.statusCode, log.level)}`}>
-              {log.statusCode || log.level}
-            </span>
-            <span className="text-xs border border-[var(--border)] rounded px-2 py-0.5 text-[var(--text-muted)]">
-              {log.provider} / {log.direction}
-            </span>
+    <article className={`glass-sm relative overflow-hidden ${log.level === 'ERROR' ? 'border-[var(--danger)]/20' : ''}`}>
+      {/* Direction indicator bar */}
+      <div className="absolute left-0 top-0 bottom-0 w-[3px] rounded-l-xl" style={{ backgroundColor: directionColor(log.direction) }} />
+
+      <div className="p-3 pl-4">
+        <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="font-semibold text-sm" style={{ fontFamily: 'var(--font-heading)' }}>{titleFor(log)}</span>
+              <span className="text-[10px] text-[var(--text-dim)] font-mono">{formatTime(log.timestamp)}</span>
+              <span className={`chip text-[10px] ${statusChipClass(log.statusCode, log.level)}`}>
+                {log.statusCode || log.level}
+              </span>
+              <span className="chip chip-muted text-[10px]">
+                {log.provider} / {log.direction}
+              </span>
+            </div>
+
+            <div className="mt-1.5 grid gap-1 text-[11px] text-[var(--text-dim)] lg:grid-cols-2">
+              <div className="truncate">Conn: {log.connectionName || log.connectionId || '-'}</div>
+              <div className="truncate">Model: {log.model || '-'}</div>
+            </div>
           </div>
 
-          <div className="mt-2 grid gap-1 text-xs text-[var(--text-muted)] lg:grid-cols-2">
-            <div className="truncate">Connection: {log.connectionName || log.connectionId || '-'}</div>
-            <div className="truncate">Model: {log.model || '-'}</div>
-          </div>
+          {metrics.length > 0 && (
+            <div className="flex flex-wrap gap-1 lg:justify-end">
+              {metrics.map(item => (
+                <span key={item} className="chip chip-muted text-[10px] font-mono">
+                  {item}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
 
-        {metrics.length > 0 && (
-          <div className="flex flex-wrap gap-1 lg:justify-end">
-            {metrics.map(item => (
-              <span key={item} className="text-xs font-mono border border-[var(--border)] rounded px-2 py-1 text-[var(--text-muted)]">
-                {item}
-              </span>
-            ))}
+        {preview && (
+          <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] p-3">
+            <div className="mb-1.5 text-[10px] uppercase font-bold tracking-wider text-[var(--text-dim)]">
+              {metadata.responsePreview ? 'Response payload' : 'Summary'}
+              {metadata.truncated ? ' (truncated)' : ''}
+            </div>
+            <pre className="max-h-44 overflow-auto whitespace-pre-wrap break-words text-xs leading-5 text-[var(--text-muted)]">{preview}</pre>
           </div>
         )}
+
+        <details className="mt-3 text-xs text-[var(--text-dim)]">
+          <summary className="cursor-pointer select-none hover:text-[var(--text-muted)] transition-colors">Details</summary>
+          <dl className="mt-2 grid gap-2 lg:grid-cols-2 text-[11px]">
+            <div className="truncate">Request ID: <span className="font-mono text-[var(--text-muted)]">{log.requestId || '-'}</span></div>
+            <div className="truncate">Path: <span className="font-mono text-[var(--text-muted)]">{log.path || '-'}</span></div>
+            <div>Message: {log.message || '-'}</div>
+            <div>Usage source: {log.usageSource || metadata.source || '-'}</div>
+            {log.error && <div className="lg:col-span-2 text-[var(--danger)]">Error: {log.error}</div>}
+          </dl>
+
+          {log.requestBody && (
+            <details className="mt-3">
+              <summary className="cursor-pointer select-none font-semibold text-[var(--text-muted)] hover:text-[var(--text)] transition-colors">Request Body</summary>
+              <pre className="mt-2 max-h-96 overflow-auto rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] p-3 whitespace-pre-wrap break-all leading-5 text-[var(--text-muted)] font-mono text-[10px]">
+                {prettyJSON(log.requestBody)}
+              </pre>
+            </details>
+          )}
+
+          {log.responseBody && (
+            <details className="mt-2">
+              <summary className="cursor-pointer select-none font-semibold text-[var(--text-muted)] hover:text-[var(--text)] transition-colors">Response Body</summary>
+              <pre className="mt-2 max-h-96 overflow-auto rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] p-3 whitespace-pre-wrap break-all leading-5 text-[var(--text-muted)] font-mono text-[10px]">
+                {prettyJSON(log.responseBody)}
+              </pre>
+            </details>
+          )}
+        </details>
       </div>
-
-      {preview && (
-        <div className="mt-3 rounded border border-[var(--border)] bg-[var(--bg)] p-3">
-          <div className="mb-2 text-xs uppercase text-[var(--text-muted)]">
-            {metadata.responsePreview ? 'Response payload' : 'Summary'}
-            {metadata.truncated ? ' (truncated)' : ''}
-          </div>
-          <pre className="max-h-44 overflow-auto whitespace-pre-wrap break-words text-xs leading-5 text-[var(--text-primary)]">{preview}</pre>
-        </div>
-      )}
-
-      <details className="mt-3 text-xs text-[var(--text-muted)]">
-        <summary className="cursor-pointer select-none">Details</summary>
-        <dl className="mt-2 grid gap-2 lg:grid-cols-2">
-          <div className="truncate">Request ID: <span className="font-mono">{log.requestId || '-'}</span></div>
-          <div className="truncate">Path: <span className="font-mono">{log.path || '-'}</span></div>
-          <div>Message: {log.message || '-'}</div>
-          <div>Usage source: {log.usageSource || metadata.source || '-'}</div>
-          {log.error && <div className="lg:col-span-2 text-[var(--danger)]">Error: {log.error}</div>}
-        </dl>
-      </details>
     </article>
   )
 }
@@ -140,7 +179,7 @@ export default function LogTable({ logs }: LogTableProps) {
 
   if (safeLogs.length === 0) {
     return (
-      <div className="flex h-80 items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--bg-card)] text-[var(--text-muted)]">
+      <div className="flex h-80 items-center justify-center glass text-[var(--text-dim)]">
         No logs for this filter.
       </div>
     )

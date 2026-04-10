@@ -10,12 +10,11 @@ import (
 	"github.com/dungnt/dntproxy/internal/domain"
 	"github.com/dungnt/dntproxy/internal/logger"
 	"github.com/dungnt/dntproxy/internal/port"
-	"github.com/dungnt/dntproxy/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
 
-func chatHandler(chatService *service.ChatService, store port.CredentialStore) gin.HandlerFunc {
+func chatHandler(chatService port.ChatService, store port.CredentialStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
 		requestID := uuid.New().String()

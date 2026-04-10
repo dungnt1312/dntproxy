@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -25,8 +26,37 @@ func NewExecutor() *Executor {
 	return &Executor{}
 }
 
+// isCodexOAuth returns true if this credential is an OpenAI OAuth token
+// (from auth.openai.com) which needs to use the Codex Responses API.
+func isCodexOAuth(credentials *domain.Credentials) bool {
+	// If there's an API key, use standard API (not OAuth)
+	if credentials.APIKey != "" {
+		return false
+	}
+	// If there's a custom base URL, user configured their own endpoint
+	if credentials.BaseURL != "" {
+		return false
+	}
+	// Check provider-specific data for authMethod == "oauth"
+	if credentials.ProviderSpecificData != nil {
+		if method, ok := credentials.ProviderSpecificData["authMethod"].(string); ok {
+			return method == "oauth"
+		}
+	}
+	// If we have an access token but no API key, it's likely OAuth
+	return credentials.AccessToken != "" && credentials.APIKey == ""
+}
+
 // Execute sends a request to OpenAI (or compatible) API and returns a streaming reader.
 func (e *Executor) Execute(model string, body []byte, credentials *domain.Credentials, requestID string) (io.ReadCloser, int, error) {
+	if isCodexOAuth(credentials) {
+		return e.executeCodexResponses(model, body, credentials, requestID)
+	}
+	return e.executeStandard(model, body, credentials, requestID)
+}
+
+// executeStandard handles standard OpenAI API key requests (api.openai.com/v1/chat/completions).
+func (e *Executor) executeStandard(model string, body []byte, credentials *domain.Credentials, requestID string) (io.ReadCloser, int, error) {
 	baseURL := credentials.BaseURL
 	if baseURL == "" {
 		baseURL = defaultOpenAIBaseURL
@@ -51,7 +81,7 @@ func (e *Executor) Execute(model string, body []byte, credentials *domain.Creden
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
 
-	log.Printf("[OPENAI] --> %s | conn=%s | model=%s", url, credentials.ConnectionName, model)
+	log.Printf("[OPENAI] --> %s | conn=%s | model=%s | body_size=%d", url, credentials.ConnectionName, model, len(body))
 	if apiKey != "" {
 		log.Printf("[OPENAI]     Authorization: Bearer %s", maskedToken(apiKey))
 	}
@@ -67,6 +97,7 @@ func (e *Executor) Execute(model string, body []byte, credentials *domain.Creden
 		RequestID:      requestID,
 		Message:        "OpenAI-compatible request sent",
 		BodySize:       len(body),
+		RequestBody:    truncateBody(body, 8192),
 	})
 
 	start := time.Now()
@@ -96,13 +127,42 @@ func (e *Executor) Execute(model string, body []byte, credentials *domain.Creden
 		return nil, 502, fmt.Errorf("openai request failed: %w", err)
 	}
 
-	bodyBytes, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		
+		respBodyStr := "Unknown error"
+		if err == nil {
+			respBodyStr = string(bodyBytes)
+		}
+		log.Printf("[OPENAI] <-- %s | conn=%s | model=%s | status=%d | duration=%s | error body_size=%d",
+			url, credentials.ConnectionName, model, resp.StatusCode, duration, len(bodyBytes))
+		log.Printf("[OPENAI] ERROR body: %s", respBodyStr)
+		
+		appLogger.AddEntry(domain.LogEntry{
+			Level:          "ERROR",
+			Provider:       "OPENAI",
+			Direction:      "response",
+			Path:           url,
+			StatusCode:     resp.StatusCode,
+			DurationMs:     duration.Milliseconds(),
+			ConnectionID:   credentials.ConnectionID,
+			ConnectionName: credentials.ConnectionName,
+			Model:          model,
+			RequestID:      requestID,
+			Message:        "OpenAI-compatible request failed",
+			BodySize:       len(bodyBytes),
+			Error:          respBodyStr,
+			ResponseBody:   truncateBody(bodyBytes, 8192),
+		})
+		return nil, resp.StatusCode, fmt.Errorf("openai returned %d: %s", resp.StatusCode, respBodyStr)
+	}
 
-	log.Printf("[OPENAI] <-- %s | conn=%s | model=%s | status=%d | duration=%s | body_size=%d",
-		url, credentials.ConnectionName, model, resp.StatusCode, duration, len(bodyBytes))
-	responseEntry := domain.LogEntry{
-		Level:          openAIResponseLevel(resp.StatusCode),
+	log.Printf("[OPENAI] <-- %s | conn=%s | model=%s | status=%d | duration=%s | stream_started=true",
+		url, credentials.ConnectionName, model, resp.StatusCode, duration)
+
+	appLogger.AddEntry(domain.LogEntry{
+		Level:          "INFO",
 		Provider:       "OPENAI",
 		Direction:      "response",
 		Path:           url,
@@ -112,44 +172,200 @@ func (e *Executor) Execute(model string, body []byte, credentials *domain.Creden
 		ConnectionName: credentials.ConnectionName,
 		Model:          model,
 		RequestID:      requestID,
-		Message:        "OpenAI-compatible response received",
-		BodySize:       len(bodyBytes),
+		Message:        "OpenAI-compatible response stream started",
+	})
+
+	// Sniff stream to extract usage and preview at the end
+	sniffer := &openaiStreamSniffer{
+		ReadCloser: resp.Body,
+		onClose: func(bodyBytes []byte) {
+			if usage := extractUsage(bodyBytes); usage != nil {
+				appLogger.AddUsage("OPENAI", requestID, credentials.ConnectionID, credentials.ConnectionName,
+					model, usage.PromptTokens, usage.CompletionTokens, "sse_usage")
+			}
+			if preview, truncated := extractResponsePreview(bodyBytes); preview != "" {
+				metadata, _ := json.Marshal(map[string]interface{}{
+					"responsePreview": preview,
+					"truncated":       truncated,
+					"source":          "sse",
+				})
+				appLogger.AddEntry(domain.LogEntry{
+					Provider:       "OPENAI",
+					Direction:      "payload",
+					ConnectionID:   credentials.ConnectionID,
+					ConnectionName: credentials.ConnectionName,
+					Model:          model,
+					RequestID:      requestID,
+					Message:        "Response payload captured",
+					MetadataJSON:   string(metadata),
+				})
+			}
+		},
 	}
 
-	if resp.StatusCode != http.StatusOK {
-		responseEntry.Error = string(bodyBytes)
-		appLogger.AddEntry(responseEntry)
-		return nil, resp.StatusCode, fmt.Errorf("openai returned %d: %s", resp.StatusCode, string(bodyBytes))
-	}
-	appLogger.AddEntry(responseEntry)
+	return sniffer, 200, nil
+}
 
-	if usage := extractUsage(bodyBytes); usage != nil {
-		appLogger.AddUsage("OPENAI", requestID, credentials.ConnectionID, credentials.ConnectionName,
-			model, usage.PromptTokens, usage.CompletionTokens, "sse_usage")
+// executeCodexResponses handles OpenAI OAuth tokens via the Codex Responses API.
+// Translates: Chat Completions request → Codex Responses API request
+// And:        Codex Responses API SSE → Chat Completions SSE
+func (e *Executor) executeCodexResponses(model string, body []byte, credentials *domain.Credentials, requestID string) (io.ReadCloser, int, error) {
+	// Translate request: Chat Completions → Codex Responses API
+	translatedBody, err := TranslateChatToCodexResponses(body)
+	if err != nil {
+		return nil, 500, fmt.Errorf("translate request to codex format: %w", err)
 	}
-	if preview, truncated := extractResponsePreview(bodyBytes); preview != "" {
-		metadata, _ := json.Marshal(map[string]interface{}{
-			"responsePreview": preview,
-			"truncated":       truncated,
-			"source":          "sse",
-		})
+
+	url := codexResponsesURL
+
+	req, err := http.NewRequest("POST", url, io.NopCloser(newBytesReader(translatedBody)))
+	if err != nil {
+		return nil, 500, fmt.Errorf("create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "text/event-stream")
+	req.Header.Set("Authorization", "Bearer "+credentials.AccessToken)
+	// Codex CLI headers
+	req.Header.Set("originator", "codex-cli")
+	req.Header.Set("User-Agent", "codex-cli/1.0.18 (macOS; arm64)")
+
+	log.Printf("[CODEX] --> %s | conn=%s | model=%s | body_size=%d", url, credentials.ConnectionName, model, len(translatedBody))
+	log.Printf("[CODEX]     Authorization: Bearer %s", maskedToken(credentials.AccessToken))
+
+	appLogger := logger.Get()
+	appLogger.AddEntry(domain.LogEntry{
+		Provider:       "CODEX",
+		Direction:      "outbound",
+		Method:         "POST",
+		Path:           url,
+		ConnectionID:   credentials.ConnectionID,
+		ConnectionName: credentials.ConnectionName,
+		Model:          model,
+		RequestID:      requestID,
+		Message:        "Codex Responses API request sent",
+		BodySize:       len(translatedBody),
+		RequestBody:    truncateBody(translatedBody, 8192),
+	})
+
+	start := time.Now()
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	duration := time.Since(start)
+
+	if err != nil {
+		errMsg := fmt.Sprintf("codex request failed: %s", err)
+		log.Printf("[CODEX] <-- %s | conn=%s | model=%s | status=502 | duration=%s | error=%s",
+			url, credentials.ConnectionName, model, duration, err)
 		appLogger.AddEntry(domain.LogEntry{
-			Provider:       "OPENAI",
-			Direction:      "payload",
+			Level:          "ERROR",
+			Provider:       "CODEX",
+			Direction:      "response",
+			Path:           url,
+			StatusCode:     502,
+			DurationMs:     duration.Milliseconds(),
 			ConnectionID:   credentials.ConnectionID,
 			ConnectionName: credentials.ConnectionName,
 			Model:          model,
 			RequestID:      requestID,
-			Message:        "Response payload captured",
-			MetadataJSON:   string(metadata),
+			Message:        "Codex Responses API request failed",
+			Error:          errMsg,
 		})
+		return nil, 502, fmt.Errorf("codex request failed: %w", err)
 	}
 
-	// Restore body for streaming
-	resp.Body = io.NopCloser(newBytesReader(bodyBytes))
+	log.Printf("[CODEX] <-- %s | conn=%s | model=%s | status=%d | duration=%s",
+		url, credentials.ConnectionName, model, resp.StatusCode, duration)
 
-	// OpenAI-compatible responses are already SSE formatted, pass through directly
-	return resp.Body, 200, nil
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		respBodyStr := string(bodyBytes)
+		log.Printf("[CODEX] ERROR body: %s", respBodyStr)
+
+		appLogger.AddEntry(domain.LogEntry{
+			Level:          "ERROR",
+			Provider:       "CODEX",
+			Direction:      "response",
+			Path:           url,
+			StatusCode:     resp.StatusCode,
+			DurationMs:     duration.Milliseconds(),
+			ConnectionID:   credentials.ConnectionID,
+			ConnectionName: credentials.ConnectionName,
+			Model:          model,
+			RequestID:      requestID,
+			Message:        "Codex Responses API error",
+			Error:          respBodyStr,
+			ResponseBody:   truncateBody(bodyBytes, 8192),
+			BodySize:       len(bodyBytes),
+		})
+		return nil, resp.StatusCode, fmt.Errorf("codex returned %d: %s", resp.StatusCode, respBodyStr)
+	}
+
+	appLogger.AddEntry(domain.LogEntry{
+		Level:          "INFO",
+		Provider:       "CODEX",
+		Direction:      "response",
+		Path:           url,
+		StatusCode:     resp.StatusCode,
+		DurationMs:     duration.Milliseconds(),
+		ConnectionID:   credentials.ConnectionID,
+		ConnectionName: credentials.ConnectionName,
+		Model:          model,
+		RequestID:      requestID,
+		Message:        "Codex Responses API streaming started",
+	})
+
+	// Create a pipe to transform the Codex SSE stream into Chat Completions SSE
+	pr, pw := io.Pipe()
+	go func() {
+		defer pw.Close()
+		state := NewCodexResponseState(model)
+		scanner := bufio.NewScanner(resp.Body)
+		// Increase scanner buffer for large SSE events
+		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+		currentEvent := ""
+
+		for scanner.Scan() {
+			line := scanner.Text()
+
+			if strings.HasPrefix(line, "event: ") {
+				currentEvent = strings.TrimPrefix(line, "event: ")
+				continue
+			}
+
+			if strings.HasPrefix(line, "data: ") {
+				dataStr := strings.TrimPrefix(line, "data: ")
+				if currentEvent != "" {
+					translated := TranslateCodexEvent(currentEvent, []byte(dataStr), state)
+					if translated != "" {
+						pw.Write([]byte(translated))
+					}
+					currentEvent = ""
+				}
+				continue
+			}
+
+			if line == "" {
+				currentEvent = ""
+			}
+		}
+
+		// If stream ended without response.completed, send finish
+		if !state.FinishReasonSent {
+			finishReason := "stop"
+			if state.ToolCallIndex > 0 {
+				finishReason = "tool_calls"
+			}
+			pw.Write([]byte(formatSSEChunk(state, map[string]interface{}{}, &finishReason)))
+			pw.Write([]byte("data: [DONE]\n\n"))
+		}
+
+		resp.Body.Close()
+	}()
+
+	return pr, 200, nil
 }
 
 // bytesReader wraps a byte slice as an io.Reader.
@@ -176,6 +392,14 @@ func maskedToken(token string) string {
 		return "***"
 	}
 	return token[:4] + "***" + token[len(token)-4:]
+}
+
+// truncateBody returns at most maxBytes of body as a readable string.
+func truncateBody(b []byte, maxBytes int) string {
+	if len(b) <= maxBytes {
+		return string(b)
+	}
+	return string(b[:maxBytes]) + fmt.Sprintf("... [truncated %d bytes]", len(b)-maxBytes)
 }
 
 type openAIUsage struct {
@@ -293,4 +517,29 @@ func openAIResponseLevel(status int) string {
 		return "ERROR"
 	}
 	return "INFO"
+}
+
+type openaiStreamSniffer struct {
+	io.ReadCloser
+	bodyBuf []byte
+	onClose func([]byte)
+}
+
+func (s *openaiStreamSniffer) Read(p []byte) (n int, err error) {
+	n, err = s.ReadCloser.Read(p)
+	if n > 0 {
+		// keep up to maxBytes to avoid memory explosion if stream is huge
+		if len(s.bodyBuf) < 100*1024 {
+			s.bodyBuf = append(s.bodyBuf, p[:n]...)
+		}
+	}
+	return n, err
+}
+
+func (s *openaiStreamSniffer) Close() error {
+	err := s.ReadCloser.Close()
+	if s.onClose != nil && len(s.bodyBuf) > 0 {
+		s.onClose(s.bodyBuf)
+	}
+	return err
 }

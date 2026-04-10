@@ -1248,6 +1248,27 @@ func apiCheckQuota(store port.CredentialStore) gin.HandlerFunc {
 				defer qResp.Body.Close()
 				qBodyBytes, _ := io.ReadAll(qResp.Body)
 				fmt.Printf("[Kiro Quota] ProfileArn: %q, StatusCode: %d, Body: %s\n", profileArn, qResp.StatusCode, string(qBodyBytes))
+
+				// Check for error responses (401, 403, etc.)
+				if qResp.StatusCode != 200 {
+					var errData map[string]interface{}
+					if json.Unmarshal(qBodyBytes, &errData) == nil {
+						if msg, ok := errData["message"].(string); ok && msg != "" {
+							result["quotaError"] = msg
+							if reason, ok := errData["reason"].(string); ok && reason != "" {
+								result["quotaErrorReason"] = reason
+							}
+						} else {
+							result["quotaError"] = fmt.Sprintf("HTTP %d: %s", qResp.StatusCode, string(qBodyBytes))
+						}
+					} else {
+						result["quotaError"] = fmt.Sprintf("HTTP %d: Unable to parse error response", qResp.StatusCode)
+					}
+					result["quotaSupported"] = false
+					c.JSON(200, result)
+					return
+				}
+
 				if qResp.StatusCode == 200 {
 					var data map[string]interface{}
 					if json.Unmarshal(qBodyBytes, &data) == nil {

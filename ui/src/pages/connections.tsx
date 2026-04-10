@@ -3,7 +3,7 @@ import { api } from '../api'
 import {
   Plus, Trash2, TestTube, Search, Upload, Shield, Settings2, ExternalLink,
   Loader2, Download, Globe, GitBranch, RefreshCw, Pencil, Check, X, BarChart2,
-  Play, CheckCircle2, XCircle
+  Play, CheckCircle2, XCircle, ChevronDown, ChevronUp
 } from 'lucide-react'
 
 const PROVIDERS = [
@@ -95,6 +95,21 @@ function QuotaPanel({ data, loading }: { data: any; loading: boolean }) {
     )
   }
   if (!data) return null
+
+  // Check for quota errors from backend
+  if (data.quotaError) {
+    return (
+      <div className="space-y-2">
+        <div className="text-xs text-red-400 bg-red-500/10 px-3 py-2 rounded border border-red-500/20">
+          <div className="font-medium mb-1">⚠️ Quota Check Failed</div>
+          <div className="opacity-90">{data.quotaError}</div>
+          {data.quotaErrorReason && (
+            <div className="text-[10px] opacity-70 mt-1">Reason: {data.quotaErrorReason}</div>
+          )}
+        </div>
+      </div>
+    )
+  }
 
   // Build bucket list
   const buckets: QuotaBucket[] = []
@@ -312,6 +327,8 @@ export default function Connections() {
   const [quotaLoading, setQuotaLoading] = useState<Record<string, boolean>>({})
   const [expandedModels, setExpandedModels] = useState<Record<string, boolean>>({})
   const [editModels, setEditModels] = useState<Record<string, string>>({})
+  const [expandedQuota, setExpandedQuota] = useState<Record<string, boolean>>({})
+  const [expandedDetails, setExpandedDetails] = useState<Record<string, boolean>>({})
   const [deviceCode, setDeviceCode] = useState<DeviceCodeState | null>(null)
   const [polling, setPolling] = useState(false)
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -544,6 +561,17 @@ export default function Connections() {
     const id = conn.id
     if (expandedModels[id]) { setExpandedModels(prev => ({ ...prev, [id]: false })) }
     else { setEditModels(prev => ({ ...prev, [id]: (conn.supportedModels || []).join('\n') })); setExpandedModels(prev => ({ ...prev, [id]: true })) }
+  }
+
+  const toggleQuota = (id: string) => {
+    setExpandedQuota(prev => ({ ...prev, [id]: !prev[id] }))
+    if (!expandedQuota[id] && !quotaResult[id]) {
+      handleCheckQuota(id)
+    }
+  }
+
+  const toggleDetails = (id: string) => {
+    setExpandedDetails(prev => ({ ...prev, [id]: !prev[id] }))
   }
 
   const handleFetchModels = async (conn: any) => {
@@ -987,147 +1015,110 @@ export default function Connections() {
               <div key={c.id}
                 className={`bg-[var(--bg-card)] rounded-xl border transition-colors ${!c.isActive ? 'opacity-60 border-[var(--border)]' : isRL ? 'border-amber-500/40' : hasIssue ? 'border-red-500/20' : 'border-[var(--border)]'}`}>
 
-                {/* Main row */}
-                <div className="flex items-start justify-between p-4 gap-3">
-                  <div className="flex items-start gap-3 min-w-0 flex-1">
-                    {/* Toggle switch */}
-                    <button onClick={() => handleToggle(c.id, c.isActive)}
-                      title={c.isActive ? 'Disable' : 'Enable'}
-                      className={`mt-0.5 flex-shrink-0 relative w-9 h-5 rounded-full transition-colors duration-200 ${c.isActive ? 'bg-[var(--accent)]' : 'bg-[var(--border)]'}`}>
-                      <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform duration-200 ${c.isActive ? 'translate-x-4' : 'translate-x-0'}`} />
-                    </button>
-
-                    {/* Status dot */}
-                    <span className={`mt-1.5 w-2 h-2 rounded-full flex-shrink-0 ${statusDot}`} />
-
-                    {/* Info block */}
-                    <div className="min-w-0 flex-1 space-y-1.5">
-                      {/* Name + badges */}
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <InlineName conn={c} onRename={handleRename} />
-                        <span className="text-xs text-[var(--text-muted)] bg-[var(--bg)] px-2 py-0.5 rounded flex items-center gap-1">
-                          <span>{getProviderIcon(c.provider)}</span>{getProviderLabel(c.provider)}
-                        </span>
-                        {(c.providerName || c.authMethod) && (
-                          <span className="text-xs bg-[var(--bg)] text-[var(--text-muted)] px-2 py-0.5 rounded">{c.providerName || c.authMethod}</span>
-                        )}
-                        {c.authType === 'apikey' && (
-                          <span className="text-xs text-amber-400 bg-amber-400/10 px-2 py-0.5 rounded">API Key</span>
-                        )}
-                        {isExpired && (
-                          <span className="text-xs text-red-400 bg-red-400/10 px-2 py-0.5 rounded">Token expired</span>
-                        )}
+                {/* Compact header */}
+                <div className="p-3">
+                  <div className="flex items-center justify-between gap-3 mb-2">
+                    {/* Left: Toggle + Status + Name */}
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                      <button onClick={() => handleToggle(c.id, c.isActive)}
+                        title={c.isActive ? 'Disable' : 'Enable'}
+                        className={`flex-shrink-0 relative w-8 h-4 rounded-full transition-colors duration-200 ${c.isActive ? 'bg-[var(--accent)]' : 'bg-[var(--border)]'}`}>
+                        <span className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white shadow transition-transform duration-200 ${c.isActive ? 'translate-x-4' : 'translate-x-0'}`} />
+                      </button>
+                      <span className={`w-2 h-2 rounded-full flex-shrink-0 ${statusDot}`} />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <InlineName conn={c} onRename={handleRename} />
+                          <span className="text-[10px] text-[var(--text-muted)] bg-[var(--bg)] px-1.5 py-0.5 rounded flex items-center gap-1">
+                            <span>{getProviderIcon(c.provider)}</span>{getProviderLabel(c.provider)}
+                          </span>
+                          {(c.providerName || c.authMethod) && (
+                            <span className="text-[10px] bg-[var(--bg)] text-[var(--text-muted)] px-1.5 py-0.5 rounded">{c.providerName || c.authMethod}</span>
+                          )}
+                        </div>
+                        {c.email && <div className="text-[11px] text-[var(--text-muted)] truncate">{c.email}</div>}
                       </div>
+                    </div>
 
-                      {/* Sub info */}
-                      {(c.email || c.baseUrl) && (
-                        <div className="text-xs text-[var(--text-muted)]">
-                          {c.email && <span>{c.email}</span>}
-                          {c.baseUrl && <span className="font-mono ml-2">{c.baseUrl}</span>}
-                        </div>
-                      )}
-
-                      {/* Token expiry bar — always visible */}
-                      <TokenBar conn={c} />
-
-                      {/* Status row — rate limit, backoff, errors */}
-                      <StatusRow conn={c} />
-
-                      {/* Reset cooldown inline */}
-                      {(isRL || c.backoffLevel > 0) && (
-                        <button onClick={() => handleResetCooldown(c.id)}
-                          className="flex items-center gap-1 text-xs text-amber-400 hover:text-amber-300 transition-colors">
-                          <RefreshCw size={11} /> Reset cooldown
-                        </button>
-                      )}
-
-                      {/* Test result */}
-                      {testResult[c.id] && (
-                        <div className={`text-xs px-2 py-1 rounded ${testResult[c.id].status === 'ok' ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}`}>
-                          {testResult[c.id].loading ? 'Testing…' : testResult[c.id].status === 'ok'
-                            ? `✓ OK${testResult[c.id].email ? ` (${testResult[c.id].email})` : ''}`
-                            : `✗ ${testResult[c.id].message}`}
-                        </div>
-                      )}
-
-                      {/* Model chips with test status */}
-                      {c.supportedModels?.length > 0 && !expandedModels[c.id] && (
-                        <div className="space-y-1.5">
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs text-[var(--text-muted)]">Models ({c.supportedModels.length})</span>
-                            <button
-                              onClick={() => handleTestAllModels(c.id, c.supportedModels)}
-                              className="flex items-center gap-1 text-xs text-[var(--accent)] hover:text-[var(--accent-hover)] transition-colors"
-                              title="Test all models"
-                            >
-                              <Play size={10} /> Test All
-                            </button>
-                          </div>
-                          <div className="flex flex-wrap gap-1.5">
-                            {c.supportedModels.map((m: string, i: number) => {
-                              const testResult = modelTestResults[c.id]?.[m]
-                              return (
-                                <div key={i} className="group/model relative inline-flex items-center gap-1">
-                                  <span
-                                    className={`text-xs font-mono px-1.5 py-0.5 rounded cursor-default ${
-                                      testResult?.status === 'ok' ? 'bg-green-500/10 text-green-400 border border-green-500/20'
-                                      : testResult?.status === 'error' ? 'bg-red-500/10 text-red-400 border border-red-500/20'
-                                      : 'bg-[var(--accent)]/10 text-[var(--accent)]'
-                                    }`}
-                                    title={testResult?.message || m}
-                                  >
-                                    {testResult?.status === 'ok' && <CheckCircle2 size={10} className="inline mr-0.5 -mt-px" />}
-                                    {testResult?.status === 'error' && <XCircle size={10} className="inline mr-0.5 -mt-px" />}
-                                    {m}
-                                  </span>
-                                  <button
-                                    onClick={(e) => { e.stopPropagation(); handleTestModel(c.id, m) }}
-                                    disabled={testResult?.status === 'loading'}
-                                    className="opacity-0 group-hover/model:opacity-100 absolute -top-1 -right-1 p-0.5 bg-[var(--bg-card)] border border-[var(--border)] rounded-full transition-opacity"
-                                    title={`Test ${m}`}
-                                  >
-                                    {testResult?.status === 'loading'
-                                      ? <Loader2 size={9} className="animate-spin text-[var(--accent)]" />
-                                      : <Play size={9} className="text-[var(--accent)]" />
-                                    }
-                                  </button>
-                                </div>
-                              )
-                            })}
-                          </div>
-                        </div>
-                      )}
+                    {/* Right: Action menu */}
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      <button onClick={() => handleTest(c.id)} className="p-1 hover:bg-[var(--bg-hover)] rounded transition-colors" title="Test">
+                        <TestTube size={13} className="text-[var(--text-muted)]" />
+                      </button>
+                      <button onClick={() => toggleQuota(c.id)} className={`p-1 hover:bg-[var(--bg-hover)] rounded transition-colors ${expandedQuota[c.id] ? 'bg-[var(--accent)]/10' : ''}`} title="Quota">
+                        <BarChart2 size={13} className={expandedQuota[c.id] ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'} />
+                      </button>
+                      <button onClick={() => toggleModelEdit(c)} className={`p-1 hover:bg-[var(--bg-hover)] rounded transition-colors ${expandedModels[c.id] ? 'bg-[var(--accent)]/10' : ''}`} title="Models">
+                        <Settings2 size={13} className={expandedModels[c.id] || c.supportedModels?.length > 0 ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'} />
+                      </button>
+                      <button onClick={() => toggleDetails(c.id)} className={`p-1 hover:bg-[var(--bg-hover)] rounded transition-colors ${expandedDetails[c.id] ? 'bg-[var(--accent)]/10' : ''}`} title="Details">
+                        <Settings2 size={13} className={expandedDetails[c.id] ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'} />
+                      </button>
+                      <button onClick={() => handleDelete(c.id)} className="p-1 hover:bg-[var(--bg-hover)] rounded transition-colors" title="Delete">
+                        <Trash2 size={13} className="text-[var(--danger)]" />
+                      </button>
                     </div>
                   </div>
 
-                  {/* Action buttons */}
-                  <div className="flex items-center gap-0.5 flex-shrink-0">
-                    {(c.provider === 'openai' || c.provider === 'openai-compatible') && (
-                      <button onClick={() => handleFetchModels(c)} disabled={fetchingModels[c.id]}
-                        className="p-1.5 hover:bg-[var(--bg-hover)] rounded-lg transition-colors" title="Fetch Models from API">
-                        {fetchingModels[c.id] ? <Loader2 size={14} className="animate-spin text-[var(--accent)]" /> : <Download size={14} className="text-[var(--text-muted)]" />}
-                      </button>
+                  {/* Compact status line */}
+                  <div className="flex items-center gap-3 text-[11px] text-[var(--text-muted)] flex-wrap">
+                    {c.isActive && (
+                      <>
+                        {/* Token status inline */}
+                        {c.expiresAt ? (
+                          <span className={isExpired ? 'text-red-400' : ''}>
+                            Token: {isExpired ? 'expired' : secsToHuman(Math.ceil((new Date(c.expiresAt).getTime() - Date.now()) / 1000))}
+                          </span>
+                        ) : c.hasApiKey ? (
+                          <span className="text-[var(--success)]">API Key</span>
+                        ) : null}
+
+                        {/* Models count */}
+                        {c.supportedModels?.length > 0 && (
+                          <span>{c.supportedModels.length} model{c.supportedModels.length > 1 ? 's' : ''}</span>
+                        )}
+
+                        {/* Rate limit */}
+                        {isRL && (
+                          <span className="text-amber-400">⏱ Rate limit: {secsToHuman(Math.ceil((new Date(c.rateLimitedUntil).getTime() - Date.now()) / 1000))}</span>
+                        )}
+
+                        {/* Backoff */}
+                        {c.backoffLevel > 0 && (
+                          <span className="text-orange-400">Backoff: {c.backoffLevel}/7</span>
+                        )}
+
+                        {/* Model locks */}
+                        {(() => {
+                          const lockCount = c.modelLocks ? Object.values(c.modelLocks).filter((e: any) => new Date(e) > new Date()).length : 0
+                          return lockCount > 0 ? <span className="text-orange-400">🔒 {lockCount} locked</span> : null
+                        })()}
+
+                        {/* Reset cooldown */}
+                        {(isRL || c.backoffLevel > 0) && (
+                          <button onClick={() => handleResetCooldown(c.id)} className="text-amber-400 hover:text-amber-300 underline">
+                            Reset
+                          </button>
+                        )}
+                      </>
                     )}
-                    <button
-                      onClick={() => handleCheckQuota(c.id)}
-                      disabled={quotaLoading[c.id]}
-                      className={`p-1.5 hover:bg-[var(--bg-hover)] rounded-lg transition-colors ${quotaResult[c.id] ? 'bg-[var(--accent)]/10' : ''}`}
-                      title="Check Quota"
-                    >
-                      {quotaLoading[c.id]
-                        ? <Loader2 size={14} className="animate-spin text-[var(--accent)]" />
-                        : <BarChart2 size={14} className={quotaResult[c.id] ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'} />}
-                    </button>
-                    <button onClick={() => toggleModelEdit(c)} className="p-1.5 hover:bg-[var(--bg-hover)] rounded-lg transition-colors" title="Allowed Models">
-                      <Settings2 size={14} className={c.supportedModels?.length > 0 ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'} />
-                    </button>
-                    <button onClick={() => handleTest(c.id)} className="p-1.5 hover:bg-[var(--bg-hover)] rounded-lg transition-colors" title="Test Connection">
-                      <TestTube size={14} className="text-[var(--text-muted)]" />
-                    </button>
-                    <button onClick={() => handleDelete(c.id)} className="p-1.5 hover:bg-[var(--bg-hover)] rounded-lg transition-colors" title="Remove">
-                      <Trash2 size={14} className="text-[var(--danger)]" />
-                    </button>
                   </div>
+
+                  {/* Test result */}
+                  {testResult[c.id] && (
+                    <div className={`mt-2 text-[11px] px-2 py-1 rounded ${testResult[c.id].status === 'ok' ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}`}>
+                      {testResult[c.id].loading ? 'Testing…' : testResult[c.id].status === 'ok'
+                        ? `✓ OK${testResult[c.id].email ? ` (${testResult[c.id].email})` : ''}`
+                        : `✗ ${testResult[c.id].message}`}
+                    </div>
+                  )}
+
+                  {/* Last error */}
+                  {c.lastError && (
+                    <div className="mt-2 text-[11px] text-red-400 truncate" title={c.lastError}>
+                      ✗ {c.lastError}
+                    </div>
+                  )}
                 </div>
 
                 {/* Quota panel */}
@@ -1170,6 +1161,96 @@ export default function Connections() {
                       <button onClick={() => setExpandedModels(prev => ({ ...prev, [c.id]: false }))}
                         className="px-3 py-1 bg-[var(--bg)] hover:bg-[var(--bg-hover)] rounded-lg text-xs text-[var(--text-muted)]">Cancel</button>
                     </div>
+                  </div>
+                )}
+
+                {/* Quota panel - collapsible */}
+                {expandedQuota[c.id] && (
+                  <div className="border-t border-[var(--border)] px-3 py-2">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-1.5">
+                        <BarChart2 size={12} className="text-[var(--text-muted)]" />
+                        <span className="text-xs font-medium text-[var(--text-muted)]">Quota</span>
+                      </div>
+                      <button onClick={() => handleCheckQuota(c.id)} disabled={quotaLoading[c.id]} className="text-[10px] text-[var(--accent)] hover:underline">
+                        {quotaLoading[c.id] ? 'Refreshing…' : 'Refresh'}
+                      </button>
+                    </div>
+                    {quotaResult[c.id]?.error ? (
+                      <p className="text-xs text-red-400">✗ {quotaResult[c.id].error}</p>
+                    ) : (
+                      <QuotaPanel data={quotaResult[c.id]} loading={quotaLoading[c.id]} />
+                    )}
+                  </div>
+                )}
+
+                {/* Details panel - collapsible */}
+                {expandedDetails[c.id] && (
+                  <div className="border-t border-[var(--border)] px-3 py-2 space-y-2">
+                    <div className="text-xs font-medium text-[var(--text-muted)] mb-1">Details</div>
+                    
+                    {/* Token expiry bar */}
+                    {c.expiresAt && <TokenBar conn={c} />}
+
+                    {/* Model list with test */}
+                    {c.supportedModels?.length > 0 && (
+                      <div className="space-y-1.5">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-[var(--text-muted)]">Models ({c.supportedModels.length})</span>
+                          <button
+                            onClick={() => handleTestAllModels(c.id, c.supportedModels)}
+                            className="flex items-center gap-1 text-[10px] text-[var(--accent)] hover:text-[var(--accent-hover)] transition-colors"
+                            title="Test all models"
+                          >
+                            <Play size={10} /> Test All
+                          </button>
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          {c.supportedModels.slice(0, 10).map((m: string, i: number) => {
+                            const testResult = modelTestResults[c.id]?.[m]
+                            return (
+                              <div key={i} className="group/model relative inline-flex items-center gap-1">
+                                <span
+                                  className={`text-[10px] font-mono px-1.5 py-0.5 rounded cursor-default ${
+                                    testResult?.status === 'ok' ? 'bg-green-500/10 text-green-400 border border-green-500/20'
+                                    : testResult?.status === 'error' ? 'bg-red-500/10 text-red-400 border border-red-500/20'
+                                    : 'bg-[var(--accent)]/10 text-[var(--accent)]'
+                                  }`}
+                                  title={testResult?.message || m}
+                                >
+                                  {testResult?.status === 'ok' && <CheckCircle2 size={9} className="inline mr-0.5 -mt-px" />}
+                                  {testResult?.status === 'error' && <XCircle size={9} className="inline mr-0.5 -mt-px" />}
+                                  {m}
+                                </span>
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); handleTestModel(c.id, m) }}
+                                  disabled={testResult?.status === 'loading'}
+                                  className="opacity-0 group-hover/model:opacity-100 absolute -top-1 -right-1 p-0.5 bg-[var(--bg-card)] border border-[var(--border)] rounded-full transition-opacity"
+                                  title={`Test ${m}`}
+                                >
+                                  {testResult?.status === 'loading'
+                                    ? <Loader2 size={8} className="animate-spin text-[var(--accent)]" />
+                                    : <Play size={8} className="text-[var(--accent)]" />
+                                  }
+                                </button>
+                              </div>
+                            )
+                          })}
+                          {c.supportedModels.length > 10 && (
+                            <span className="text-[10px] text-[var(--text-muted)] px-1.5 py-0.5">
+                              +{c.supportedModels.length - 10} more
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Additional info */}
+                    {c.baseUrl && (
+                      <div className="text-[11px] text-[var(--text-muted)]">
+                        <span className="opacity-60">Base URL:</span> <span className="font-mono">{c.baseUrl}</span>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

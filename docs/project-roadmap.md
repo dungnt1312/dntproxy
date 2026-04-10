@@ -1,29 +1,30 @@
 # Project Roadmap
 
-This roadmap captures the progress and future plans for `dntproxy`. 
+This roadmap captures the progress and next milestones for `dntproxy`.
 
-## Phase 1: Core Proxy Engine (✅ Completed)
-- [x] Configure Gin framework standard routing.
-- [x] Build AWS Kiro Executor & Custom Binary EventStream Parser.
-- [x] Establish OpenAI ↔ Kiro translation models.
-- [x] Implement JSON file DB system with `flock`.
-- [x] Add combo feature for round-robin & automatic fallback support.
-- [x] Model aliases layer.
+## Phase 1: Core Proxy Engine (Completed)
+- [x] Configure Gin routing.
+- [x] Build Kiro executor and EventStream parser.
+- [x] Implement OpenAI to Kiro request/response translation.
+- [x] Add JSON DB storage with file locking.
+- [x] Add combo handling (fallback and round-robin).
+- [x] Add model aliases.
 
-## Phase 2: Authentication Flows (✅ Completed)
-- [x] AWS Builder ID OAuth device code flow.
-- [x] AWS IAM Identity Center (IDC).
-- [x] GitHub & Google Social OAuth Integration mapping (PKCE flows).
-- [x] Provide import mechanism for raw manual tokens.
-- [x] Auto-refresh handler to manage decaying access tokens.
+## Phase 2: Authentication Flows (Completed)
+- [x] AWS Builder ID device flow.
+- [x] AWS IAM Identity Center flow.
+- [x] Google/GitHub social login with PKCE.
+- [x] Manual token import.
+- [x] Auto-refresh access tokens.
 
-## Phase 3: Developer Utilities, UI & Admin CLI (✅ Completed)
-- [x] Comprehensive Cobra-based CLI Commands for interactive proxy manipulation (`auth`, `combo`, `alias`, `key`).
-- [x] Standup React User Interface to configure the application states via a simple Web GUI (`ui/`).
+## Phase 3: CLI and UI (Completed)
+- [x] CLI commands for `auth`, `combo`, `alias`, `key`.
+- [x] React UI for configuration and management.
 
-## Phase 4: Polish & Telemetry (🚧 In Progress)
-- [ ] **Request Logging**: Implement detailed logging output mechanisms for HTTP audits.
-- [ ] **Graceful Shutdown**: Listen for SIGTERM / SIGINT and handle open persistent SSE connections gracefully.
-- [ ] **Cross-Platform Delivery**: Enhance build configuration using Makefiles.
-- [ ] **Dockerization**: Provide an official `Dockerfile` and `docker-compose.yml` pattern.
-- [ ] **Metrics Validation**: Surface usage token calculation metrics correctly down the pipeline natively.
+## Phase 4: Polish and Delivery (In Progress)
+- [ ] Request logging for HTTP audits.
+- [ ] Graceful shutdown for SIGTERM/SIGINT and active SSE connections.
+- [x] Cross-platform install scripts for release binaries (`install.sh`, `install.ps1`).
+- [ ] Cross-platform build packaging automation (CI/Makefile/Goreleaser).
+- [ ] Official Docker image and compose setup.
+- [ ] Usage metrics validation across the pipeline.

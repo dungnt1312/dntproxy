@@ -18,7 +18,6 @@ import (
 	"github.com/dungnt/dntproxy/internal/adapter/kiro"
 	openai "github.com/dungnt/dntproxy/internal/adapter/openai"
 	"github.com/dungnt/dntproxy/internal/domain"
-	"github.com/dungnt/dntproxy/internal/logger"
 	"github.com/dungnt/dntproxy/internal/port"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -59,6 +58,12 @@ func RegisterAPIRoutes(r *gin.Engine, store port.CredentialStore) {
 		api.POST("/keys", apiCreateKey(store))
 		api.DELETE("/keys/:id", apiDeleteKey(store))
 
+		// Model registry management
+		api.GET("/models/registry", apiGetModelRegistry(store))
+		api.POST("/models/registry", apiAddModelDefinition(store))
+		api.PUT("/models/registry/:key", apiUpdateModelDefinition(store))
+		api.DELETE("/models/registry/:key", apiDeleteModelDefinition(store))
+
 		// Settings
 		api.GET("/settings", apiGetSettings(store))
 		api.PUT("/settings", apiUpdateSettings(store))
@@ -68,8 +73,14 @@ func RegisterAPIRoutes(r *gin.Engine, store port.CredentialStore) {
 
 		// Logs
 		api.GET("/logs", apiGetLogs)
+		api.GET("/logs/summary", apiGetLogSummary)
+		api.GET("/logs/connections", apiGetLogConnections)
+		api.GET("/logs/prices", apiGetLogPrices)
 		api.GET("/logs/stream", apiLogStream)
 		api.POST("/logs/clear", apiClearLogs)
+
+		// Usage/Quota
+		api.GET("/usage/:connectionId", apiGetUsage(store))
 
 		// Backup
 		api.GET("/backup/export", apiExportBackup(store))
@@ -206,18 +217,19 @@ func apiImportConnection(store port.CredentialStore) gin.HandlerFunc {
 		}
 
 		conn := domain.ProviderConnection{
-			ID:           uuid.New().String(),
-			Provider:     "kiro",
-			AuthType:     "oauth",
-			Name:         name,
-			Priority:     len(cfg.ProviderConnections) + 1,
-			IsActive:     true,
-			AccessToken:  result.AccessToken,
-			RefreshToken: result.RefreshToken,
-			ExpiresAt:    time.Now().Add(time.Duration(expiresIn) * time.Second).UTC().Format(time.RFC3339),
-			ExpiresIn:    expiresIn,
-			Email:        email,
-			TestStatus:   "active",
+			ID:              uuid.New().String(),
+			Provider:        "kiro",
+			AuthType:        "oauth",
+			Name:            name,
+			Priority:        len(cfg.ProviderConnections) + 1,
+			IsActive:        true,
+			AccessToken:     result.AccessToken,
+			RefreshToken:    result.RefreshToken,
+			ExpiresAt:       time.Now().Add(time.Duration(expiresIn) * time.Second).UTC().Format(time.RFC3339),
+			ExpiresIn:       expiresIn,
+			Email:           email,
+			TestStatus:      "active",
+			SupportedModels: domain.DefaultKiroModels(),
 			ProviderSpecificData: map[string]interface{}{
 				"profileArn": result.ProfileArn,
 				"authMethod": result.AuthMethod,
@@ -401,8 +413,8 @@ func apiCreateCombo(store port.CredentialStore) gin.HandlerFunc {
 			c.JSON(400, gin.H{"error": "name required"})
 			return
 		}
-		if len(req.Models) == 0 && len(req.ConnectionIDs) == 0 {
-			c.JSON(400, gin.H{"error": "at least one model or connection required"})
+		if len(req.Models) == 0 {
+			c.JSON(400, gin.H{"error": "at least one model required"})
 			return
 		}
 
@@ -505,6 +517,10 @@ func apiUpdateCombo(store port.CredentialStore) gin.HandlerFunc {
 			combo.Name = *req.Name
 		}
 		if req.SetModels {
+			if len(req.Models) == 0 {
+				c.JSON(400, gin.H{"error": "combo models cannot be empty"})
+				return
+			}
 			combo.Models = req.Models
 		}
 		if req.SetConnections {
@@ -600,7 +616,6 @@ func apiListKeys(store port.CredentialStore) gin.HandlerFunc {
 			ID        string `json:"id"`
 			Name      string `json:"name"`
 			KeyMasked string `json:"keyMasked"`
-			Key       string `json:"key"`
 			IsActive  bool   `json:"isActive"`
 			CreatedAt string `json:"createdAt"`
 		}
@@ -615,7 +630,6 @@ func apiListKeys(store port.CredentialStore) gin.HandlerFunc {
 				ID:        k.ID,
 				Name:      k.Name,
 				KeyMasked: masked,
-				Key:       k.Key,
 				IsActive:  k.IsActive,
 				CreatedAt: k.CreatedAt,
 			})
@@ -731,31 +745,117 @@ func apiUpdateSettings(store port.CredentialStore) gin.HandlerFunc {
 
 func apiListModels(store port.CredentialStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		allModels := []gin.H{
-			// Kiro models
-			{"id": "kr/claude-sonnet-4.5", "name": "Claude Sonnet 4.5", "provider": "kiro"},
-			{"id": "kr/claude-haiku-4.5", "name": "Claude Haiku 4.5", "provider": "kiro"},
-			{"id": "kr/deepseek-3.2", "name": "DeepSeek 3.2", "provider": "kiro"},
-			{"id": "kr/deepseek-3.1", "name": "DeepSeek 3.1", "provider": "kiro"},
-			{"id": "kr/qwen3-coder-next", "name": "Qwen3 Coder Next", "provider": "kiro"},
-			// OpenAI models
-			{"id": "oai/gpt-4.1", "name": "GPT-4.1", "provider": "openai"},
-			{"id": "oai/gpt-4.1-mini", "name": "GPT-4.1 Mini", "provider": "openai"},
-			{"id": "oai/gpt-4.1-nano", "name": "GPT-4.1 Nano", "provider": "openai"},
-			{"id": "oai/gpt-4o", "name": "GPT-4o", "provider": "openai"},
-			{"id": "oai/gpt-4o-mini", "name": "GPT-4o Mini", "provider": "openai"},
-			{"id": "oai/o3", "name": "o3", "provider": "openai"},
-			{"id": "oai/o3-mini", "name": "o3-mini", "provider": "openai"},
-			{"id": "oai/o4-mini", "name": "o4-mini", "provider": "openai"},
+		providerFilter := c.Query("provider")
+		var allModels []gin.H
+
+		cfg, err := store.Load()
+		if err != nil {
+			c.JSON(500, gin.H{"error": "Failed to load config"})
+			return
 		}
 
-		cfg, _ := store.Load()
 		if cfg != nil {
-			for alias, model := range cfg.ModelAliases {
-				allModels = append(allModels, gin.H{"id": alias, "name": alias + " → " + model, "provider": "alias"})
+			seen := make(map[string]bool)
+
+			// Build from active connections' SupportedModels
+			for _, conn := range cfg.ProviderConnections {
+				if !conn.IsActive {
+					continue
+				}
+				if providerFilter != "" && conn.Provider != providerFilter {
+					continue
+				}
+
+				if len(conn.SupportedModels) == 0 {
+					// No restriction — add all registry models for this provider
+					if cfg.ModelRegistry != nil {
+						for key, m := range cfg.ModelRegistry.Models {
+							if m.Provider == conn.Provider && m.IsActive && !seen[key] {
+								seen[key] = true
+								allModels = append(allModels, gin.H{
+									"id":              key,
+									"name":            m.Name,
+									"provider":        m.Provider,
+									"contextWindow":   m.ContextWindow,
+									"maxOutputTokens": m.MaxOutputTokens,
+									"inputPrice":      m.InputPrice,
+									"outputPrice":     m.OutputPrice,
+									"capabilities":    m.Capabilities,
+								})
+							}
+						}
+					}
+				} else {
+					for _, modelID := range conn.SupportedModels {
+						key := conn.Provider + "/" + modelID
+						if seen[key] {
+							continue
+						}
+						seen[key] = true
+						entry := gin.H{
+							"id":       key,
+							"name":     modelID,
+							"provider": conn.Provider,
+						}
+						// Enrich with registry metadata if available
+						if cfg.ModelRegistry != nil {
+							if m := cfg.ModelRegistry.GetModel(key); m != nil {
+								entry["name"] = m.Name
+								entry["contextWindow"] = m.ContextWindow
+								entry["maxOutputTokens"] = m.MaxOutputTokens
+								entry["inputPrice"] = m.InputPrice
+								entry["outputPrice"] = m.OutputPrice
+								entry["capabilities"] = m.Capabilities
+							}
+						}
+						allModels = append(allModels, entry)
+					}
+				}
 			}
+
+			// Fallback: no connections → show full registry
+			if len(cfg.ProviderConnections) == 0 && cfg.ModelRegistry != nil {
+				for key, m := range cfg.ModelRegistry.Models {
+					if !m.IsActive {
+						continue
+					}
+					if providerFilter != "" && m.Provider != providerFilter {
+						continue
+					}
+					if !seen[key] {
+						seen[key] = true
+						allModels = append(allModels, gin.H{
+							"id":              key,
+							"name":            m.Name,
+							"provider":        m.Provider,
+							"contextWindow":   m.ContextWindow,
+							"maxOutputTokens": m.MaxOutputTokens,
+							"inputPrice":      m.InputPrice,
+							"outputPrice":     m.OutputPrice,
+							"capabilities":    m.Capabilities,
+						})
+					}
+				}
+			}
+
+			// Add aliases
+			for alias, model := range cfg.ModelAliases {
+				allModels = append(allModels, gin.H{
+					"id":       alias,
+					"name":     alias + " → " + model,
+					"provider": "alias",
+					"target":   model,
+				})
+			}
+
+			// Add combos
 			for _, combo := range cfg.Combos {
-				allModels = append(allModels, gin.H{"id": combo.Name, "name": combo.Name, "provider": "combo", "models": combo.Models})
+				allModels = append(allModels, gin.H{
+					"id":       combo.Name,
+					"name":     combo.Name,
+					"provider": "combo",
+					"models":   combo.Models,
+				})
 			}
 		}
 
@@ -1103,7 +1203,7 @@ func apiTestModel(store port.CredentialStore) gin.HandlerFunc {
 			return
 		}
 
-		stream, statusCode, execErr := executor.Execute(req.Model, bodyBytes, creds)
+		stream, statusCode, execErr := executor.Execute(req.Model, bodyBytes, creds, uuid.New().String())
 		if stream != nil {
 			stream.Close()
 		}
@@ -1392,7 +1492,7 @@ func apiCheckQuota(store port.CredentialStore) gin.HandlerFunc {
 
 			// Try to refresh if expired
 			if expired, ok := result["expired"].(bool); ok && expired && conn.RefreshToken != "" {
-				updatedConn, refErr := auth.RefreshOpenAIToken(conn, store)
+				updatedConn, refErr := refreshOpenAIConnection(conn, store)
 				if refErr == nil {
 					conn = updatedConn
 					result["expired"] = false
@@ -1437,7 +1537,7 @@ func apiCheckQuota(store port.CredentialStore) gin.HandlerFunc {
 
 		if (resp.StatusCode == 401 || resp.StatusCode == 403) && conn.Provider == "openai" && conn.RefreshToken != "" {
 			resp.Body.Close() // close failed response
-			updatedConn, refErr := auth.RefreshOpenAIToken(conn, store)
+			updatedConn, refErr := refreshOpenAIConnection(conn, store)
 			if refErr == nil {
 				conn = updatedConn
 				req, _ = http.NewRequest("GET", baseURL+"/v1/models", nil)
@@ -1504,55 +1604,6 @@ func apiCheckQuota(store port.CredentialStore) gin.HandlerFunc {
 
 		c.JSON(200, result)
 	}
-}
-
-// === Logs ===
-
-func apiGetLogs(c *gin.Context) {
-	appLogger := logger.Get()
-	logs := appLogger.GetAll()
-	c.JSON(200, logs)
-}
-
-func apiLogStream(c *gin.Context) {
-	c.Header("Content-Type", "text/event-stream")
-	c.Header("Cache-Control", "no-cache")
-	c.Header("Connection", "keep-alive")
-
-	appLogger := logger.Get()
-	ch := appLogger.Subscribe()
-	defer appLogger.Unsubscribe(ch)
-
-	logs := appLogger.GetAll()
-	data, _ := json.Marshal(logs)
-	c.Writer.Write([]byte("data: " + string(data) + "\n\n"))
-	c.Writer.Flush()
-
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-
-	clientGone := c.Request.Context().Done()
-
-	for {
-		select {
-		case <-clientGone:
-			return
-		case logs := <-ch:
-			data, _ := json.Marshal(logs)
-			c.Writer.Write([]byte("data: " + string(data) + "\n\n"))
-			c.Writer.Flush()
-		case <-ticker.C:
-			c.Writer.Write([]byte(": keepalive\n\n"))
-			c.Writer.Flush()
-		}
-	}
-}
-
-func apiClearLogs(c *gin.Context) {
-	appLogger := logger.Get()
-	appLogger.Clear()
-	log.Printf("[LOG] Logs cleared by admin")
-	c.JSON(200, gin.H{"ok": true})
 }
 
 // === Backup ===
@@ -1941,5 +1992,153 @@ func apiImportBackup(store port.CredentialStore) gin.HandlerFunc {
 			"skipped":  skipped,
 			"mode":     req.Mode,
 		})
+	}
+}
+
+// === Usage/Quota ===
+
+func apiGetUsage(store port.CredentialStore) gin.HandlerFunc {
+	handler := NewUsageHandler(store)
+	return handler.GetUsage
+}
+
+// === Model Registry Management ===
+
+func apiGetModelRegistry(store port.CredentialStore) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		cfg, err := store.Load()
+		if err != nil {
+			c.JSON(500, gin.H{"error": "Failed to load config"})
+			return
+		}
+
+		if cfg.ModelRegistry == nil {
+			cfg.ModelRegistry = domain.DefaultModelRegistry()
+		}
+
+		c.JSON(200, cfg.ModelRegistry)
+	}
+}
+
+func apiAddModelDefinition(store port.CredentialStore) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req struct {
+			Key   string                 `json:"key"` // e.g. "kiro/my-model"
+			Model domain.ModelDefinition `json:"model"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(400, gin.H{"error": "Invalid request: " + err.Error()})
+			return
+		}
+
+		if req.Key == "" {
+			c.JSON(400, gin.H{"error": "Key is required"})
+			return
+		}
+
+		cfg, err := store.Load()
+		if err != nil {
+			c.JSON(500, gin.H{"error": "Failed to load config"})
+			return
+		}
+
+		if cfg.ModelRegistry == nil {
+			cfg.ModelRegistry = domain.DefaultModelRegistry()
+		}
+
+		// Check if model already exists
+		if cfg.ModelRegistry.GetModel(req.Key) != nil {
+			c.JSON(400, gin.H{"error": "Model already exists"})
+			return
+		}
+
+		cfg.ModelRegistry.AddOrUpdateModel(req.Key, &req.Model)
+
+		if err := store.Save(cfg); err != nil {
+			c.JSON(500, gin.H{"error": "Failed to save: " + err.Error()})
+			return
+		}
+
+		log.Printf("[MODEL] Added model definition: %s", req.Key)
+		c.JSON(200, gin.H{"ok": true, "key": req.Key})
+	}
+}
+
+func apiUpdateModelDefinition(store port.CredentialStore) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		key := c.Param("key")
+		if key == "" {
+			c.JSON(400, gin.H{"error": "Key is required"})
+			return
+		}
+
+		var model domain.ModelDefinition
+		if err := c.ShouldBindJSON(&model); err != nil {
+			c.JSON(400, gin.H{"error": "Invalid request: " + err.Error()})
+			return
+		}
+
+		cfg, err := store.Load()
+		if err != nil {
+			c.JSON(500, gin.H{"error": "Failed to load config"})
+			return
+		}
+
+		if cfg.ModelRegistry == nil {
+			cfg.ModelRegistry = domain.DefaultModelRegistry()
+		}
+
+		// Check if model exists
+		if cfg.ModelRegistry.GetModel(key) == nil {
+			c.JSON(404, gin.H{"error": "Model not found"})
+			return
+		}
+
+		cfg.ModelRegistry.AddOrUpdateModel(key, &model)
+
+		if err := store.Save(cfg); err != nil {
+			c.JSON(500, gin.H{"error": "Failed to save: " + err.Error()})
+			return
+		}
+
+		log.Printf("[MODEL] Updated model definition: %s", key)
+		c.JSON(200, gin.H{"ok": true, "key": key})
+	}
+}
+
+func apiDeleteModelDefinition(store port.CredentialStore) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		key := c.Param("key")
+		if key == "" {
+			c.JSON(400, gin.H{"error": "Key is required"})
+			return
+		}
+
+		cfg, err := store.Load()
+		if err != nil {
+			c.JSON(500, gin.H{"error": "Failed to load config"})
+			return
+		}
+
+		if cfg.ModelRegistry == nil {
+			c.JSON(404, gin.H{"error": "Model registry not found"})
+			return
+		}
+
+		// Check if model exists
+		if cfg.ModelRegistry.GetModel(key) == nil {
+			c.JSON(404, gin.H{"error": "Model not found"})
+			return
+		}
+
+		cfg.ModelRegistry.RemoveModel(key)
+
+		if err := store.Save(cfg); err != nil {
+			c.JSON(500, gin.H{"error": "Failed to save: " + err.Error()})
+			return
+		}
+
+		log.Printf("[MODEL] Deleted model definition: %s", key)
+		c.JSON(200, gin.H{"ok": true, "key": key})
 	}
 }

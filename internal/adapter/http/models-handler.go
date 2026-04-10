@@ -19,41 +19,66 @@ func modelsHandler(store port.CredentialStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var models []modelObject
 
-		// Add Kiro models
-		kiroModels := []string{
-			"claude-sonnet-4.5",
-			"claude-haiku-4.5",
-			"deepseek-3.2",
-			"deepseek-3.1",
-			"qwen3-coder-next",
-		}
-		for _, m := range kiroModels {
-			models = append(models, modelObject{
-				ID:      "kr/" + m,
-				Object:  "model",
-				Created: 1700000000,
-				OwnedBy: "kiro",
-			})
-		}
+		cfg, err := store.Load()
+		if err == nil && cfg != nil {
+			seen := make(map[string]bool)
 
-		// Add OpenAI models
-		openaiModels := []string{
-			"gpt-4.1",
-			"gpt-4.1-mini",
-			"gpt-4.1-nano",
-			"gpt-4o",
-			"gpt-4o-mini",
-			"o3",
-			"o3-mini",
-			"o4-mini",
-		}
-		for _, m := range openaiModels {
-			models = append(models, modelObject{
-				ID:      "oai/" + m,
-				Object:  "model",
-				Created: 1700000000,
-				OwnedBy: "openai",
-			})
+			activeConns := make([]interface{ GetProvider() string }, 0)
+			_ = activeConns
+
+			// Collect model IDs from active connections' SupportedModels
+			// Key: "provider/modelID" — same format as registry
+			for _, conn := range cfg.ProviderConnections {
+				if !conn.IsActive {
+					continue
+				}
+				if len(conn.SupportedModels) == 0 {
+					// No restriction — add all registry models for this provider
+					if cfg.ModelRegistry != nil {
+						for key, m := range cfg.ModelRegistry.Models {
+							if m.Provider == conn.Provider && m.IsActive && !seen[key] {
+								seen[key] = true
+								models = append(models, modelObject{
+									ID:      key,
+									Object:  "model",
+									Created: 1700000000,
+									OwnedBy: m.Provider,
+								})
+							}
+						}
+					}
+				} else {
+					for _, modelID := range conn.SupportedModels {
+						key := conn.Provider + "/" + modelID
+						if seen[key] {
+							continue
+						}
+						seen[key] = true
+						ownedBy := conn.Provider
+						models = append(models, modelObject{
+							ID:      key,
+							Object:  "model",
+							Created: 1700000000,
+							OwnedBy: ownedBy,
+						})
+					}
+				}
+			}
+
+			// If no connections at all, fall back to full registry
+			if len(cfg.ProviderConnections) == 0 && cfg.ModelRegistry != nil {
+				for key, m := range cfg.ModelRegistry.Models {
+					if m.IsActive && !seen[key] {
+						seen[key] = true
+						models = append(models, modelObject{
+							ID:      key,
+							Object:  "model",
+							Created: 1700000000,
+							OwnedBy: m.Provider,
+						})
+					}
+				}
+			}
 		}
 
 		// Add combos as models

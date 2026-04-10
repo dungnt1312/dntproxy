@@ -1,0 +1,159 @@
+package storage
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/dungnt/dntproxy/internal/domain"
+)
+
+// List returns recent logs that match the query.
+func (s *SQLiteLogStore) List(ctx context.Context, query domain.LogQuery) ([]domain.LogEntry, error) {
+	where, args := buildLogWhere(query)
+	limit := normalizeLimit(query.Limit)
+	args = append(args, limit)
+
+	rows, err := s.db.QueryContext(ctx, `SELECT id, timestamp_ms, timestamp, level, provider, direction,
+		COALESCE(method, ''), COALESCE(path, ''), status_code, duration_ms,
+		COALESCE(connection_id, ''), COALESCE(connection_name, ''), COALESCE(model, ''),
+		COALESCE(request_id, ''), COALESCE(message, ''), COALESCE(error, ''), body_size,
+		input_tokens, output_tokens, total_tokens, COALESCE(usage_source, ''),
+		cost_input, cost_output, cost_total, currency, COALESCE(metadata_json, '')
+		FROM request_logs `+where+` ORDER BY timestamp_ms DESC LIMIT ?`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list logs: %w", err)
+	}
+	defer rows.Close()
+
+	logs := make([]domain.LogEntry, 0)
+	for rows.Next() {
+		entry, err := scanLogEntry(rows)
+		if err != nil {
+			return nil, err
+		}
+		logs = append(logs, *entry)
+	}
+	return logs, rows.Err()
+}
+
+// Summary returns aggregate request, error, token, and cost totals.
+func (s *SQLiteLogStore) Summary(ctx context.Context, query domain.LogQuery) (*domain.LogSummary, error) {
+	where, args := buildLogWhere(query)
+	requestDirection := "inbound"
+	if (query.ConnectionID != "" && query.ConnectionID != "all") || (query.Provider != "" && query.Provider != "all") {
+		requestDirection = "response"
+	}
+	row := s.db.QueryRowContext(ctx, `SELECT
+		COUNT(CASE WHEN direction = '`+requestDirection+`' THEN 1 END),
+		COUNT(CASE WHEN level = 'ERROR' THEN 1 END),
+		COALESCE(SUM(input_tokens), 0),
+		COALESCE(SUM(output_tokens), 0),
+		COALESCE(SUM(total_tokens), 0),
+		COALESCE(SUM(cost_total), 0)
+		FROM request_logs `+where, args...)
+
+	summary := &domain.LogSummary{Currency: "USD"}
+	if err := row.Scan(&summary.Requests, &summary.Errors, &summary.InputTokens,
+		&summary.OutputTokens, &summary.TotalTokens, &summary.CostTotal); err != nil {
+		return nil, fmt.Errorf("summarize logs: %w", err)
+	}
+	return summary, nil
+}
+
+// ConnectionSummaries aggregates usage by connection.
+func (s *SQLiteLogStore) ConnectionSummaries(ctx context.Context, query domain.LogQuery) ([]domain.LogConnectionSummary, error) {
+	where, args := buildLogWhere(query)
+	rows, err := s.db.QueryContext(ctx, `SELECT COALESCE(connection_id, ''), COALESCE(connection_name, ''), provider,
+		COUNT(CASE WHEN direction = 'response' THEN 1 END),
+		COUNT(CASE WHEN level = 'ERROR' THEN 1 END),
+		COALESCE(SUM(total_tokens), 0),
+		COALESCE(SUM(cost_total), 0)
+		FROM request_logs `+where+`
+		GROUP BY connection_id, connection_name, provider
+		HAVING COALESCE(connection_id, '') <> ''
+		ORDER BY COALESCE(SUM(total_tokens), 0) DESC`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("connection summaries: %w", err)
+	}
+	defer rows.Close()
+
+	result := make([]domain.LogConnectionSummary, 0)
+	for rows.Next() {
+		var item domain.LogConnectionSummary
+		item.Currency = "USD"
+		if err := rows.Scan(&item.ConnectionID, &item.ConnectionName, &item.Provider,
+			&item.Requests, &item.Errors, &item.TotalTokens, &item.CostTotal); err != nil {
+			return nil, err
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}
+
+func buildLogWhere(query domain.LogQuery) (string, []interface{}) {
+	clauses := []string{"timestamp_ms >= ?"}
+	args := []interface{}{rangeCutoffMs(query.Range)}
+
+	if query.ConnectionID != "" && query.ConnectionID != "all" {
+		clauses = append(clauses, "connection_id = ?")
+		args = append(args, query.ConnectionID)
+	}
+	if query.Provider != "" && query.Provider != "all" {
+		clauses = append(clauses, "provider = ?")
+		args = append(args, query.Provider)
+	}
+	if query.Level != "" && query.Level != "all" {
+		clauses = append(clauses, "level = ?")
+		args = append(args, query.Level)
+	}
+	if query.Search != "" {
+		clauses = append(clauses, "(message LIKE ? OR error LIKE ? OR model LIKE ? OR request_id LIKE ? OR metadata_json LIKE ?)")
+		search := "%" + query.Search + "%"
+		args = append(args, search, search, search, search, search)
+	}
+
+	return "WHERE " + strings.Join(clauses, " AND "), args
+}
+
+func rangeCutoffMs(value string) int64 {
+	now := time.Now()
+	switch value {
+	case "1h":
+		return now.Add(-time.Hour).UnixMilli()
+	case "7d":
+		return now.AddDate(0, 0, -7).UnixMilli()
+	case "30d":
+		return now.AddDate(0, 0, -30).UnixMilli()
+	default:
+		return now.AddDate(0, 0, -1).UnixMilli()
+	}
+}
+
+func normalizeLimit(limit int) int {
+	if limit <= 0 {
+		return 200
+	}
+	if limit > 1000 {
+		return 1000
+	}
+	return limit
+}
+
+type logScanner interface {
+	Scan(dest ...interface{}) error
+}
+
+func scanLogEntry(row logScanner) (*domain.LogEntry, error) {
+	var entry domain.LogEntry
+	if err := row.Scan(&entry.ID, &entry.TimestampMs, &entry.Timestamp, &entry.Level,
+		&entry.Provider, &entry.Direction, &entry.Method, &entry.Path, &entry.StatusCode,
+		&entry.DurationMs, &entry.ConnectionID, &entry.ConnectionName, &entry.Model,
+		&entry.RequestID, &entry.Message, &entry.Error, &entry.BodySize, &entry.InputTokens,
+		&entry.OutputTokens, &entry.TotalTokens, &entry.UsageSource, &entry.CostInput,
+		&entry.CostOutput, &entry.CostTotal, &entry.Currency, &entry.MetadataJSON); err != nil {
+		return nil, err
+	}
+	return &entry, nil
+}

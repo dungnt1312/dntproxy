@@ -27,10 +27,19 @@ func (r *ModelResolver) Resolve(modelStr string) (*domain.ModelInfo, error) {
 		model := modelStr[idx+1:]
 
 		provider := resolveProviderAlias(providerOrAlias)
+
+		// Try to get model metadata from registry
+		cfg, err := r.store.Load()
+		var modelDef *domain.ModelDefinition
+		if err == nil && cfg != nil && cfg.ModelRegistry != nil {
+			modelDef = cfg.ModelRegistry.GetModel(provider + "/" + model)
+		}
+
 		return &domain.ModelInfo{
 			Provider:      provider,
 			Model:         model,
 			ProviderAlias: providerOrAlias,
+			Definition:    modelDef,
 		}, nil
 	}
 
@@ -42,10 +51,19 @@ func (r *ModelResolver) Resolve(modelStr string) (*domain.ModelInfo, error) {
 			providerOrAlias := resolved[:idx]
 			model := resolved[idx+1:]
 			provider := resolveProviderAlias(providerOrAlias)
+
+			// Try to get model metadata from registry
+			cfg, err := r.store.Load()
+			var modelDef *domain.ModelDefinition
+			if err == nil && cfg != nil && cfg.ModelRegistry != nil {
+				modelDef = cfg.ModelRegistry.GetModel(provider + "/" + model)
+			}
+
 			return &domain.ModelInfo{
 				Provider:      provider,
 				Model:         model,
 				ProviderAlias: providerOrAlias,
+				Definition:    modelDef,
 			}, nil
 		}
 	}

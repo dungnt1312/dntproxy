@@ -8,6 +8,7 @@ import Keys from './pages/keys'
 import Settings from './pages/settings'
 import Logs from './pages/logs'
 import Backup from './pages/backup'
+import Playground from './pages/playground'
 
 export default function App() {
   return (
@@ -22,6 +23,7 @@ export default function App() {
           <Route path="/settings" element={<Settings />} />
           <Route path="/logs" element={<Logs />} />
           <Route path="/backup" element={<Backup />} />
+          <Route path="/playground" element={<Playground />} />
         </Route>
       </Routes>
     </BrowserRouter>

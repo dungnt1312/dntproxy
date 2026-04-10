@@ -21,10 +21,11 @@ This roadmap captures the progress and next milestones for `dntproxy`.
 - [x] CLI commands for `auth`, `combo`, `alias`, `key`.
 - [x] React UI for configuration and management.
 
-## Phase 4: Polish and Delivery (In Progress)
-- [ ] Request logging for HTTP audits.
-- [ ] Graceful shutdown for SIGTERM/SIGINT and active SSE connections.
-- [x] Cross-platform install scripts for release binaries (`install.sh`, `install.ps1`).
-- [ ] Cross-platform build packaging automation (CI/Makefile/Goreleaser).
-- [ ] Official Docker image and compose setup.
-- [ ] Usage metrics validation across the pipeline.
+## Phase 4: Polish & Telemetry (🚧 In Progress)
+- [x] **Request Logging**: Persist structured HTTP/provider logs to local SQLite with 30-day retention and connection-level filtering.
+- [x] **Logs UX**: Render logs as a request timeline with connection filters, usage/cost badges, and bounded response payload previews.
+- [ ] **Graceful Shutdown**: Listen for SIGTERM / SIGINT and handle open persistent SSE connections gracefully.
+- [x] **Install scripts**: Cross-platform release installers (`install.sh`, `install.ps1`).
+- [ ] **Cross-Platform Delivery**: Enhance build configuration (Makefiles, CI, Goreleaser).
+- [ ] **Dockerization**: Provide an official `Dockerfile` and `docker-compose.yml` pattern.
+- [x] **Metrics Validation**: Capture provider/SSE usage tokens and estimate cost from configurable local model price profiles.

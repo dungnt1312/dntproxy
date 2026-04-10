@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"time"
@@ -14,6 +15,45 @@ import (
 type AccountSelector struct {
 	store        port.CredentialStore
 	tokenRefresh *auth.TokenRefreshService
+}
+
+type AccountSelectionErrorKind string
+
+const (
+	SelectionErrNoActiveCredentials AccountSelectionErrorKind = "no_active_credentials"
+	SelectionErrUnsupportedModel    AccountSelectionErrorKind = "unsupported_model"
+	SelectionErrRateLimited         AccountSelectionErrorKind = "rate_limited"
+	SelectionErrModelLocked         AccountSelectionErrorKind = "model_locked"
+	SelectionErrUnavailable         AccountSelectionErrorKind = "unavailable"
+)
+
+type AccountSelectionError struct {
+	Kind     AccountSelectionErrorKind
+	Provider string
+	Model    string
+}
+
+func (e *AccountSelectionError) Error() string {
+	switch e.Kind {
+	case SelectionErrNoActiveCredentials:
+		return fmt.Sprintf("no active credentials for provider: %s", e.Provider)
+	case SelectionErrUnsupportedModel:
+		return fmt.Sprintf("no accounts support model %q for provider: %s", e.Model, e.Provider)
+	case SelectionErrRateLimited:
+		return fmt.Sprintf("all accounts rate limited for provider: %s", e.Provider)
+	case SelectionErrModelLocked:
+		return fmt.Sprintf("all accounts locked for model %q on provider: %s", e.Model, e.Provider)
+	default:
+		return fmt.Sprintf("no available accounts for provider: %s", e.Provider)
+	}
+}
+
+func IsAccountSelectionError(err error, kind AccountSelectionErrorKind) bool {
+	var selErr *AccountSelectionError
+	if !errors.As(err, &selErr) {
+		return false
+	}
+	return selErr.Kind == kind
 }
 
 // NewAccountSelector creates a new AccountSelector.
@@ -33,33 +73,42 @@ func (s *AccountSelector) SelectCredentials(provider string, excludeIDs map[stri
 	}
 
 	if len(connections) == 0 {
-		return nil, fmt.Errorf("no active credentials for provider: %s", provider)
+		return nil, &AccountSelectionError{
+			Kind:     SelectionErrNoActiveCredentials,
+			Provider: provider,
+			Model:    model,
+		}
 	}
 
-	var allRateLimited bool = true
+	supportedCount := 0
+	rateLimitedSupportedCount := 0
+	lockedSupportedCount := 0
+	nonExcludedCount := 0
 
 	for _, conn := range connections {
 		// Skip excluded connections
 		if excludeIDs != nil && excludeIDs[conn.ID] {
 			continue
 		}
-
-		// Skip rate-limited connections
-		if domain.IsAccountUnavailable(conn.RateLimitedUntil) {
-			continue
-		}
-
-		// Skip model-locked connections
-		if domain.IsModelLockActive(conn.ModelLocks, model) {
-			continue
-		}
+		nonExcludedCount++
 
 		// Skip connections that don't support this model
 		if !conn.SupportsModel(model) {
 			continue
 		}
+		supportedCount++
 
-		allRateLimited = false
+		// Skip rate-limited connections
+		if domain.IsAccountUnavailable(conn.RateLimitedUntil) {
+			rateLimitedSupportedCount++
+			continue
+		}
+
+		// Skip model-locked connections
+		if domain.IsModelLockActive(conn.ModelLocks, model) {
+			lockedSupportedCount++
+			continue
+		}
 
 		// Auto-refresh token if expiring soon
 		if s.tokenRefresh.NeedsRefresh(&conn) {
@@ -76,11 +125,43 @@ func (s *AccountSelector) SelectCredentials(provider string, excludeIDs map[stri
 		return connectionToCredentials(&conn), nil
 	}
 
-	if allRateLimited {
-		return nil, fmt.Errorf("all accounts rate limited for provider: %s", provider)
+	if nonExcludedCount == 0 {
+		return nil, &AccountSelectionError{
+			Kind:     SelectionErrUnavailable,
+			Provider: provider,
+			Model:    model,
+		}
 	}
 
-	return nil, fmt.Errorf("no available accounts for provider: %s", provider)
+	if supportedCount == 0 {
+		return nil, &AccountSelectionError{
+			Kind:     SelectionErrUnsupportedModel,
+			Provider: provider,
+			Model:    model,
+		}
+	}
+
+	if rateLimitedSupportedCount == supportedCount {
+		return nil, &AccountSelectionError{
+			Kind:     SelectionErrRateLimited,
+			Provider: provider,
+			Model:    model,
+		}
+	}
+
+	if lockedSupportedCount == supportedCount {
+		return nil, &AccountSelectionError{
+			Kind:     SelectionErrModelLocked,
+			Provider: provider,
+			Model:    model,
+		}
+	}
+
+	return nil, &AccountSelectionError{
+		Kind:     SelectionErrUnavailable,
+		Provider: provider,
+		Model:    model,
+	}
 }
 
 // MarkUnavailable marks a connection as unavailable with cooldown.
@@ -91,6 +172,9 @@ func (s *AccountSelector) MarkUnavailable(connectionID string, status int, error
 	}
 
 	result := domain.CheckFallbackError(status, errorText, conn.BackoffLevel)
+	if !result.ShouldFallback {
+		return nil
+	}
 
 	if result.CooldownMs > 0 {
 		conn.RateLimitedUntil = domain.CooldownUntil(result.CooldownMs)

@@ -11,6 +11,9 @@
 /vendor/
 .env
 db.json
+logs.db
+logs.db-shm
+logs.db-wal
 
 # UI
 ui/node_modules/
@@ -19,3 +22,7 @@ ui/.bun/
 
 # Data
 *.lock.json
+temp
+
+# Local worktrees / nested clones
+.worktrees/

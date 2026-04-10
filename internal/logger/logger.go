@@ -1,25 +1,24 @@
 package logger
 
 import (
+	"context"
+	"fmt"
 	"log"
 	"sync"
 	"time"
-)
 
-type LogEntry struct {
-	Timestamp string `json:"timestamp"`
-	Level     string `json:"level"`
-	Provider  string `json:"provider"`
-	Message   string `json:"message"`
-}
+	"github.com/dungnt/dntproxy/internal/domain"
+	"github.com/dungnt/dntproxy/internal/port"
+	"github.com/google/uuid"
+)
 
 type Logger struct {
 	mu          sync.RWMutex
-	logs        []LogEntry
+	logs        []domain.LogEntry
 	maxSize     int
-	subs        chan []LogEntry
+	store       port.LogStore
 	subMu       sync.RWMutex
-	subscribers map[chan []LogEntry]bool
+	subscribers map[chan []domain.LogEntry]bool
 }
 
 var (
@@ -31,32 +30,129 @@ func Get() *Logger {
 	once.Do(func() {
 		defaultLogger = &Logger{
 			maxSize:     1000,
-			logs:        make([]LogEntry, 0, 1000),
-			subscribers: make(map[chan []LogEntry]bool),
+			logs:        make([]domain.LogEntry, 0, 1000),
+			subscribers: make(map[chan []domain.LogEntry]bool),
 		}
 	})
 	return defaultLogger
 }
 
+// Init attaches persistent storage to the process-wide logger.
+func Init(store port.LogStore) {
+	Get().store = store
+}
+
 func (l *Logger) Add(provider, level, message string) {
-	entry := LogEntry{
-		Timestamp: time.Now().Format("15:04:05.000"),
-		Level:     level,
+	l.AddEntry(domain.LogEntry{
 		Provider:  provider,
+		Level:     level,
+		Direction: "event",
 		Message:   message,
+	})
+}
+
+func (l *Logger) AddEntry(entry domain.LogEntry) {
+	now := time.Now()
+	if entry.ID == "" {
+		entry.ID = uuid.New().String()
+	}
+	if entry.TimestampMs == 0 {
+		entry.TimestampMs = now.UnixMilli()
+	}
+	if entry.Timestamp == "" {
+		entry.Timestamp = now.Format(time.RFC3339Nano)
+	}
+	if entry.Level == "" {
+		entry.Level = "INFO"
+	}
+	if entry.Provider == "" {
+		entry.Provider = "APP"
+	}
+	if entry.Direction == "" {
+		entry.Direction = "event"
+	}
+	if entry.Currency == "" {
+		entry.Currency = "USD"
 	}
 
-	log.Printf("[%s] %s | %s", provider, level, message)
+	log.Printf("[%s] %s | %s", entry.Provider, entry.Level, entry.Message)
+
+	if l.store != nil {
+		if err := l.store.Insert(context.Background(), &entry); err != nil {
+			log.Printf("[LOG] Failed to persist log: %s", err)
+		}
+	}
 
 	l.mu.Lock()
 	l.logs = append(l.logs, entry)
 	if len(l.logs) > l.maxSize {
 		l.logs = l.logs[len(l.logs)-l.maxSize:]
 	}
-	logsCopy := make([]LogEntry, len(l.logs))
+	logsCopy := make([]domain.LogEntry, len(l.logs))
 	copy(logsCopy, l.logs)
 	l.mu.Unlock()
 
+	l.broadcast(logsCopy)
+}
+
+func (l *Logger) AddUsage(provider, requestID, connectionID, connectionName, model string, inputTokens, outputTokens int, source string) {
+	total := inputTokens + outputTokens
+	if total <= 0 {
+		return
+	}
+	l.AddEntry(domain.LogEntry{
+		Level:          "INFO",
+		Provider:       provider,
+		Direction:      "usage",
+		ConnectionID:   connectionID,
+		ConnectionName: connectionName,
+		Model:          model,
+		RequestID:      requestID,
+		Message:        fmt.Sprintf("Usage captured: input=%d output=%d total=%d source=%s", inputTokens, outputTokens, total, source),
+		InputTokens:    inputTokens,
+		OutputTokens:   outputTokens,
+		TotalTokens:    total,
+		UsageSource:    source,
+	})
+}
+
+func (l *Logger) GetAll() []domain.LogEntry {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	result := make([]domain.LogEntry, len(l.logs))
+	copy(result, l.logs)
+	return result
+}
+
+func (l *Logger) Subscribe() chan []domain.LogEntry {
+	l.subMu.Lock()
+	defer l.subMu.Unlock()
+	ch := make(chan []domain.LogEntry, 10)
+	l.subscribers[ch] = true
+	return ch
+}
+
+func (l *Logger) Unsubscribe(ch chan []domain.LogEntry) {
+	l.subMu.Lock()
+	defer l.subMu.Unlock()
+	delete(l.subscribers, ch)
+	close(ch)
+}
+
+func (l *Logger) Clear() {
+	if l.store != nil {
+		if err := l.store.Clear(context.Background()); err != nil {
+			log.Printf("[LOG] Failed to clear persisted logs: %s", err)
+		}
+	}
+	l.mu.Lock()
+	l.logs = l.logs[:0]
+	logsCopy := make([]domain.LogEntry, 0)
+	l.mu.Unlock()
+	l.broadcast(logsCopy)
+}
+
+func (l *Logger) broadcast(logsCopy []domain.LogEntry) {
 	l.subMu.RLock()
 	for ch := range l.subscribers {
 		select {
@@ -67,63 +163,17 @@ func (l *Logger) Add(provider, level, message string) {
 	l.subMu.RUnlock()
 }
 
-func (l *Logger) GetAll() []LogEntry {
-	l.mu.RLock()
-	defer l.mu.RUnlock()
-	result := make([]LogEntry, len(l.logs))
-	copy(result, l.logs)
-	return result
-}
-
-func (l *Logger) Subscribe() chan []LogEntry {
-	l.subMu.Lock()
-	defer l.subMu.Unlock()
-	ch := make(chan []LogEntry, 10)
-	l.subscribers[ch] = true
-	return ch
-}
-
-func (l *Logger) Unsubscribe(ch chan []LogEntry) {
-	l.subMu.Lock()
-	defer l.subMu.Unlock()
-	delete(l.subscribers, ch)
-	close(ch)
-}
-
-func (l *Logger) Clear() {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.logs = l.logs[:0]
-}
-
+// AddKiro logs a Kiro-specific message.
 func (l *Logger) AddKiro(format string, args ...interface{}) {
-	l.Add("KIRO", "INFO", formatArgs(format, args))
+	l.Add("KIRO", "INFO", fmt.Sprintf(format, args...))
 }
 
+// AddOpenAI logs an OpenAI-specific message.
 func (l *Logger) AddOpenAI(format string, args ...interface{}) {
-	l.Add("OPENAI", "INFO", formatArgs(format, args))
+	l.Add("OPENAI", "INFO", fmt.Sprintf(format, args...))
 }
 
+// AddError logs an error message for a provider.
 func (l *Logger) AddError(provider, format string, args ...interface{}) {
-	l.Add(provider, "ERROR", formatArgs(format, args))
-}
-
-func formatArgs(format string, args []interface{}) string {
-	if len(args) == 0 {
-		return format
-	}
-	result := format
-	for _, arg := range args {
-		switch v := arg.(type) {
-		case string:
-			result += " " + v
-		case int:
-			result += " " + string(rune('0'+v))
-		case error:
-			result += " " + v.Error()
-		default:
-			result += " "
-		}
-	}
-	return result
+	l.Add(provider, "ERROR", fmt.Sprintf(format, args...))
 }

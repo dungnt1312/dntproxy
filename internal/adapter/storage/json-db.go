@@ -46,6 +46,11 @@ func NewJsonDB(path string) (*JsonDB, error) {
 	}, nil
 }
 
+// DataDir returns the directory where app data is stored.
+func (db *JsonDB) DataDir() string {
+	return filepath.Dir(db.filePath)
+}
+
 func defaultDBPath() string {
 	home, _ := os.UserHomeDir()
 	if runtime.GOOS == "windows" {
@@ -230,4 +235,16 @@ func (db *JsonDB) GetSettings() (*domain.Settings, error) {
 		return nil, err
 	}
 	return &cfg.Settings, nil
+}
+
+// GetModelRegistry returns the model registry.
+func (db *JsonDB) GetModelRegistry() (*domain.ModelRegistry, error) {
+	cfg, err := db.Load()
+	if err != nil {
+		return nil, err
+	}
+	if cfg.ModelRegistry == nil {
+		cfg.ModelRegistry = domain.DefaultModelRegistry()
+	}
+	return cfg.ModelRegistry, nil
 }

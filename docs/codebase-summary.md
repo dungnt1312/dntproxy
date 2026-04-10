@@ -22,7 +22,11 @@ Core application layers (Clean Architecture).
 - `adapter/`: external integrations (`http`, `kiro`, `auth`, `storage`).
 
 ### `ui/`
-React + Vite + TypeScript admin UI for proxy configuration.
+Web admin UI (React, Vite, TypeScript).
+- Uses `bun` as the preferred package manager.
+- Features tools for managing connections, logs, settings, and aliases visually.
+- Logs use a local SQLite database (`logs.db`) for 30-day structured request/provider history, connection filters, usage tokens, estimated cost summaries, and bounded response payload previews.
+- Styled using Tailwind CSS (configuration assumed by environment).
 
 ## Root Files
 - `CLAUDE.md`: project operating instructions.

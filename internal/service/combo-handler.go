@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"sync"
 	"time"
@@ -9,7 +10,7 @@ import (
 
 // ComboHandler manages combo fallback and round-robin strategies.
 type ComboHandler struct {
-	rotationState sync.Map // comboName → int (current index)
+	rotationState sync.Map // comboName -> int (current index)
 }
 
 // NewComboHandler creates a new ComboHandler.
@@ -20,6 +21,7 @@ func NewComboHandler() *ComboHandler {
 // ComboResult represents the result of trying a single model in a combo.
 type ComboResult struct {
 	OK         bool
+	Stream     io.ReadCloser
 	StatusCode int
 	Error      string
 	RetryAfter string
@@ -56,20 +58,17 @@ func (ch *ComboHandler) HandleCombo(
 			return result, nil
 		}
 
-		// Track earliest retryAfter
 		if result.RetryAfter != "" {
 			if earliestRetry == "" || result.RetryAfter < earliestRetry {
 				earliestRetry = result.RetryAfter
 			}
 		}
 
-		// Check if should fallback
 		if !shouldComboFallback(result.StatusCode) {
 			log.Printf("[COMBO] Model %s failed (no fallback), status=%d", modelStr, result.StatusCode)
 			return result, nil
 		}
 
-		// Transient error cooldown
 		if isTransientStatus(result.StatusCode) {
 			log.Printf("[COMBO] Model %s transient %d, waiting 2s", modelStr, result.StatusCode)
 			time.Sleep(2 * time.Second)
@@ -82,7 +81,6 @@ func (ch *ComboHandler) HandleCombo(
 		log.Printf("[COMBO] Model %s failed (%d), trying next", modelStr, result.StatusCode)
 	}
 
-	// All models failed
 	if lastStatus == 0 {
 		lastStatus = 503
 	}
@@ -119,9 +117,8 @@ func (ch *ComboHandler) getRotatedModels(models []string, comboName string, stra
 }
 
 func shouldComboFallback(status int) bool {
-	// Most errors should trigger fallback
 	switch status {
-	case 400: // Bad request — don't fallback, request itself is wrong
+	case 400, 405, 411, 413, 414, 415, 422, 431:
 		return false
 	default:
 		return true

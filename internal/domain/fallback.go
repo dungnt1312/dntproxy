@@ -63,6 +63,8 @@ func CheckFallbackError(status int, errorText string, backoffLevel int) Fallback
 
 	// Status code based
 	switch status {
+	case 400, 405, 411, 413, 414, 415, 422, 431:
+		return FallbackResult{false, 0, backoffLevel}
 	case 401:
 		return FallbackResult{true, CooldownUnauthorized, backoffLevel}
 	case 402, 403:

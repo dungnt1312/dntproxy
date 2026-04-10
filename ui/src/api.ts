@@ -1,3 +1,5 @@
+import type { LogFilters } from './types/logs';
+
 const BASE = '/api';
 
 async function request(path: string, options?: RequestInit) {
@@ -10,6 +12,15 @@ async function request(path: string, options?: RequestInit) {
     throw new Error(err.error || err.message || res.statusText);
   }
   return res.json();
+}
+
+function logQuery(filters: Partial<LogFilters> = {}) {
+  const params = new URLSearchParams()
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value && value !== 'all') params.set(key, value)
+  })
+  const query = params.toString()
+  return query ? `?${query}` : ''
 }
 
 export const api = {
@@ -81,7 +92,10 @@ export const api = {
   getModels: () => request('/models'),
 
   // Logs
-  getLogs: () => fetch('/api/logs').then(r => r.json()),
+  getLogs: (filters?: Partial<LogFilters>) => fetch(`/api/logs${logQuery(filters)}`).then(r => r.json()),
+  getLogSummary: (filters?: Partial<LogFilters>) => fetch(`/api/logs/summary${logQuery(filters)}`).then(r => r.json()),
+  getLogConnections: (filters?: Partial<LogFilters>) => fetch(`/api/logs/connections${logQuery(filters)}`).then(r => r.json()),
+  getLogPrices: () => fetch('/api/logs/prices').then(r => r.json()),
   clearLogs: () => fetch('/api/logs/clear', { method: 'POST' }),
 
   // Backup

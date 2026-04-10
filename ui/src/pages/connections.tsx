@@ -1,18 +1,21 @@
-import { useEffect, useState, useRef, useCallback } from 'react'
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import { api } from '../api'
 import {
   Plus, Trash2, TestTube, Search, Upload, Shield, Settings2, ExternalLink,
   Loader2, Download, Globe, GitBranch, RefreshCw, Pencil, Check, X, BarChart2,
-  Play, CheckCircle2, XCircle, ChevronDown, ChevronUp
+  Play, CheckCircle2, XCircle, Link2, AlertTriangle, MoreHorizontal, ArrowDownAZ
 } from 'lucide-react'
+import ModelSelector from '../components/ModelSelector'
+import { getModelName } from '../models-config'
 
 const PROVIDERS = [
-  { id: 'kiro', name: 'Kiro AI', icon: '🤖' },
-  { id: 'openai', name: 'OpenAI', icon: '🟢' },
-  { id: 'openai-compatible', name: 'OpenAI Compatible', icon: '🔌' },
-]
+  { id: 'kiro', name: 'Kiro AI', icon: 'KI' },
+  { id: 'openai', name: 'OpenAI', icon: 'OA' },
+  { id: 'openai-compatible', name: 'OpenAI Compatible', icon: 'OC' },
+] as const
 
 type ImportMode = 'detect' | 'file' | 'manual' | 'builder-id' | 'idc' | 'social'
+type SortMode = 'name' | 'issues' | 'provider'
 
 interface DeviceCodeState {
   sessionId: string; userCode: string; verificationUri: string;
@@ -29,6 +32,28 @@ function secsToHuman(secs: number): string {
   if (secs < 60) return `${secs}s`
   if (secs < 3600) return `${Math.floor(secs / 60)}m`
   return `${Math.floor(secs / 3600)}h ${Math.floor((secs % 3600) / 60)}m`
+}
+
+function getProviderMeta(provider: string) {
+  return PROVIDERS.find(x => x.id === provider)
+}
+
+function ProviderBadge({ provider }: { provider: string }) {
+  const p = getProviderMeta(provider)
+  return (
+    <span className="flex items-center gap-1 rounded bg-[var(--bg)] px-2 py-0.5 text-xs text-[var(--text-muted)]">
+      <span>{p?.icon ?? '📦'}</span>
+      {p?.name ?? provider}
+    </span>
+  )
+}
+
+function connectionAttentionRank(c: { isActive?: boolean; rateLimitedUntil?: string; expiresAt?: string; backoffLevel?: number; lastError?: string }) {
+  if (!c.isActive) return 2
+  const isRL = c.rateLimitedUntil && new Date(c.rateLimitedUntil) > new Date()
+  const isExpired = c.expiresAt && new Date(c.expiresAt) < new Date()
+  const hasIssue = isRL || isExpired || (c.backoffLevel ?? 0) > 0 || !!c.lastError
+  return hasIssue ? 0 : 1
 }
 
 
@@ -95,21 +120,6 @@ function QuotaPanel({ data, loading }: { data: any; loading: boolean }) {
     )
   }
   if (!data) return null
-
-  // Check for quota errors from backend
-  if (data.quotaError) {
-    return (
-      <div className="space-y-2">
-        <div className="text-xs text-red-400 bg-red-500/10 px-3 py-2 rounded border border-red-500/20">
-          <div className="font-medium mb-1">⚠️ Quota Check Failed</div>
-          <div className="opacity-90">{data.quotaError}</div>
-          {data.quotaErrorReason && (
-            <div className="text-[10px] opacity-70 mt-1">Reason: {data.quotaErrorReason}</div>
-          )}
-        </div>
-      </div>
-    )
-  }
 
   // Build bucket list
   const buckets: QuotaBucket[] = []
@@ -285,10 +295,19 @@ function InlineName({ conn, onRename }: { conn: any; onRename: (id: string, name
           onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') cancel() }}
           className="bg-[var(--bg)] border border-[var(--accent)] rounded px-2 py-0.5 text-sm font-medium outline-none w-52"
         />
-        <button onClick={save} disabled={saving} className="p-0.5 text-[var(--success)] hover:opacity-80">
+        <button
+          onClick={save}
+          disabled={saving}
+          aria-label="Save connection name"
+          className="p-0.5 text-[var(--success)] hover:opacity-80"
+        >
           {saving ? <Loader2 size={12} className="animate-spin" /> : <Check size={13} />}
         </button>
-        <button onClick={cancel} className="p-0.5 text-[var(--text-muted)] hover:opacity-80">
+        <button
+          onClick={cancel}
+          aria-label="Cancel editing connection name"
+          className="p-0.5 text-[var(--text-muted)] hover:opacity-80"
+        >
           <X size={13} />
         </button>
       </div>
@@ -300,6 +319,7 @@ function InlineName({ conn, onRename }: { conn: any; onRename: (id: string, name
       <span className="font-medium text-sm">{conn.name}</span>
       <button
         onClick={() => setEditing(true)}
+        aria-label={`Rename ${conn.name}`}
         className="opacity-0 group-hover/name:opacity-100 p-0.5 text-[var(--text-muted)] hover:text-[var(--text)] transition-opacity"
         title="Rename"
       >
@@ -327,8 +347,6 @@ export default function Connections() {
   const [quotaLoading, setQuotaLoading] = useState<Record<string, boolean>>({})
   const [expandedModels, setExpandedModels] = useState<Record<string, boolean>>({})
   const [editModels, setEditModels] = useState<Record<string, string>>({})
-  const [expandedQuota, setExpandedQuota] = useState<Record<string, boolean>>({})
-  const [expandedDetails, setExpandedDetails] = useState<Record<string, boolean>>({})
   const [deviceCode, setDeviceCode] = useState<DeviceCodeState | null>(null)
   const [polling, setPolling] = useState(false)
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -343,6 +361,99 @@ export default function Connections() {
   const [openaiOAuthSession, setOpenaiOAuthSession] = useState<{sessionId: string; authUrl: string} | null>(null)
   const openaiPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const [autoRefreshQuota, setAutoRefreshQuota] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [sortMode, setSortMode] = useState<SortMode>('name')
+  const [menuOpenFor, setMenuOpenFor] = useState<string | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null)
+  const [deleteConfirmName, setDeleteConfirmName] = useState('')
+  const [deleteBusy, setDeleteBusy] = useState(false)
+
+  const connectionStats = useMemo(() => {
+    const total = conns.length
+    const active = conns.filter((c: any) => c.isActive).length
+    const needsAttention = conns.filter((c: any) => {
+      if (!c.isActive) return false
+      const rl = c.rateLimitedUntil && new Date(c.rateLimitedUntil) > new Date()
+      const exp = c.expiresAt && new Date(c.expiresAt) < new Date()
+      return rl || exp || (c.backoffLevel ?? 0) > 0 || !!c.lastError
+    }).length
+    return { total, active, needsAttention }
+  }, [conns])
+
+  const filteredConns = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase()
+    if (!q) return conns
+    return conns.filter((c: any) => {
+      const providerLabel = getProviderLabel(c.provider).toLowerCase()
+      const hay = [
+        c.name,
+        c.email,
+        c.baseUrl,
+        c.providerName,
+        c.authMethod,
+        providerLabel,
+        ...(c.supportedModels || []),
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+      return hay.includes(q)
+    })
+  }, [conns, searchQuery])
+
+  const sortedConns = useMemo(() => {
+    const list = [...filteredConns]
+    if (sortMode === 'name') {
+      list.sort((a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
+    } else if (sortMode === 'provider') {
+      list.sort((a: { provider: string; name: string }, b: { provider: string; name: string }) =>
+        a.provider.localeCompare(b.provider) || a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
+    } else {
+      list.sort((a, b) => {
+        const d = connectionAttentionRank(a) - connectionAttentionRank(b)
+        return d !== 0 ? d : a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
+      })
+    }
+    return list
+  }, [filteredConns, sortMode])
+
+  useEffect(() => {
+    if (!menuOpenFor) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMenuOpenFor(null)
+    }
+    const onMouseDown = (e: MouseEvent) => {
+      const el = e.target as HTMLElement | null
+      if (el?.closest?.('[data-connection-menu-root]')) return
+      setMenuOpenFor(null)
+    }
+    window.addEventListener('keydown', onKey)
+    document.addEventListener('mousedown', onMouseDown)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      document.removeEventListener('mousedown', onMouseDown)
+    }
+  }, [menuOpenFor])
+
+  useEffect(() => {
+    if (!deleteTarget) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !deleteBusy) {
+        setDeleteTarget(null)
+        setDeleteConfirmName('')
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [deleteTarget, deleteBusy])
+
+  useEffect(() => {
+    if (!deleteTarget) return
+    const id = requestAnimationFrame(() => {
+      document.getElementById('delete-confirm-input')?.focus()
+    })
+    return () => cancelAnimationFrame(id)
+  }, [deleteTarget?.id])
 
   useEffect(() => {
     if (!autoRefreshQuota) return
@@ -383,6 +494,18 @@ export default function Connections() {
     setError(''); setSuccess('')
     if (pollTimerRef.current) { clearTimeout(pollTimerRef.current); pollTimerRef.current = null }
   }
+
+  useEffect(() => {
+    if (!showAdd) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setShowAdd(false)
+        resetForm()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [showAdd])
 
   const parseSupportedModels = (str: string) => str.split('\n').map(s => s.trim()).filter(Boolean)
 
@@ -506,9 +629,29 @@ export default function Connections() {
   }
 
   // ── Card actions ───────────────────────────────────────────────────────────
-  const handleDelete = async (id: string) => {
-    if (!confirm('Remove this connection?')) return
-    await api.deleteConnection(id); load()
+  const openDeleteDialog = (id: string, name: string) => {
+    setMenuOpenFor(null)
+    setDeleteTarget({ id, name })
+    setDeleteConfirmName('')
+  }
+
+  const closeDeleteDialog = () => {
+    if (deleteBusy) return
+    setDeleteTarget(null)
+    setDeleteConfirmName('')
+  }
+
+  const confirmDeleteConnection = async () => {
+    if (!deleteTarget || deleteConfirmName !== deleteTarget.name) return
+    setDeleteBusy(true)
+    try {
+      await api.deleteConnection(deleteTarget.id)
+      setDeleteTarget(null)
+      setDeleteConfirmName('')
+      load()
+    } finally {
+      setDeleteBusy(false)
+    }
   }
 
   const handleTest = async (id: string) => {
@@ -552,7 +695,14 @@ export default function Connections() {
   }
 
   const handleSaveModels = async (id: string) => {
-    const models = parseSupportedModels(editModels[id] || '')
+    const conn = conns.find(c => c.id === id)
+    const rawModels = editModels[id] ? editModels[id].split('\n').filter(Boolean) : []
+    // Strip provider prefix before saving — backend stores bare IDs
+    const models = rawModels.map(m => {
+      if (conn && m.startsWith(conn.provider + '/')) return m.slice(conn.provider.length + 1)
+      const slash = m.indexOf('/')
+      return slash >= 0 ? m.slice(slash + 1) : m
+    })
     await api.updateConnection(id, { supportedModels: models, setModels: true })
     setExpandedModels(prev => ({ ...prev, [id]: false })); load()
   }
@@ -560,26 +710,25 @@ export default function Connections() {
   const toggleModelEdit = (conn: any) => {
     const id = conn.id
     if (expandedModels[id]) { setExpandedModels(prev => ({ ...prev, [id]: false })) }
-    else { setEditModels(prev => ({ ...prev, [id]: (conn.supportedModels || []).join('\n') })); setExpandedModels(prev => ({ ...prev, [id]: true })) }
-  }
-
-  const toggleQuota = (id: string) => {
-    setExpandedQuota(prev => ({ ...prev, [id]: !prev[id] }))
-    if (!expandedQuota[id] && !quotaResult[id]) {
-      handleCheckQuota(id)
+    else {
+      // Convert bare IDs to provider/id format for ModelSelector
+      const withPrefix = (conn.supportedModels || []).map((m: string) =>
+        m.includes('/') ? m : `${conn.provider}/${m}`
+      )
+      setEditModels(prev => ({ ...prev, [id]: withPrefix.join('\n') }))
+      setExpandedModels(prev => ({ ...prev, [id]: true }))
     }
-  }
-
-  const toggleDetails = (id: string) => {
-    setExpandedDetails(prev => ({ ...prev, [id]: !prev[id] }))
   }
 
   const handleFetchModels = async (conn: any) => {
     setFetchingModels(prev => ({ ...prev, [conn.id]: true }))
     try {
       const res = await api.fetchConnectionModels(conn.id)
-      setFetchedModels(prev => ({ ...prev, [conn.id]: res.models || [] }))
-      setEditModels(prev => ({ ...prev, [conn.id]: (res.models || []).join('\n') }))
+      const fetched = res.models || []
+      setFetchedModels(prev => ({ ...prev, [conn.id]: fetched }))
+      // Add provider prefix for ModelSelector display
+      const withPrefix = fetched.map((m: string) => m.includes('/') ? m : `${conn.provider}/${m}`)
+      setEditModels(prev => ({ ...prev, [conn.id]: withPrefix.join('\n') }))
       setExpandedModels(prev => ({ ...prev, [conn.id]: true }))
     } catch (e: any) {
       if (conn.provider === 'openai' || conn.provider === 'openai-compatible') {
@@ -620,8 +769,7 @@ export default function Connections() {
     }
   }
 
-  const getProviderIcon = (p: string) => PROVIDERS.find(x => x.id === p)?.icon ?? '📦'
-  const getProviderLabel = (p: string) => PROVIDERS.find(x => x.id === p)?.name ?? p
+  const getProviderLabel = (p: string) => getProviderMeta(p)?.name ?? p
 
   // ── DeviceCode panel (shared) ──────────────────────────────────────────────
   const DeviceCodePanel = () => deviceCode ? (
@@ -649,36 +797,119 @@ export default function Connections() {
   return (
     <div>
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-4">
-          <h2 className="text-2xl font-bold">Connections</h2>
-          <label className="flex items-center gap-1.5 text-sm text-[var(--text-muted)] cursor-pointer hover:text-[var(--text)] transition-colors">
-            <input 
-              type="checkbox" 
-              checked={autoRefreshQuota} 
-              onChange={e => setAutoRefreshQuota(e.target.checked)} 
-              className="accent-[var(--accent)] w-3.5 h-3.5" 
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between mb-6">
+        <div className="min-w-0 space-y-1">
+          <h2 className="text-2xl font-bold tracking-tight">Connections</h2>
+          <p className="text-sm text-[var(--text-muted)] max-w-xl">
+            Kết nối tài khoản Kiro, OpenAI hoặc API tương thích. Bật/tắt từng kết nối, kiểm tra quota và model.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => { setShowAdd(!showAdd); resetForm() }}
+          className="shrink-0 flex items-center justify-center gap-1.5 px-4 py-2 bg-[var(--accent)] hover:bg-[var(--accent-hover)] rounded-lg text-sm font-medium transition-colors shadow-sm shadow-[var(--accent)]/20"
+        >
+          <Plus size={16} /> {showAdd ? 'Đóng form' : 'Add Connection'}
+        </button>
+      </div>
+
+      {/* Toolbar: stats + search + quota option */}
+      {conns.length > 0 && (
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:gap-4 mb-5">
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--bg-card)] px-2.5 py-1.5 text-[var(--text-muted)]">
+              <span className="font-medium text-[var(--text)] tabular-nums">{connectionStats.total}</span>
+              total
+            </span>
+            <span className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--bg-card)] px-2.5 py-1.5 text-[var(--text-muted)]">
+              <span className="h-1.5 w-1.5 rounded-full bg-[var(--success)]" aria-hidden />
+              <span className="font-medium text-[var(--success)] tabular-nums">{connectionStats.active}</span>
+              active
+            </span>
+            {connectionStats.needsAttention > 0 && (
+              <span className="inline-flex items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-amber-400">
+                <AlertTriangle size={12} className="shrink-0" aria-hidden />
+                <span className="font-medium tabular-nums">{connectionStats.needsAttention}</span>
+                need attention
+              </span>
+            )}
+          </div>
+          <div className="relative flex flex-1 min-w-0 flex-col gap-2 sm:max-w-md sm:flex-row sm:items-center sm:gap-3">
+            <div className="relative min-w-0 flex-1">
+              <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" aria-hidden />
+              <input
+                type="search"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                placeholder="Tìm theo tên, provider, email, URL, model…"
+                aria-label="Filter connections"
+                className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg)] py-2 pl-9 pr-3 text-sm outline-none transition-colors placeholder:text-[var(--text-muted)] focus:border-[var(--accent)] focus:ring-1 focus:ring-[var(--accent)]/40"
+              />
+            </div>
+            <div className="relative shrink-0">
+              <ArrowDownAZ size={14} className="pointer-events-none absolute left-2.5 top-1/2 z-[1] -translate-y-1/2 text-[var(--text-muted)]" aria-hidden />
+              <select
+                value={sortMode}
+                onChange={e => setSortMode(e.target.value as SortMode)}
+                aria-label="Sort connections"
+                title="Sort connections"
+                className="w-full cursor-pointer appearance-none rounded-lg border border-[var(--border)] bg-[var(--bg)] py-2 pl-8 pr-8 text-sm text-[var(--text)] outline-none transition-colors focus:border-[var(--accent)] focus:ring-1 focus:ring-[var(--accent)]/40 sm:w-[11.5rem]"
+              >
+                <option value="name">Name (A–Z)</option>
+                <option value="issues">Issues first</option>
+                <option value="provider">Provider</option>
+              </select>
+              <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] text-[10px]" aria-hidden>
+                ▼
+              </span>
+            </div>
+          </div>
+          <label className="flex cursor-pointer items-center gap-2 text-sm text-[var(--text-muted)] transition-colors hover:text-[var(--text)] lg:shrink-0">
+            <input
+              type="checkbox"
+              checked={autoRefreshQuota}
+              onChange={e => setAutoRefreshQuota(e.target.checked)}
+              className="accent-[var(--accent)] h-3.5 w-3.5 rounded border-[var(--border)]"
             />
             Auto refresh quota
           </label>
         </div>
-        <button onClick={() => { setShowAdd(!showAdd); resetForm() }}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-[var(--accent)] hover:bg-[var(--accent-hover)] rounded-lg text-sm transition-colors">
-          <Plus size={16} /> Add Connection
-        </button>
-      </div>
+      )}
 
       {/* Add form */}
       {showAdd && (
-        <div className="bg-[var(--bg-card)] rounded-xl p-4 border border-[var(--border)] mb-6 space-y-4">
+        <div className="bg-[var(--bg-card)] rounded-xl p-4 border border-[var(--border)] mb-6 space-y-4 shadow-lg shadow-black/20">
+          <div className="flex items-start justify-between gap-3 border-b border-[var(--border)] pb-3">
+            <div>
+              <h3 className="text-sm font-semibold text-[var(--text)]">Thêm kết nối mới</h3>
+              <p className="mt-0.5 text-xs text-[var(--text-muted)]">Chọn provider và phương thức đăng nhập / import.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => { setShowAdd(false); resetForm() }}
+              className="shrink-0 rounded-lg p-2 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text)]"
+              aria-label="Đóng form thêm kết nối"
+            >
+              <X size={18} />
+            </button>
+          </div>
           {/* Provider tabs */}
           <div>
             <label className="block text-xs text-[var(--text-muted)] mb-2">Provider</label>
             <div className="flex gap-2 flex-wrap">
               {PROVIDERS.map(p => (
-                <button key={p.id} onClick={() => { setProvider(p.id); resetForm() }}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-lg border text-sm transition-colors ${provider === p.id ? 'border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent)]' : 'border-[var(--border)] hover:border-[var(--bg-hover)]'}`}>
-                  <span>{p.icon}</span> {p.name}
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => { setProvider(p.id); resetForm() }}
+                  className={`flex items-center gap-2 rounded-lg border px-4 py-2 text-sm transition-colors ${
+                    provider === p.id
+                      ? 'border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent)]'
+                      : 'border-[var(--border)] hover:border-[var(--bg-hover)]'
+                  }`}
+                >
+                  <span>{p.icon}</span>
+                  {p.name}
                 </button>
               ))}
             </div>
@@ -998,10 +1229,36 @@ export default function Connections() {
 
       {/* ── Connection cards ─────────────────────────────────────────────────── */}
       {conns.length === 0 ? (
-        <p className="text-[var(--text-muted)]">No connections configured.</p>
+        <div className="rounded-xl border border-dashed border-[var(--border)] bg-[var(--bg-card)]/60 px-6 py-12 text-center">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-[var(--accent)]/15 text-[var(--accent)]">
+            <Link2 size={24} strokeWidth={2} aria-hidden />
+          </div>
+          <h3 className="mt-4 text-base font-semibold text-[var(--text)]">Chưa có kết nối</h3>
+          <p className="mx-auto mt-2 max-w-sm text-sm text-[var(--text-muted)]">
+            Thêm Kiro hoặc OpenAI để proxy bắt đầu route request. Bạn có thể dùng Builder ID, OAuth hoặc API key.
+          </p>
+          <button
+            type="button"
+            onClick={() => { setShowAdd(true); resetForm() }}
+            className="mt-6 inline-flex items-center gap-2 rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-hover)]"
+          >
+            <Plus size={16} /> Add Connection
+          </button>
+        </div>
+      ) : filteredConns.length === 0 ? (
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-card)] px-6 py-10 text-center">
+          <p className="text-sm text-[var(--text-muted)]">Không có kết nối khớp “{searchQuery.trim()}”.</p>
+          <button
+            type="button"
+            onClick={() => setSearchQuery('')}
+            className="mt-3 text-sm font-medium text-[var(--accent)] underline-offset-2 hover:underline"
+          >
+            Xóa bộ lọc
+          </button>
+        </div>
       ) : (
         <div className="space-y-3">
-          {conns.map((c: any) => {
+          {sortedConns.map((c: any) => {
             const isRL = c.rateLimitedUntil && new Date(c.rateLimitedUntil) > new Date()
             const isExpired = c.expiresAt && new Date(c.expiresAt) < new Date()
             const hasIssue = isRL || isExpired || c.backoffLevel > 0 || c.lastError
@@ -1015,110 +1272,192 @@ export default function Connections() {
               <div key={c.id}
                 className={`bg-[var(--bg-card)] rounded-xl border transition-colors ${!c.isActive ? 'opacity-60 border-[var(--border)]' : isRL ? 'border-amber-500/40' : hasIssue ? 'border-red-500/20' : 'border-[var(--border)]'}`}>
 
-                {/* Compact header */}
-                <div className="p-3">
-                  <div className="flex items-center justify-between gap-3 mb-2">
-                    {/* Left: Toggle + Status + Name */}
-                    <div className="flex items-center gap-2 min-w-0 flex-1">
-                      <button onClick={() => handleToggle(c.id, c.isActive)}
-                        title={c.isActive ? 'Disable' : 'Enable'}
-                        className={`flex-shrink-0 relative w-8 h-4 rounded-full transition-colors duration-200 ${c.isActive ? 'bg-[var(--accent)]' : 'bg-[var(--border)]'}`}>
-                        <span className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white shadow transition-transform duration-200 ${c.isActive ? 'translate-x-4' : 'translate-x-0'}`} />
-                      </button>
-                      <span className={`w-2 h-2 rounded-full flex-shrink-0 ${statusDot}`} />
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <InlineName conn={c} onRename={handleRename} />
-                          <span className="text-[10px] text-[var(--text-muted)] bg-[var(--bg)] px-1.5 py-0.5 rounded flex items-center gap-1">
-                            <span>{getProviderIcon(c.provider)}</span>{getProviderLabel(c.provider)}
-                          </span>
-                          {(c.providerName || c.authMethod) && (
-                            <span className="text-[10px] bg-[var(--bg)] text-[var(--text-muted)] px-1.5 py-0.5 rounded">{c.providerName || c.authMethod}</span>
-                          )}
-                        </div>
-                        {c.email && <div className="text-[11px] text-[var(--text-muted)] truncate">{c.email}</div>}
-                      </div>
-                    </div>
+                {/* Main row */}
+                <div className="flex items-start justify-between p-4 gap-3">
+                  <div className="flex items-start gap-3 min-w-0 flex-1">
+                    {/* Toggle switch */}
+                    <button onClick={() => handleToggle(c.id, c.isActive)}
+                      aria-label={`${c.isActive ? 'Disable' : 'Enable'} connection ${c.name}`}
+                      title={c.isActive ? 'Disable' : 'Enable'}
+                      className={`mt-0.5 flex-shrink-0 relative w-9 h-5 rounded-full transition-colors duration-200 ${c.isActive ? 'bg-[var(--accent)]' : 'bg-[var(--border)]'}`}>
+                      <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform duration-200 ${c.isActive ? 'translate-x-4' : 'translate-x-0'}`} />
+                    </button>
 
-                    {/* Right: Action menu */}
-                    <div className="flex items-center gap-1 flex-shrink-0">
-                      <button onClick={() => handleTest(c.id)} className="p-1 hover:bg-[var(--bg-hover)] rounded transition-colors" title="Test">
-                        <TestTube size={13} className="text-[var(--text-muted)]" />
-                      </button>
-                      <button onClick={() => toggleQuota(c.id)} className={`p-1 hover:bg-[var(--bg-hover)] rounded transition-colors ${expandedQuota[c.id] ? 'bg-[var(--accent)]/10' : ''}`} title="Quota">
-                        <BarChart2 size={13} className={expandedQuota[c.id] ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'} />
-                      </button>
-                      <button onClick={() => toggleModelEdit(c)} className={`p-1 hover:bg-[var(--bg-hover)] rounded transition-colors ${expandedModels[c.id] ? 'bg-[var(--accent)]/10' : ''}`} title="Models">
-                        <Settings2 size={13} className={expandedModels[c.id] || c.supportedModels?.length > 0 ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'} />
-                      </button>
-                      <button onClick={() => toggleDetails(c.id)} className={`p-1 hover:bg-[var(--bg-hover)] rounded transition-colors ${expandedDetails[c.id] ? 'bg-[var(--accent)]/10' : ''}`} title="Details">
-                        <Settings2 size={13} className={expandedDetails[c.id] ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'} />
-                      </button>
-                      <button onClick={() => handleDelete(c.id)} className="p-1 hover:bg-[var(--bg-hover)] rounded transition-colors" title="Delete">
-                        <Trash2 size={13} className="text-[var(--danger)]" />
-                      </button>
+                    {/* Status dot */}
+                    <span className={`mt-1.5 w-2 h-2 rounded-full flex-shrink-0 ${statusDot}`} />
+
+                    {/* Info block */}
+                    <div className="min-w-0 flex-1 space-y-1.5">
+                      {/* Name + badges */}
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <InlineName conn={c} onRename={handleRename} />
+                        <ProviderBadge provider={c.provider} />
+                        {(c.providerName || c.authMethod) && (
+                          <span className="text-xs bg-[var(--bg)] text-[var(--text-muted)] px-2 py-0.5 rounded">{c.providerName || c.authMethod}</span>
+                        )}
+                        {c.authType === 'apikey' && (
+                          <span className="text-xs text-amber-400 bg-amber-400/10 px-2 py-0.5 rounded">API Key</span>
+                        )}
+                        {isExpired && (
+                          <span className="text-xs text-red-400 bg-red-400/10 px-2 py-0.5 rounded">Token expired</span>
+                        )}
+                      </div>
+
+                      {/* Sub info */}
+                      {(c.email || c.baseUrl) && (
+                        <div className="text-xs text-[var(--text-muted)]">
+                          {c.email && <span>{c.email}</span>}
+                          {c.baseUrl && <span className="font-mono ml-2">{c.baseUrl}</span>}
+                        </div>
+                      )}
+
+                      {/* Token expiry bar — always visible */}
+                      <TokenBar conn={c} />
+
+                      {/* Status row — rate limit, backoff, errors */}
+                      <StatusRow conn={c} />
+
+                      {/* Reset cooldown inline */}
+                      {(isRL || c.backoffLevel > 0) && (
+                        <button onClick={() => handleResetCooldown(c.id)}
+                          className="flex items-center gap-1 text-xs text-amber-400 hover:text-amber-300 transition-colors">
+                          <RefreshCw size={11} /> Reset cooldown
+                        </button>
+                      )}
+
+                      {/* Test result */}
+                      {testResult[c.id] && (
+                        <div className={`text-xs px-2 py-1 rounded ${testResult[c.id].status === 'ok' ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}`}>
+                          {testResult[c.id].loading ? 'Testing…' : testResult[c.id].status === 'ok'
+                            ? `✓ OK${testResult[c.id].email ? ` (${testResult[c.id].email})` : ''}`
+                            : `✗ ${testResult[c.id].message}`}
+                        </div>
+                      )}
+
+                      {/* Model chips with test status */}
+                      {c.supportedModels?.length > 0 && !expandedModels[c.id] && (
+                        <div className="space-y-1.5">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-[var(--text-muted)]">Models ({c.supportedModels.length})</span>
+                            <button
+                              onClick={() => handleTestAllModels(c.id, c.supportedModels)}
+                              className="flex items-center gap-1 text-xs text-[var(--accent)] hover:text-[var(--accent-hover)] transition-colors"
+                              title="Test all models"
+                            >
+                              <Play size={10} /> Test All
+                            </button>
+                          </div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {c.supportedModels.map((m: string, i: number) => {
+                              const testResult = modelTestResults[c.id]?.[m]
+                              return (
+                                <div key={i} className="group/model relative inline-flex items-center gap-1">
+                                  <span
+                                    className={`text-xs font-mono px-1.5 py-0.5 rounded cursor-default ${
+                                      testResult?.status === 'ok' ? 'bg-green-500/10 text-green-400 border border-green-500/20'
+                                      : testResult?.status === 'error' ? 'bg-red-500/10 text-red-400 border border-red-500/20'
+                                      : 'bg-[var(--accent)]/10 text-[var(--accent)]'
+                                    }`}
+                                    title={testResult?.message || m}
+                                  >
+                                    {testResult?.status === 'ok' && <CheckCircle2 size={10} className="inline mr-0.5 -mt-px" />}
+                                    {testResult?.status === 'error' && <XCircle size={10} className="inline mr-0.5 -mt-px" />}
+                                    {getModelName(m)}
+                                  </span>
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); handleTestModel(c.id, m) }}
+                                    disabled={testResult?.status === 'loading'}
+                                    aria-label={`Test model ${m} on connection ${c.name}`}
+                                    className="opacity-0 group-hover/model:opacity-100 absolute -top-1 -right-1 p-0.5 bg-[var(--bg-card)] border border-[var(--border)] rounded-full transition-opacity"
+                                    title={`Test ${m}`}
+                                  >
+                                    {testResult?.status === 'loading'
+                                      ? <Loader2 size={9} className="animate-spin text-[var(--accent)]" />
+                                      : <Play size={9} className="text-[var(--accent)]" />
+                                    }
+                                  </button>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
 
-                  {/* Compact status line */}
-                  <div className="flex items-center gap-3 text-[11px] text-[var(--text-muted)] flex-wrap">
-                    {c.isActive && (
-                      <>
-                        {/* Token status inline */}
-                        {c.expiresAt ? (
-                          <span className={isExpired ? 'text-red-400' : ''}>
-                            Token: {isExpired ? 'expired' : secsToHuman(Math.ceil((new Date(c.expiresAt).getTime() - Date.now()) / 1000))}
-                          </span>
-                        ) : c.hasApiKey ? (
-                          <span className="text-[var(--success)]">API Key</span>
-                        ) : null}
-
-                        {/* Models count */}
-                        {c.supportedModels?.length > 0 && (
-                          <span>{c.supportedModels.length} model{c.supportedModels.length > 1 ? 's' : ''}</span>
-                        )}
-
-                        {/* Rate limit */}
-                        {isRL && (
-                          <span className="text-amber-400">⏱ Rate limit: {secsToHuman(Math.ceil((new Date(c.rateLimitedUntil).getTime() - Date.now()) / 1000))}</span>
-                        )}
-
-                        {/* Backoff */}
-                        {c.backoffLevel > 0 && (
-                          <span className="text-orange-400">Backoff: {c.backoffLevel}/7</span>
-                        )}
-
-                        {/* Model locks */}
-                        {(() => {
-                          const lockCount = c.modelLocks ? Object.values(c.modelLocks).filter((e: any) => new Date(e) > new Date()).length : 0
-                          return lockCount > 0 ? <span className="text-orange-400">🔒 {lockCount} locked</span> : null
-                        })()}
-
-                        {/* Reset cooldown */}
-                        {(isRL || c.backoffLevel > 0) && (
-                          <button onClick={() => handleResetCooldown(c.id)} className="text-amber-400 hover:text-amber-300 underline">
-                            Reset
+                  <div className="relative shrink-0" data-connection-menu-root>
+                    <button
+                      type="button"
+                      onClick={() => setMenuOpenFor(menuOpenFor === c.id ? null : c.id)}
+                      aria-expanded={menuOpenFor === c.id}
+                      aria-haspopup="menu"
+                      aria-label={`More actions for ${c.name}`}
+                      className="rounded-lg p-2 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text)]"
+                    >
+                      <MoreHorizontal size={18} />
+                    </button>
+                    {menuOpenFor === c.id && (
+                      <div
+                        role="menu"
+                        className="absolute right-0 z-50 mt-1 min-w-[13.5rem] rounded-lg border border-[var(--border)] bg-[var(--bg-card)] py-1 shadow-xl ring-1 ring-black/20"
+                      >
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--text)] hover:bg-[var(--bg-hover)]"
+                          onClick={() => { handleTest(c.id); setMenuOpenFor(null) }}
+                        >
+                          <TestTube size={14} className="text-[var(--text-muted)]" />
+                          Test connection
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--text)] hover:bg-[var(--bg-hover)] disabled:opacity-50"
+                          disabled={quotaLoading[c.id]}
+                          onClick={() => { void handleCheckQuota(c.id); setMenuOpenFor(null) }}
+                        >
+                          {quotaLoading[c.id]
+                            ? <Loader2 size={14} className="animate-spin text-[var(--accent)]" />
+                            : <BarChart2 size={14} className={quotaResult[c.id] ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'} />}
+                          {quotaResult[c.id] ? 'Hide quota' : 'Show quota'}
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--text)] hover:bg-[var(--bg-hover)]"
+                          onClick={() => { toggleModelEdit(c); setMenuOpenFor(null) }}
+                        >
+                          <Settings2 size={14} className={c.supportedModels?.length > 0 ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'} />
+                          Allowed models
+                        </button>
+                        {(c.provider === 'openai' || c.provider === 'openai-compatible') && (
+                          <button
+                            type="button"
+                            role="menuitem"
+                            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--text)] hover:bg-[var(--bg-hover)] disabled:opacity-50"
+                            disabled={!!fetchingModels[c.id]}
+                            onClick={() => { void handleFetchModels(c); setMenuOpenFor(null) }}
+                          >
+                            {fetchingModels[c.id]
+                              ? <Loader2 size={14} className="animate-spin text-[var(--accent)]" />
+                              : <Download size={14} className="text-[var(--text-muted)]" />}
+                            Fetch models from API
                           </button>
                         )}
-                      </>
+                        <div className="my-1 h-px bg-[var(--border)]" role="separator" />
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--danger)] hover:bg-red-500/10"
+                          onClick={() => openDeleteDialog(c.id, c.name)}
+                        >
+                          <Trash2 size={14} />
+                          Remove connection…
+                        </button>
+                      </div>
                     )}
                   </div>
-
-                  {/* Test result */}
-                  {testResult[c.id] && (
-                    <div className={`mt-2 text-[11px] px-2 py-1 rounded ${testResult[c.id].status === 'ok' ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}`}>
-                      {testResult[c.id].loading ? 'Testing…' : testResult[c.id].status === 'ok'
-                        ? `✓ OK${testResult[c.id].email ? ` (${testResult[c.id].email})` : ''}`
-                        : `✗ ${testResult[c.id].message}`}
-                    </div>
-                  )}
-
-                  {/* Last error */}
-                  {c.lastError && (
-                    <div className="mt-2 text-[11px] text-red-400 truncate" title={c.lastError}>
-                      ✗ {c.lastError}
-                    </div>
-                  )}
                 </div>
 
                 {/* Quota panel */}
@@ -1140,7 +1479,7 @@ export default function Connections() {
                 {expandedModels[c.id] && (
                   <div className="border-t border-[var(--border)] px-4 py-3 space-y-2">
                     <div className="flex items-center justify-between">
-                      <label className="text-xs text-[var(--text-muted)]">Allowed Models (one per line, empty = all)</label>
+                      <label className="text-xs text-[var(--text-muted)]">Allowed Models</label>
                       {(c.provider === 'openai' || c.provider === 'openai-compatible') && (
                         <button onClick={() => handleFetchModels(c)} disabled={fetchingModels[c.id]}
                           className="flex items-center gap-1 px-2 py-0.5 bg-[var(--bg)] hover:bg-[var(--bg-hover)] rounded text-xs text-[var(--text-muted)] transition-colors">
@@ -1149,13 +1488,15 @@ export default function Connections() {
                         </button>
                       )}
                     </div>
-                    <textarea value={editModels[c.id] || ''} onChange={e => setEditModels(prev => ({ ...prev, [c.id]: e.target.value }))}
-                      rows={5} placeholder={"claude-opus-4*\nclaude-sonnet-4*"}
-                      className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-lg px-3 py-2 text-xs font-mono focus:border-[var(--accent)] outline-none resize-none" />
+                    <ModelSelector
+                      selected={editModels[c.id] ? editModels[c.id].split('\n').filter(Boolean) : []}
+                      onChange={(models) => setEditModels(prev => ({ ...prev, [c.id]: models.join('\n') }))}
+                      provider={c.provider}
+                    />
                     {fetchedModels[c.id] && (
                       <p className="text-xs text-[var(--success)]">Fetched {fetchedModels[c.id].length} models from API</p>
                     )}
-                    <div className="flex gap-2">
+                    <div className="flex gap-2 pt-2">
                       <button onClick={() => handleSaveModels(c.id)}
                         className="px-3 py-1 bg-[var(--accent)] hover:bg-[var(--accent-hover)] rounded-lg text-xs">Save</button>
                       <button onClick={() => setExpandedModels(prev => ({ ...prev, [c.id]: false }))}
@@ -1163,101 +1504,69 @@ export default function Connections() {
                     </div>
                   </div>
                 )}
-
-                {/* Quota panel - collapsible */}
-                {expandedQuota[c.id] && (
-                  <div className="border-t border-[var(--border)] px-3 py-2">
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-1.5">
-                        <BarChart2 size={12} className="text-[var(--text-muted)]" />
-                        <span className="text-xs font-medium text-[var(--text-muted)]">Quota</span>
-                      </div>
-                      <button onClick={() => handleCheckQuota(c.id)} disabled={quotaLoading[c.id]} className="text-[10px] text-[var(--accent)] hover:underline">
-                        {quotaLoading[c.id] ? 'Refreshing…' : 'Refresh'}
-                      </button>
-                    </div>
-                    {quotaResult[c.id]?.error ? (
-                      <p className="text-xs text-red-400">✗ {quotaResult[c.id].error}</p>
-                    ) : (
-                      <QuotaPanel data={quotaResult[c.id]} loading={quotaLoading[c.id]} />
-                    )}
-                  </div>
-                )}
-
-                {/* Details panel - collapsible */}
-                {expandedDetails[c.id] && (
-                  <div className="border-t border-[var(--border)] px-3 py-2 space-y-2">
-                    <div className="text-xs font-medium text-[var(--text-muted)] mb-1">Details</div>
-                    
-                    {/* Token expiry bar */}
-                    {c.expiresAt && <TokenBar conn={c} />}
-
-                    {/* Model list with test */}
-                    {c.supportedModels?.length > 0 && (
-                      <div className="space-y-1.5">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs text-[var(--text-muted)]">Models ({c.supportedModels.length})</span>
-                          <button
-                            onClick={() => handleTestAllModels(c.id, c.supportedModels)}
-                            className="flex items-center gap-1 text-[10px] text-[var(--accent)] hover:text-[var(--accent-hover)] transition-colors"
-                            title="Test all models"
-                          >
-                            <Play size={10} /> Test All
-                          </button>
-                        </div>
-                        <div className="flex flex-wrap gap-1">
-                          {c.supportedModels.slice(0, 10).map((m: string, i: number) => {
-                            const testResult = modelTestResults[c.id]?.[m]
-                            return (
-                              <div key={i} className="group/model relative inline-flex items-center gap-1">
-                                <span
-                                  className={`text-[10px] font-mono px-1.5 py-0.5 rounded cursor-default ${
-                                    testResult?.status === 'ok' ? 'bg-green-500/10 text-green-400 border border-green-500/20'
-                                    : testResult?.status === 'error' ? 'bg-red-500/10 text-red-400 border border-red-500/20'
-                                    : 'bg-[var(--accent)]/10 text-[var(--accent)]'
-                                  }`}
-                                  title={testResult?.message || m}
-                                >
-                                  {testResult?.status === 'ok' && <CheckCircle2 size={9} className="inline mr-0.5 -mt-px" />}
-                                  {testResult?.status === 'error' && <XCircle size={9} className="inline mr-0.5 -mt-px" />}
-                                  {m}
-                                </span>
-                                <button
-                                  onClick={(e) => { e.stopPropagation(); handleTestModel(c.id, m) }}
-                                  disabled={testResult?.status === 'loading'}
-                                  className="opacity-0 group-hover/model:opacity-100 absolute -top-1 -right-1 p-0.5 bg-[var(--bg-card)] border border-[var(--border)] rounded-full transition-opacity"
-                                  title={`Test ${m}`}
-                                >
-                                  {testResult?.status === 'loading'
-                                    ? <Loader2 size={8} className="animate-spin text-[var(--accent)]" />
-                                    : <Play size={8} className="text-[var(--accent)]" />
-                                  }
-                                </button>
-                              </div>
-                            )
-                          })}
-                          {c.supportedModels.length > 10 && (
-                            <span className="text-[10px] text-[var(--text-muted)] px-1.5 py-0.5">
-                              +{c.supportedModels.length - 10} more
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Additional info */}
-                    {c.baseUrl && (
-                      <div className="text-[11px] text-[var(--text-muted)]">
-                        <span className="opacity-60">Base URL:</span> <span className="font-mono">{c.baseUrl}</span>
-                      </div>
-                    )}
-                  </div>
-                )}
               </div>
             )
           })}
         </div>
       )}
+
+      {deleteTarget && (
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-4"
+          role="presentation"
+          onMouseDown={e => { if (e.target === e.currentTarget) closeDeleteDialog() }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-connection-title"
+            className="w-full max-w-md rounded-xl border border-[var(--border)] bg-[var(--bg-card)] p-5 shadow-2xl"
+            onMouseDown={e => e.stopPropagation()}
+          >
+            <h3 id="delete-connection-title" className="text-lg font-semibold text-[var(--text)]">
+              Remove connection?
+            </h3>
+            <p className="mt-2 text-sm text-[var(--text-muted)]">
+              Hành động này không hoàn tác. Nhập đúng tên kết nối để xác nhận:
+            </p>
+            <p className="mt-2 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 font-mono text-sm text-[var(--text)]">
+              {deleteTarget.name}
+            </p>
+            <label htmlFor="delete-confirm-input" className="mt-4 block text-xs font-medium text-[var(--text-muted)]">
+              Tên kết nối
+            </label>
+            <input
+              id="delete-confirm-input"
+              type="text"
+              value={deleteConfirmName}
+              onChange={e => setDeleteConfirmName(e.target.value)}
+              autoComplete="off"
+              placeholder={deleteTarget.name}
+              disabled={deleteBusy}
+              className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)] focus:ring-1 focus:ring-[var(--accent)]/40 disabled:opacity-50"
+            />
+            <div className="mt-5 flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                onClick={closeDeleteDialog}
+                disabled={deleteBusy}
+                className="rounded-lg border border-[var(--border)] bg-[var(--bg)] px-4 py-2 text-sm text-[var(--text)] transition-colors hover:bg-[var(--bg-hover)] disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void confirmDeleteConnection()}
+                disabled={deleteBusy || deleteConfirmName !== deleteTarget.name}
+                className="rounded-lg bg-[var(--danger)] px-4 py-2 text-sm font-medium text-white transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {deleteBusy ? 'Removing…' : 'Remove connection'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
+

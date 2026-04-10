@@ -223,18 +223,19 @@ func authPoll(store port.CredentialStore) gin.HandlerFunc {
 		}
 
 		conn := domain.ProviderConnection{
-			ID:           uuid.New().String(),
-			Provider:     "kiro",
-			AuthType:     "oauth",
-			Name:         name,
-			Priority:     len(cfg.ProviderConnections) + 1,
-			IsActive:     true,
-			AccessToken:  tokens.AccessToken,
-			RefreshToken: tokens.RefreshToken,
-			ExpiresAt:    time.Now().Add(time.Duration(expiresIn) * time.Second).UTC().Format(time.RFC3339),
-			ExpiresIn:    expiresIn,
-			Email:        email,
-			TestStatus:   "active",
+			ID:              uuid.New().String(),
+			Provider:        "kiro",
+			AuthType:        "oauth",
+			Name:            name,
+			Priority:        len(cfg.ProviderConnections) + 1,
+			IsActive:        true,
+			AccessToken:     tokens.AccessToken,
+			RefreshToken:    tokens.RefreshToken,
+			ExpiresAt:       time.Now().Add(time.Duration(expiresIn) * time.Second).UTC().Format(time.RFC3339),
+			ExpiresIn:       expiresIn,
+			Email:           email,
+			TestStatus:      "active",
+			SupportedModels: domain.DefaultKiroModels(),
 			ProviderSpecificData: map[string]interface{}{
 				"authMethod":   session.AuthMethod,
 				"provider":     providerLabel,
@@ -375,18 +376,19 @@ func authExchangeSocial(store port.CredentialStore) gin.HandlerFunc {
 		}
 
 		conn := domain.ProviderConnection{
-			ID:           uuid.New().String(),
-			Provider:     "kiro",
-			AuthType:     "oauth",
-			Name:         name,
-			Priority:     len(cfg.ProviderConnections) + 1,
-			IsActive:     true,
-			AccessToken:  tokens.AccessToken,
-			RefreshToken: tokens.RefreshToken,
-			ExpiresAt:    time.Now().Add(time.Duration(expiresIn) * time.Second).UTC().Format(time.RFC3339),
-			ExpiresIn:    expiresIn,
-			Email:        email,
-			TestStatus:   "active",
+			ID:              uuid.New().String(),
+			Provider:        "kiro",
+			AuthType:        "oauth",
+			Name:            name,
+			Priority:        len(cfg.ProviderConnections) + 1,
+			IsActive:        true,
+			AccessToken:     tokens.AccessToken,
+			RefreshToken:    tokens.RefreshToken,
+			ExpiresAt:       time.Now().Add(time.Duration(expiresIn) * time.Second).UTC().Format(time.RFC3339),
+			ExpiresIn:       expiresIn,
+			Email:           email,
+			TestStatus:      "active",
+			SupportedModels: domain.DefaultKiroModels(),
 			ProviderSpecificData: map[string]interface{}{
 				"profileArn": tokens.ProfileArn,
 				"authMethod": session.Provider,
@@ -479,7 +481,7 @@ func apiFetchConnectionModels(store port.CredentialStore) gin.HandlerFunc {
 
 		if (resp.StatusCode == 401 || resp.StatusCode == 403) && conn.Provider == "openai" && conn.RefreshToken != "" {
 			resp.Body.Close()
-			updatedConn, refErr := auth.RefreshOpenAIToken(conn, store)
+			updatedConn, refErr := refreshOpenAIConnection(conn, store)
 			if refErr == nil {
 				conn = updatedConn
 				req, _ = http.NewRequest("GET", modelsURL, nil)
@@ -543,10 +545,10 @@ func apiFetchConnectionModels(store port.CredentialStore) gin.HandlerFunc {
 // token URL: https://auth.openai.com/oauth/token
 
 const (
-	openaiClientID   = "app_EMoamEEZ73f0CkXaXp7hrann"
-	openaiAuthURL    = "https://auth.openai.com/oauth/authorize"
-	openaiTokenURL   = "https://auth.openai.com/oauth/token"
-	openaiScope      = "openid profile email offline_access"
+	openaiClientID     = "app_EMoamEEZ73f0CkXaXp7hrann"
+	openaiAuthURL      = "https://auth.openai.com/oauth/authorize"
+	openaiTokenURL     = "https://auth.openai.com/oauth/token"
+	openaiScope        = "openid profile email offline_access"
 	openaiCallbackPort = 1455
 )
 
@@ -783,4 +785,3 @@ func authOpenAIExchange(store port.CredentialStore) gin.HandlerFunc {
 		})
 	}
 }
-

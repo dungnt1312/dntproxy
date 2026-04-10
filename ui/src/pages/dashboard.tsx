@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { api } from '../api'
 import { Link2, Layers, Box, KeyRound } from 'lucide-react'
 
@@ -29,21 +30,21 @@ export default function Dashboard() {
     <div>
       <h2 className="text-2xl font-bold mb-6">Dashboard</h2>
 
-      <div className="grid grid-cols-4 gap-4 mb-8">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-8">
         {cards.map(({ label, value, icon: Icon, color, href }) => (
-          <a key={label} href={href} className="bg-[var(--bg-card)] rounded-xl p-4 border border-[var(--border)] hover:border-[var(--accent)] transition-colors">
+          <Link key={label} to={href} className="bg-[var(--bg-card)] rounded-xl p-4 border border-[var(--border)] hover:border-[var(--accent)] transition-colors">
             <div className="flex items-center justify-between mb-2">
               <span className="text-sm text-[var(--text-muted)]">{label}</span>
               <Icon size={18} className={color} />
             </div>
             <div className="text-3xl font-bold">{value}</div>
-          </a>
+          </Link>
         ))}
       </div>
 
       <h3 className="text-lg font-semibold mb-3">Connection Status</h3>
       {conns.length === 0 ? (
-        <p className="text-[var(--text-muted)]">No connections. <a href="/connections" className="text-[var(--accent)] underline">Add one</a></p>
+        <p className="text-[var(--text-muted)]">No connections. <Link to="/connections" className="text-[var(--accent)] underline">Add one</Link></p>
       ) : (
         <div className="space-y-2">
           {conns.map((c: any) => (

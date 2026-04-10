@@ -31,4 +31,7 @@ type CredentialStore interface {
 
 	// GetSettings returns app settings.
 	GetSettings() (*domain.Settings, error)
+
+	// GetModelRegistry returns the model registry.
+	GetModelRegistry() (*domain.ModelRegistry, error)
 }

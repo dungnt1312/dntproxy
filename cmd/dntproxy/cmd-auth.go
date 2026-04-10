@@ -51,12 +51,15 @@ func buildAuthCmd() *cobra.Command {
 
 func runAuthAdd(cmd *cobra.Command, args []string) error {
 	fmt.Println("Choose authentication method:")
+	fmt.Println("\nKiro (AWS CodeWhisperer):")
 	fmt.Println("  1. AWS Builder ID (device code)")
 	fmt.Println("  2. AWS IAM Identity Center / IDC (device code)")
 	fmt.Println("  3. Google social login")
 	fmt.Println("  4. GitHub social login")
 	fmt.Println("  5. Import refresh token")
-	fmt.Print("\nChoice [1-5]: ")
+	fmt.Println("\nOpenAI:")
+	fmt.Println("  6. OpenAI OAuth (Authorization Code + PKCE)")
+	fmt.Print("\nChoice [1-6]: ")
 
 	reader := bufio.NewReader(os.Stdin)
 	choice, _ := reader.ReadString('\n')
@@ -73,6 +76,8 @@ func runAuthAdd(cmd *cobra.Command, args []string) error {
 		return runAuthSocial("github")
 	case "5":
 		return runAuthImport(reader)
+	case "6":
+		return runAuthOpenAI()
 	default:
 		return fmt.Errorf("invalid choice: %s", choice)
 	}
@@ -395,6 +400,99 @@ func runAuthRemove(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println("Connection removed.")
+	return nil
+}
+
+func runAuthOpenAI() error {
+	codeVerifier, codeChallenge, state, err := auth.GeneratePKCE()
+	if err != nil {
+		return fmt.Errorf("generate PKCE: %w", err)
+	}
+
+	// Use localhost callback
+	redirectURI := "http://localhost:20129/callback"
+	authURL := auth.BuildOpenAIAuthURL(redirectURI, state, codeChallenge)
+
+	fmt.Printf("\n[OpenAI] Open this URL in your browser:\n  %s\n", authURL)
+	fmt.Println("\nAfter login, you'll be redirected to localhost.")
+	fmt.Println("Copy the 'code' parameter from the URL and paste it here.")
+	fmt.Printf("\nState (for verification): %s\n", state)
+
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Print("\nEnter authorization code: ")
+	code, _ := reader.ReadString('\n')
+	code = strings.TrimSpace(code)
+	if code == "" {
+		return fmt.Errorf("authorization code is required")
+	}
+
+	fmt.Println("Exchanging code for tokens...")
+
+	tokens, err := auth.ExchangeOpenAICode(code, redirectURI, codeVerifier)
+	if err != nil {
+		return fmt.Errorf("exchange code: %w", err)
+	}
+
+	return saveOpenAIConnection(tokens)
+}
+
+func saveOpenAIConnection(tokens *auth.OpenAITokenResponse) error {
+	store, err := getStore()
+	if err != nil {
+		return err
+	}
+
+	cfg, err := store.Load()
+	if err != nil {
+		return err
+	}
+
+	email := auth.ExtractEmailFromJWT(tokens.AccessToken)
+	name := email
+	if name == "" {
+		name = fmt.Sprintf("OpenAI Account %d", len(cfg.ProviderConnections)+1)
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	expiresIn := tokens.ExpiresIn
+	if expiresIn == 0 {
+		expiresIn = 3600
+	}
+
+	conn := domain.ProviderConnection{
+		ID:           uuid.New().String(),
+		Provider:     "openai",
+		AuthType:     "oauth",
+		Name:         name,
+		Priority:     len(cfg.ProviderConnections) + 1,
+		IsActive:     true,
+		AccessToken:  tokens.AccessToken,
+		RefreshToken: tokens.RefreshToken,
+		ExpiresAt:    time.Now().Add(time.Duration(expiresIn) * time.Second).UTC().Format(time.RFC3339),
+		ExpiresIn:    expiresIn,
+		Email:        email,
+		TestStatus:   "active",
+		ProviderSpecificData: map[string]interface{}{
+			"authMethod": "openai-oauth",
+			"provider":   "OpenAI",
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	cfg.ProviderConnections = append(cfg.ProviderConnections, conn)
+	if err := store.Save(cfg); err != nil {
+		return fmt.Errorf("save connection: %w", err)
+	}
+
+	fmt.Printf("\nOpenAI connection saved!\n")
+	fmt.Printf("  ID:       %s\n", conn.ID)
+	fmt.Printf("  Name:     %s\n", conn.Name)
+	fmt.Printf("  Provider: openai\n")
+	if email != "" {
+		fmt.Printf("  Email:    %s\n", email)
+	}
+
 	return nil
 }
 

@@ -3,6 +3,7 @@ package kiro
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -20,24 +21,24 @@ type SSEChunk struct {
 
 // SSEChoice is a choice in a streaming chunk.
 type SSEChoice struct {
-	Index        int       `json:"index"`
-	Delta        SSEDelta  `json:"delta"`
-	FinishReason *string   `json:"finish_reason"`
+	Index        int      `json:"index"`
+	Delta        SSEDelta `json:"delta"`
+	FinishReason *string  `json:"finish_reason"`
 }
 
 // SSEDelta is the delta content in a streaming chunk.
 type SSEDelta struct {
-	Role      string         `json:"role,omitempty"`
-	Content   string         `json:"content,omitempty"`
-	ToolCalls []SSEToolCall  `json:"tool_calls,omitempty"`
+	Role      string        `json:"role,omitempty"`
+	Content   string        `json:"content,omitempty"`
+	ToolCalls []SSEToolCall `json:"tool_calls,omitempty"`
 }
 
 // SSEToolCall is a tool call in streaming format.
 type SSEToolCall struct {
-	Index    int             `json:"index"`
-	ID       string          `json:"id,omitempty"`
-	Type     string          `json:"type,omitempty"`
-	Function *SSEToolCallFn  `json:"function,omitempty"`
+	Index    int            `json:"index"`
+	ID       string         `json:"id,omitempty"`
+	Type     string         `json:"type,omitempty"`
+	Function *SSEToolCallFn `json:"function,omitempty"`
 }
 
 // SSEToolCallFn is the function part of a streaming tool call.
@@ -51,6 +52,21 @@ type SSEUsage struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
 	TotalTokens      int `json:"total_tokens"`
+}
+
+// UsageReport is the provider usage data captured from stream events.
+type UsageReport struct {
+	InputTokens  int
+	OutputTokens int
+	TotalTokens  int
+	Source       string
+}
+
+// PayloadReport is a bounded response preview captured from provider events.
+type PayloadReport struct {
+	ResponsePreview string
+	Truncated       bool
+	Source          string
 }
 
 // ResponseTransformer converts parsed EventStream frames to OpenAI SSE chunks.
@@ -68,6 +84,14 @@ type ResponseTransformer struct {
 	hasCtxUsage  bool
 	hasMetering  bool
 	finishSent   bool
+	usageSource  string
+	usageSent    bool
+	onUsage      func(UsageReport)
+	preview      strings.Builder
+	previewBytes int
+	previewCut   bool
+	payloadSent  bool
+	onPayload    func(PayloadReport)
 }
 
 // NewResponseTransformer creates a new transformer for a response stream.
@@ -78,6 +102,16 @@ func NewResponseTransformer(model string) *ResponseTransformer {
 		created:     time.Now().Unix(),
 		seenToolIDs: make(map[string]int),
 	}
+}
+
+// SetUsageCallback registers a hook for usage persistence.
+func (t *ResponseTransformer) SetUsageCallback(callback func(UsageReport)) {
+	t.onUsage = callback
+}
+
+// SetPayloadCallback registers a hook for response payload preview persistence.
+func (t *ResponseTransformer) SetPayloadCallback(callback func(PayloadReport)) {
+	t.onPayload = callback
 }
 
 // TransformFrame converts a single EventStream frame to zero or more SSE lines.
@@ -136,13 +170,18 @@ func (t *ResponseTransformer) Flush() [][]byte {
 		if t.hasToolCalls {
 			finishReason = "tool_calls"
 		}
+		if t.usage == nil && t.totalContent > 0 {
+			t.estimateUsage()
+		}
 		chunk := t.buildChunk(SSEDelta{}, &finishReason)
 		if t.usage != nil {
 			chunk.Usage = t.usage
+			t.notifyUsage()
 		}
 		results = append(results, t.marshalSSE(chunk))
 	}
 
+	t.notifyPayload()
 	results = append(results, []byte("data: [DONE]\n\n"))
 	return results
 }
@@ -155,6 +194,7 @@ func (t *ResponseTransformer) handleAssistantResponse(frame *EventFrame) []byte 
 		return nil
 	}
 
+	t.capturePayloadText(payload.Content)
 	t.totalContent += len(payload.Content)
 
 	delta := SSEDelta{Content: payload.Content}
@@ -174,6 +214,7 @@ func (t *ResponseTransformer) handleCodeEvent(frame *EventFrame) []byte {
 		return nil
 	}
 
+	t.capturePayloadText(payload.Content)
 	t.totalContent += len(payload.Content)
 	delta := SSEDelta{Content: payload.Content}
 	t.chunkIndex++
@@ -255,6 +296,8 @@ func (t *ResponseTransformer) emitToolUse(toolCallID, toolName string, toolInput
 			argsStr = string(b)
 		}
 
+		t.capturePayloadText(fmt.Sprintf("\n[tool:%s] %s", toolName, argsStr))
+
 		delta := SSEDelta{
 			ToolCalls: []SSEToolCall{{
 				Index: toolIndex,
@@ -318,6 +361,8 @@ func (t *ResponseTransformer) handleMetricsEvent(frame *EventFrame) {
 			CompletionTokens: output,
 			TotalTokens:      input + output,
 		}
+		t.usageSource = "provider_metrics"
+		t.notifyUsage()
 	}
 }
 
@@ -326,19 +371,7 @@ func (t *ResponseTransformer) emitFinalChunk() []byte {
 
 	// Estimate tokens if not available from metrics
 	if t.usage == nil {
-		outputTokens := 0
-		if t.totalContent > 0 {
-			outputTokens = max(1, t.totalContent/4)
-		}
-		inputTokens := 0
-		if t.ctxPct > 0 {
-			inputTokens = int(t.ctxPct * 200000 / 100)
-		}
-		t.usage = &SSEUsage{
-			PromptTokens:     inputTokens,
-			CompletionTokens: outputTokens,
-			TotalTokens:      inputTokens + outputTokens,
-		}
+		t.estimateUsage()
 	}
 
 	finishReason := "stop"
@@ -348,7 +381,77 @@ func (t *ResponseTransformer) emitFinalChunk() []byte {
 
 	chunk := t.buildChunk(SSEDelta{}, &finishReason)
 	chunk.Usage = t.usage
+	t.notifyUsage()
 	return t.marshalSSE(chunk)
+}
+
+func (t *ResponseTransformer) estimateUsage() {
+	outputTokens := 0
+	if t.totalContent > 0 {
+		outputTokens = max(1, t.totalContent/4)
+	}
+	inputTokens := 0
+	if t.ctxPct > 0 {
+		inputTokens = int(t.ctxPct * 200000 / 100)
+	}
+	t.usage = &SSEUsage{
+		PromptTokens:     inputTokens,
+		CompletionTokens: outputTokens,
+		TotalTokens:      inputTokens + outputTokens,
+	}
+	t.usageSource = "estimated"
+}
+
+func (t *ResponseTransformer) notifyUsage() {
+	if t.usageSent || t.onUsage == nil || t.usage == nil || t.usage.TotalTokens <= 0 {
+		return
+	}
+	source := t.usageSource
+	if source == "" {
+		source = "provider_metrics"
+	}
+	t.usageSent = true
+	t.onUsage(UsageReport{
+		InputTokens:  t.usage.PromptTokens,
+		OutputTokens: t.usage.CompletionTokens,
+		TotalTokens:  t.usage.TotalTokens,
+		Source:       source,
+	})
+}
+
+func (t *ResponseTransformer) capturePayloadText(text string) {
+	const maxPreviewBytes = 4000
+	if text == "" || t.previewBytes >= maxPreviewBytes {
+		if text != "" {
+			t.previewCut = true
+		}
+		return
+	}
+	for _, r := range text {
+		runeBytes := len(string(r))
+		if t.previewBytes+runeBytes > maxPreviewBytes {
+			t.previewCut = true
+			return
+		}
+		t.preview.WriteRune(r)
+		t.previewBytes += runeBytes
+	}
+}
+
+func (t *ResponseTransformer) notifyPayload() {
+	if t.payloadSent || t.onPayload == nil {
+		return
+	}
+	preview := strings.TrimSpace(t.preview.String())
+	if preview == "" {
+		return
+	}
+	t.payloadSent = true
+	t.onPayload(PayloadReport{
+		ResponsePreview: preview,
+		Truncated:       t.previewCut,
+		Source:          "kiro_eventstream",
+	})
 }
 
 func (t *ResponseTransformer) buildChunk(delta SSEDelta, finishReason *string) *SSEChunk {

@@ -46,7 +46,13 @@ export default function Settings() {
               <label className="block text-sm font-medium">Require API Key</label>
               <p className="text-xs text-[var(--text-muted)]">Enforce Bearer token on /v1/* routes.</p>
             </div>
-            <button onClick={() => setSettings({ ...settings, requireApiKey: !settings.requireApiKey })} className={`w-11 h-6 rounded-full transition-colors relative ${settings.requireApiKey ? 'bg-[var(--accent)]' : 'bg-[var(--border)]'}`}>
+            <button
+              onClick={() => setSettings({ ...settings, requireApiKey: !settings.requireApiKey })}
+              role="switch"
+              aria-checked={Boolean(settings.requireApiKey)}
+              aria-label="Toggle Require API Key"
+              className={`w-11 h-6 rounded-full transition-colors relative ${settings.requireApiKey ? 'bg-[var(--accent)]' : 'bg-[var(--border)]'}`}
+            >
               <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-transform ${settings.requireApiKey ? 'left-5.5' : 'left-0.5'}`} />
             </button>
           </div>

@@ -1,14 +1,18 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
+	"time"
 
 	httpAdapter "github.com/dungnt/dntproxy/internal/adapter/http"
 	"github.com/dungnt/dntproxy/internal/adapter/storage"
+	"github.com/dungnt/dntproxy/internal/logger"
 	"github.com/dungnt/dntproxy/internal/service"
 	"github.com/spf13/cobra"
 )
@@ -75,6 +79,13 @@ func runServe(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("init storage: %w", err)
 	}
+	logStore, err := storage.NewSQLiteLogStore(filepath.Join(store.DataDir(), "logs.db"))
+	if err != nil {
+		return fmt.Errorf("init log storage: %w", err)
+	}
+	defer logStore.Close()
+	logger.Init(logStore)
+	go runLogRetention(logStore)
 
 	cfg, err := store.Load()
 	if err != nil {
@@ -121,4 +132,16 @@ func runServe(cmd *cobra.Command, args []string) error {
 	scheduler.Stop()
 	log.Printf("[dntproxy] Shutdown complete")
 	return nil
+}
+
+func runLogRetention(logStore *storage.SQLiteLogStore) {
+	ticker := time.NewTicker(24 * time.Hour)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		cutoff := time.Now().AddDate(0, 0, -30).UnixMilli()
+		if err := logStore.PurgeOlderThan(context.Background(), cutoff); err != nil {
+			log.Printf("[LOG] Failed to purge old logs: %s", err)
+		}
+	}
 }

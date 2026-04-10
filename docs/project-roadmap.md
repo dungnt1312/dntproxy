@@ -22,8 +22,9 @@ This roadmap captures the progress and future plans for `dntproxy`.
 - [x] Standup React User Interface to configure the application states via a simple Web GUI (`ui/`).
 
 ## Phase 4: Polish & Telemetry (🚧 In Progress)
-- [ ] **Request Logging**: Implement detailed logging output mechanisms for HTTP audits.
+- [x] **Request Logging**: Persist structured HTTP/provider logs to local SQLite with 30-day retention and connection-level filtering.
+- [x] **Logs UX**: Render logs as a request timeline with connection filters, usage/cost badges, and bounded response payload previews.
 - [ ] **Graceful Shutdown**: Listen for SIGTERM / SIGINT and handle open persistent SSE connections gracefully.
 - [ ] **Cross-Platform Delivery**: Enhance build configuration using Makefiles.
 - [ ] **Dockerization**: Provide an official `Dockerfile` and `docker-compose.yml` pattern.
-- [ ] **Metrics Validation**: Surface usage token calculation metrics correctly down the pipeline natively.
+- [x] **Metrics Validation**: Capture provider/SSE usage tokens and estimate cost from configurable local model price profiles.

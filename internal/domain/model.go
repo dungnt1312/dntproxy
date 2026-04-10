@@ -5,6 +5,7 @@ type ModelInfo struct {
 	Provider      string
 	Model         string
 	ProviderAlias string
+	Definition    *ModelDefinition // Optional: model metadata from registry
 }
 
 // Combo represents a named group of models with fallback/round-robin.

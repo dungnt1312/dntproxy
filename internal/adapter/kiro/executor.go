@@ -27,7 +27,7 @@ func NewExecutor() *Executor {
 
 // Execute sends a translated request to Kiro and returns a streaming reader
 // that emits OpenAI-compatible SSE data.
-func (e *Executor) Execute(model string, body []byte, credentials *domain.Credentials) (io.ReadCloser, int, error) {
+func (e *Executor) Execute(model string, body []byte, credentials *domain.Credentials, requestID string) (io.ReadCloser, int, error) {
 	// Parse the OpenAI request
 	var openaiReq OpenAIRequest
 	if err := json.Unmarshal(body, &openaiReq); err != nil {
@@ -66,15 +66,24 @@ func (e *Executor) Execute(model string, body []byte, credentials *domain.Creden
 		req.Header.Set("Authorization", "Bearer "+credentials.AccessToken)
 	}
 
-	reqID := uuid.New().String()
 	appLogger := logger.Get()
 
 	log.Printf("[KIRO] --> %s %s | conn=%s | model=%s | req_id=%s",
-		req.Method, kiroBaseURL, credentials.ConnectionName, model, reqID)
+		req.Method, kiroBaseURL, credentials.ConnectionName, model, requestID)
 	log.Printf("[KIRO]     Authorization: Bearer %s*** | Content-Type: %s",
 		maskedToken(credentials.AccessToken), req.Header.Get("Content-Type"))
-	appLogger.AddKiro("--> %s %s | conn=%s | model=%s | req_id=%s",
-		req.Method, kiroBaseURL, credentials.ConnectionName, model, reqID)
+	appLogger.AddEntry(domain.LogEntry{
+		Provider:       "KIRO",
+		Direction:      "outbound",
+		Method:         req.Method,
+		Path:           kiroBaseURL,
+		ConnectionID:   credentials.ConnectionID,
+		ConnectionName: credentials.ConnectionName,
+		Model:          model,
+		RequestID:      requestID,
+		Message:        "Kiro request sent",
+		BodySize:       len(payloadBytes),
+	})
 
 	start := time.Now()
 
@@ -86,9 +95,21 @@ func (e *Executor) Execute(model string, body []byte, credentials *domain.Creden
 	if err != nil {
 		errMsg := fmt.Sprintf("kiro request failed: %s", err)
 		log.Printf("[KIRO] <-- %s | conn=%s | model=%s | status=502 | duration=%s | req_id=%s | error=%s",
-			kiroBaseURL, credentials.ConnectionName, model, duration, reqID, err)
-		appLogger.AddError("KIRO", "<-- %s | conn=%s | model=%s | status=502 | duration=%s | req_id=%s | error=%s",
-			kiroBaseURL, credentials.ConnectionName, model, duration, reqID, errMsg)
+			kiroBaseURL, credentials.ConnectionName, model, duration, requestID, err)
+		appLogger.AddEntry(domain.LogEntry{
+			Level:          "ERROR",
+			Provider:       "KIRO",
+			Direction:      "response",
+			Path:           kiroBaseURL,
+			StatusCode:     502,
+			DurationMs:     duration.Milliseconds(),
+			ConnectionID:   credentials.ConnectionID,
+			ConnectionName: credentials.ConnectionName,
+			Model:          model,
+			RequestID:      requestID,
+			Message:        "Kiro request failed",
+			Error:          errMsg,
+		})
 		return nil, 502, fmt.Errorf("kiro request failed: %w", err)
 	}
 
@@ -96,13 +117,28 @@ func (e *Executor) Execute(model string, body []byte, credentials *domain.Creden
 	resp.Body.Close()
 
 	log.Printf("[KIRO] <-- %s | conn=%s | model=%s | status=%d | duration=%s | req_id=%s | body_size=%d",
-		kiroBaseURL, credentials.ConnectionName, model, resp.StatusCode, duration, reqID, len(bodyBytes))
-	appLogger.AddKiro("<-- %s | conn=%s | model=%s | status=%d | duration=%s | req_id=%s | body_size=%d",
-		kiroBaseURL, credentials.ConnectionName, model, resp.StatusCode, duration, reqID, len(bodyBytes))
+		kiroBaseURL, credentials.ConnectionName, model, resp.StatusCode, duration, requestID, len(bodyBytes))
+	responseEntry := domain.LogEntry{
+		Level:          responseLevel(resp.StatusCode),
+		Provider:       "KIRO",
+		Direction:      "response",
+		Path:           kiroBaseURL,
+		StatusCode:     resp.StatusCode,
+		DurationMs:     duration.Milliseconds(),
+		ConnectionID:   credentials.ConnectionID,
+		ConnectionName: credentials.ConnectionName,
+		Model:          model,
+		RequestID:      requestID,
+		Message:        "Kiro response received",
+		BodySize:       len(bodyBytes),
+	}
 
 	if resp.StatusCode != http.StatusOK {
+		responseEntry.Error = string(bodyBytes)
+		appLogger.AddEntry(responseEntry)
 		return nil, resp.StatusCode, fmt.Errorf("kiro returned %d: %s", resp.StatusCode, string(bodyBytes))
 	}
+	appLogger.AddEntry(responseEntry)
 
 	// Restore body for streaming
 	resp.Body = io.NopCloser(newBytesReader(bodyBytes))
@@ -115,6 +151,27 @@ func (e *Executor) Execute(model string, body []byte, credentials *domain.Creden
 		defer resp.Body.Close()
 
 		transformer := NewResponseTransformer(model)
+		transformer.SetUsageCallback(func(usage UsageReport) {
+			appLogger.AddUsage("KIRO", requestID, credentials.ConnectionID, credentials.ConnectionName,
+				model, usage.InputTokens, usage.OutputTokens, usage.Source)
+		})
+		transformer.SetPayloadCallback(func(payload PayloadReport) {
+			metadata, _ := json.Marshal(map[string]interface{}{
+				"responsePreview": payload.ResponsePreview,
+				"truncated":       payload.Truncated,
+				"source":          payload.Source,
+			})
+			appLogger.AddEntry(domain.LogEntry{
+				Provider:       "KIRO",
+				Direction:      "payload",
+				ConnectionID:   credentials.ConnectionID,
+				ConnectionName: credentials.ConnectionName,
+				Model:          model,
+				RequestID:      requestID,
+				Message:        "Response payload captured",
+				MetadataJSON:   string(metadata),
+			})
+		})
 		buf := make([]byte, 0, 64*1024)
 		readBuf := make([]byte, 32*1024)
 
@@ -161,6 +218,13 @@ func maskedToken(token string) string {
 		return "***"
 	}
 	return token[:4] + "***" + token[len(token)-4:]
+}
+
+func responseLevel(status int) string {
+	if status >= 400 {
+		return "ERROR"
+	}
+	return "INFO"
 }
 
 // bytesReader wraps a byte slice as an io.Reader.

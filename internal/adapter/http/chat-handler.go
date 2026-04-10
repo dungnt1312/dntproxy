@@ -5,14 +5,21 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"time"
 
+	"github.com/dungnt/dntproxy/internal/domain"
+	"github.com/dungnt/dntproxy/internal/logger"
 	"github.com/dungnt/dntproxy/internal/port"
 	"github.com/dungnt/dntproxy/internal/service"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 func chatHandler(chatService *service.ChatService, store port.CredentialStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		start := time.Now()
+		requestID := uuid.New().String()
+
 		// Check API key if required
 		settings, _ := store.GetSettings()
 		if settings != nil && settings.RequireAPIKey {
@@ -45,7 +52,21 @@ func chatHandler(chatService *service.ChatService, store port.CredentialStore) g
 
 		log.Printf("[CHAT] POST /v1/chat/completions | model=%s", partial.Model)
 
-		result := chatService.HandleChat(body, partial.Model)
+		result := chatService.HandleChat(body, partial.Model, requestID)
+		logger.Get().AddEntry(domain.LogEntry{
+			Level:      statusLevel(result.StatusCode),
+			Provider:   "CLIENT",
+			Direction:  "inbound",
+			Method:     c.Request.Method,
+			Path:       c.Request.URL.Path,
+			StatusCode: result.StatusCode,
+			DurationMs: time.Since(start).Milliseconds(),
+			Model:      partial.Model,
+			RequestID:  requestID,
+			Message:    "Client chat completion request",
+			Error:      result.Error,
+			BodySize:   len(body),
+		})
 
 		if result.Stream != nil {
 			c.Header("Content-Type", "text/event-stream")
@@ -77,4 +98,11 @@ func chatHandler(chatService *service.ChatService, store port.CredentialStore) g
 			"error": gin.H{"message": result.Error},
 		})
 	}
+}
+
+func statusLevel(status int) string {
+	if status >= 400 {
+		return "ERROR"
+	}
+	return "INFO"
 }

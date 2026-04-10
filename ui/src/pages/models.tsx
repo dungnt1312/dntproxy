@@ -40,11 +40,10 @@ export default function Models() {
 
       {/* Kiro Models */}
       <h3 className="text-lg font-semibold mb-3 flex items-center gap-2"><Box size={18} className="text-green-400" /> Kiro Models</h3>
-      <div className="grid grid-cols-2 gap-2 mb-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-6">
         {kiroModels.map((m: any) => (
           <div key={m.id} className="bg-[var(--bg-card)] rounded-lg p-3 border border-[var(--border)]">
             <span className="font-mono text-sm">{m.id}</span>
-            <span className="text-xs text-[var(--text-muted)] ml-2">{m.name}</span>
           </div>
         ))}
       </div>
@@ -53,11 +52,10 @@ export default function Models() {
       {openaiModels.length > 0 && (
         <>
           <h3 className="text-lg font-semibold mb-3 flex items-center gap-2"><Cpu size={18} className="text-emerald-400" /> OpenAI Models</h3>
-          <div className="grid grid-cols-2 gap-2 mb-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-6">
             {openaiModels.map((m: any) => (
               <div key={m.id} className="bg-[var(--bg-card)] rounded-lg p-3 border border-[var(--border)]">
                 <span className="font-mono text-sm">{m.id}</span>
-                <span className="text-xs text-[var(--text-muted)] ml-2">{m.name}</span>
               </div>
             ))}
           </div>
@@ -68,7 +66,7 @@ export default function Models() {
       {comboModels.length > 0 && (
         <>
           <h3 className="text-lg font-semibold mb-3 flex items-center gap-2"><Zap size={18} className="text-amber-400" /> Combo Models</h3>
-          <div className="grid grid-cols-2 gap-2 mb-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-6">
             {comboModels.map((m: any) => (
               <div key={m.id} className="bg-[var(--bg-card)] rounded-lg p-3 border border-[var(--border)]">
                 <span className="font-mono text-sm">{m.id}</span>
@@ -95,7 +93,7 @@ export default function Models() {
           </div>
           <div className="flex-1">
             <label className="block text-xs text-[var(--text-muted)] mb-1">Model</label>
-            <input value={model} onChange={e => setModel(e.target.value)} placeholder="kr/claude-sonnet-4.5" className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm" />
+            <input value={model} onChange={e => setModel(e.target.value)} placeholder="kiro/claude-sonnet-4.5" className="w-full bg-[var(--bg)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm" />
           </div>
           <button onClick={handleAddAlias} className="px-4 py-2 bg-[var(--accent)] hover:bg-[var(--accent-hover)] rounded-lg text-sm transition-colors">Save</button>
         </div>

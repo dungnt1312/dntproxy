@@ -7,6 +7,7 @@ type AppConfig struct {
 	ModelAliases        AliasMap             `json:"modelAliases"`
 	APIKeys             []APIKey             `json:"apiKeys"`
 	Settings            Settings             `json:"settings"`
+	ModelRegistry       *ModelRegistry       `json:"modelRegistry,omitempty"`
 }
 
 // Settings holds app-level settings.
@@ -40,5 +41,6 @@ func DefaultConfig() AppConfig {
 			RequireAPIKey:         false,
 			Port:                  20128,
 		},
+		ModelRegistry: DefaultModelRegistry(),
 	}
 }

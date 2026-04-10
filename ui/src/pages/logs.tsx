@@ -1,190 +1,111 @@
-import { useEffect, useState, useRef } from 'react'
-import { Terminal, Trash2, RefreshCw } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Terminal } from 'lucide-react'
+import { api } from '../api'
+import LogConnectionList from '../components/log-connection-list'
+import LogFilterBar from '../components/log-filter-bar'
+import LogSummaryBar from '../components/log-summary-bar'
+import LogTable from '../components/log-table'
+import type { LogConnectionSummary, LogEntry, LogFilters, LogSummary } from '../types/logs'
 
-interface LogEntry {
-  timestamp: string
-  level: string
-  provider: string
-  message: string
-}
-
-function parseLogMessage(msg: string) {
-  const parts: Record<string, string> = {}
-  
-  const urlMatch = msg.match(/\b(https?:\/\/[^\s|]+)/)
-  if (urlMatch) parts.url = urlMatch[1]
-  
-  const methodMatch = msg.match(/\b(GET|POST|PUT|DELETE)\b/)
-  if (methodMatch) parts.method = methodMatch[1]
-  
-  const connMatch = msg.match(/conn=([^|\s]+)/)
-  if (connMatch) parts.conn = connMatch[1]
-  
-  const modelMatch = msg.match(/model=([^|\s]+)/)
-  if (modelMatch) parts.model = modelMatch[1]
-  
-  const statusMatch = msg.match(/status=(\d+)/)
-  if (statusMatch) parts.status = statusMatch[1]
-  
-  const durationMatch = msg.match(/duration=([^|\s]+)/)
-  if (durationMatch) parts.duration = durationMatch[1]
-  
-  const errorMatch = msg.match(/error=([^|\s]+)/)
-  if (errorMatch) parts.error = errorMatch[1]
-  
-  return parts
+const defaultFilters: LogFilters = {
+  range: '24h',
+  connectionId: 'all',
+  provider: 'all',
+  level: 'all',
+  q: '',
 }
 
 export default function Logs() {
   const [logs, setLogs] = useState<LogEntry[]>([])
-  const [autoRefresh, setAutoRefresh] = useState(true)
-  const containerRef = useRef<HTMLDivElement>(null)
+  const [summary, setSummary] = useState<LogSummary | null>(null)
+  const [connections, setConnections] = useState<LogConnectionSummary[]>([])
+  const [filters, setFilters] = useState(defaultFilters)
+  const [live, setLive] = useState(true)
   const eventSourceRef = useRef<EventSource | null>(null)
 
-  useEffect(() => {
-    loadLogs()
-    startStream()
-    return () => {
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close()
-      }
-    }
-  }, [])
+  const loadLogs = useCallback(async () => {
+    const [logData, summaryData, connectionData] = await Promise.all([
+      api.getLogs(filters),
+      api.getLogSummary(filters),
+      api.getLogConnections({ range: filters.range }),
+    ])
+    setLogs(Array.isArray(logData) ? logData : [])
+    setSummary(summaryData)
+    setConnections(Array.isArray(connectionData) ? connectionData : [])
+  }, [filters])
 
   useEffect(() => {
-    if (autoRefresh && containerRef.current) {
-      containerRef.current.scrollTop = containerRef.current.scrollHeight
-    }
-  }, [logs, autoRefresh])
+    loadLogs().catch(console.error)
+  }, [loadLogs])
 
-  async function loadLogs() {
-    try {
-      const res = await fetch('/api/logs')
-      const data = await res.json()
-      setLogs(data || [])
-    } catch (e) {
-      console.error('Failed to load logs:', e)
-    }
-  }
+  useEffect(() => {
+    eventSourceRef.current?.close()
+    if (!live) return
 
-  function startStream() {
-    const es = new EventSource('/api/logs/stream')
-    es.onmessage = (e) => {
-      const data = JSON.parse(e.data)
-      setLogs(data || [])
+    const query = new URLSearchParams()
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value && value !== 'all') query.set(key, value)
+    })
+    const es = new EventSource(`/api/logs/stream?${query.toString()}`)
+    es.onmessage = e => {
+      const streamLogs = JSON.parse(e.data)
+      setLogs(Array.isArray(streamLogs) ? streamLogs : [])
+      api.getLogSummary(filters).then(setSummary).catch(console.error)
+      api.getLogConnections({ range: filters.range })
+        .then(data => setConnections(Array.isArray(data) ? data : []))
+        .catch(console.error)
     }
-    es.onerror = () => {
-      setTimeout(startStream, 2000)
-    }
+    es.onerror = () => es.close()
     eventSourceRef.current = es
-  }
+
+    return () => es.close()
+  }, [filters, live])
 
   async function clearLogs() {
-    await fetch('/api/logs/clear', { method: 'POST' })
+    await api.clearLogs()
     setLogs([])
-  }
-
-  function getStatusClass(status: string) {
-    if (!status) return ''
-    if (status.startsWith('2')) return 'text-green-400'
-    if (status.startsWith('4')) return 'text-red-400'
-    if (status.startsWith('5')) return 'text-red-500'
-    return 'text-yellow-400'
+    setSummary(null)
+    setConnections([])
   }
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between mb-4">
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center justify-between gap-3">
         <h2 className="text-2xl font-bold flex items-center gap-2">
           <Terminal size={24} />
           Logs
         </h2>
-        <div className="flex items-center gap-3">
-          <span className="text-sm text-[var(--text-muted)]">
-            {logs.length} entries
-          </span>
-          <button
-            onClick={() => setAutoRefresh(!autoRefresh)}
-            className={`flex items-center gap-1.5 text-sm px-3 py-1.5 rounded border ${
-              autoRefresh
-                ? 'bg-[var(--accent)] text-white border-[var(--accent)]'
-                : 'bg-[var(--bg-card)] text-[var(--text-muted)] border-[var(--border)]'
-            }`}
-          >
-            <RefreshCw size={14} className={autoRefresh ? 'animate-spin' : ''} />
-            Auto-scroll
-          </button>
-          <button
-            onClick={clearLogs}
-            className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded border border-[var(--border)] bg-[var(--bg-card)] hover:bg-[var(--bg-hover)] text-[var(--text-muted)]"
-          >
-            <Trash2 size={14} />
-            Clear
-          </button>
-        </div>
+        <span className="text-sm text-[var(--text-muted)]">30-day retention</span>
       </div>
 
-      <div ref={containerRef} className="flex-1 overflow-auto bg-[var(--bg-card)] rounded-lg border border-[var(--border)]">
-        {logs.length === 0 ? (
-          <div className="flex items-center justify-center h-full text-[var(--text-muted)]">
-            No logs yet. Send a request to see logs here.
+      <LogSummaryBar summary={summary} />
+      <p className="text-xs text-[var(--text-muted)]">
+        Cost is estimated from local model price profiles; Kiro billing can differ from token API pricing.
+      </p>
+      <LogFilterBar
+        filters={filters}
+        live={live}
+        onFiltersChange={setFilters}
+        onLiveChange={setLive}
+        onRefresh={loadLogs}
+        onClear={clearLogs}
+      />
+
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start min-h-0">
+        <LogConnectionList
+          connections={connections}
+          selectedId={filters.connectionId}
+          onSelect={connectionId => setFilters({ ...filters, connectionId })}
+        />
+        <main className="flex-1 min-w-0 space-y-2">
+          <div className="flex flex-col gap-1 border-b border-[var(--border)] pb-2">
+            <h3 className="text-sm font-semibold">Request timeline</h3>
+            <p className="text-xs text-[var(--text-muted)]">
+              Payload previews are captured as separate response events and capped before being stored.
+            </p>
           </div>
-        ) : (
-          <table className="w-full text-sm">
-            <thead className="sticky top-0 bg-[var(--bg-card)] border-b border-[var(--border)]">
-              <tr className="text-left text-[var(--text-muted)]">
-                <th className="px-3 py-2 font-medium w-24">Time</th>
-                <th className="px-3 py-2 font-medium w-20">Provider</th>
-                <th className="px-3 py-2 font-medium w-16">Method</th>
-                <th className="px-3 py-2 font-medium w-16">Status</th>
-                <th className="px-3 py-2 font-medium w-20">Duration</th>
-                <th className="px-3 py-2 font-medium w-28">Connection</th>
-                <th className="px-3 py-2 font-medium w-28">Model</th>
-                <th className="px-3 py-2 font-medium">Message</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-[var(--border)]">
-              {logs.map((log, i) => {
-                const parts = parseLogMessage(log.message)
-                return (
-                  <tr 
-                    key={i} 
-                    className={`hover:bg-[var(--bg-hover)] ${log.level === 'ERROR' ? 'bg-red-900/10' : ''}`}
-                  >
-                    <td className="px-3 py-2 text-[var(--text-muted)] font-mono text-xs">
-                      {log.timestamp}
-                    </td>
-                    <td className="px-3 py-2">
-                      <span className={`font-bold ${
-                        log.provider === 'KIRO' ? 'text-orange-400' : 'text-green-400'
-                      }`}>
-                        {log.provider}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2 text-[var(--text-muted)]">
-                      {parts.method || '-'}
-                    </td>
-                    <td className={`px-3 py-2 font-mono font-bold ${getStatusClass(parts.status || '')}`}>
-                      {parts.status || '-'}
-                    </td>
-                    <td className="px-3 py-2 text-[var(--text-muted)] font-mono text-xs">
-                      {parts.duration || '-'}
-                    </td>
-                    <td className="px-3 py-2 text-purple-400 text-xs">
-                      {parts.conn || '-'}
-                    </td>
-                    <td className="px-3 py-2 text-orange-400 text-xs">
-                      {parts.model || '-'}
-                    </td>
-                    <td className="px-3 py-2 text-xs max-w-md truncate" title={log.message}>
-                      {log.message}
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        )}
+          <LogTable logs={logs} />
+        </main>
       </div>
     </div>
   )

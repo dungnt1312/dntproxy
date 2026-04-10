@@ -2,8 +2,16 @@ import { useEffect, useState } from 'react'
 import { api } from '../api'
 import { Plus, Trash2, Copy, Check } from 'lucide-react'
 
+interface APIKeyItem {
+  id: string
+  name: string
+  keyMasked: string
+  isActive: boolean
+  createdAt: string
+}
+
 export default function Keys() {
-  const [keys, setKeys] = useState<any[]>([])
+  const [keys, setKeys] = useState<APIKeyItem[]>([])
   const [showAdd, setShowAdd] = useState(false)
   const [name, setName] = useState('')
   const [newKey, setNewKey] = useState('')
@@ -47,7 +55,11 @@ export default function Keys() {
           <p className="text-sm text-green-400 mb-2">New API key generated. Copy it now — it won't be shown again.</p>
           <div className="flex items-center gap-2">
             <code className="flex-1 bg-[var(--bg)] px-3 py-2 rounded-lg text-sm font-mono break-all">{newKey}</code>
-            <button onClick={() => handleCopy(newKey, 'new')} className="p-2 hover:bg-[var(--bg-hover)] rounded-lg transition-colors">
+            <button
+              onClick={() => handleCopy(newKey, 'new')}
+              aria-label="Copy new API key"
+              className="p-2 hover:bg-[var(--bg-hover)] rounded-lg transition-colors"
+            >
               {copied === 'new' ? <Check size={16} className="text-green-400" /> : <Copy size={16} />}
             </button>
           </div>
@@ -68,7 +80,7 @@ export default function Keys() {
         <p className="text-[var(--text-muted)]">No API keys.</p>
       ) : (
         <div className="space-y-2">
-          {keys.map((k: any) => (
+          {keys.map((k) => (
             <div key={k.id} className="bg-[var(--bg-card)] rounded-lg p-3 border border-[var(--border)] flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <span className="font-medium text-sm">{k.name}</span>
@@ -78,10 +90,12 @@ export default function Keys() {
                 </span>
               </div>
               <div className="flex items-center gap-1">
-                <button onClick={() => handleCopy(k.key, k.id)} className="p-1.5 hover:bg-[var(--bg-hover)] rounded-lg transition-colors" title="Copy full key">
-                  {copied === k.id ? <Check size={14} className="text-green-400" /> : <Copy size={14} className="text-[var(--text-muted)]" />}
-                </button>
-                <button onClick={() => handleDelete(k.id)} className="p-1.5 hover:bg-[var(--bg-hover)] rounded-lg transition-colors" title="Remove">
+                <button
+                  onClick={() => handleDelete(k.id)}
+                  aria-label={`Remove API key ${k.name}`}
+                  className="p-1.5 hover:bg-[var(--bg-hover)] rounded-lg transition-colors"
+                  title="Remove"
+                >
                   <Trash2 size={14} className="text-[var(--danger)]" />
                 </button>
               </div>

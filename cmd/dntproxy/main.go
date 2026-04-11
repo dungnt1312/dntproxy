@@ -95,7 +95,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	port := 20199
+	port := 20128
 	if cfg.Settings.Port > 0 {
 		port = cfg.Settings.Port
 	}

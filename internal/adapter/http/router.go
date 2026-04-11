@@ -22,13 +22,12 @@ func NewRouter(store port.CredentialStore, providers port.ProviderRegistry) *gin
 
 	chatService := service.NewChatService(store, providers)
 
-	// OpenAI-compatible endpoints
+	// OpenAI-compatible endpoints (with optional API key check)
 	v1 := r.Group("/v1")
+	v1.Use(apiKeyMiddleware(store))
 	{
 		v1.POST("/chat/completions", chatHandler(chatService, store))
 		v1.GET("/models", modelsHandler(store))
-		v1.OPTIONS("/chat/completions", optionsHandler())
-		v1.OPTIONS("/models", optionsHandler())
 	}
 
 	// Dashboard API endpoints

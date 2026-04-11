@@ -13,7 +13,7 @@ import (
 // KiroMessage represents a message in Kiro conversation history.
 type KiroMessage struct {
 	UserInputMessage         *KiroUserMessage      `json:"userInputMessage,omitempty"`
-	AssistantResponseMessage *KiroAssistantMessage  `json:"assistantResponseMessage,omitempty"`
+	AssistantResponseMessage *KiroAssistantMessage `json:"assistantResponseMessage,omitempty"`
 }
 
 // KiroUserMessage is a user message in Kiro format.
@@ -21,7 +21,7 @@ type KiroUserMessage struct {
 	Content                 string                  `json:"content"`
 	ModelID                 string                  `json:"modelId"`
 	Origin                  string                  `json:"origin,omitempty"`
-	UserInputMessageContext *KiroUserMessageContext  `json:"userInputMessageContext,omitempty"`
+	UserInputMessageContext *KiroUserMessageContext `json:"userInputMessageContext,omitempty"`
 }
 
 // KiroUserMessageContext holds tools and tool results.
@@ -49,9 +49,9 @@ type KiroInputSchema struct {
 
 // KiroToolResult represents a tool execution result.
 type KiroToolResult struct {
-	ToolUseID string              `json:"toolUseId"`
-	Status    string              `json:"status"`
-	Content   []KiroTextContent   `json:"content"`
+	ToolUseID string            `json:"toolUseId"`
+	Status    string            `json:"status"`
+	Content   []KiroTextContent `json:"content"`
 }
 
 // KiroTextContent is a text content block.
@@ -61,8 +61,8 @@ type KiroTextContent struct {
 
 // KiroAssistantMessage is an assistant message in Kiro format.
 type KiroAssistantMessage struct {
-	Content  string         `json:"content"`
-	ToolUses []KiroToolUse  `json:"toolUses,omitempty"`
+	Content  string        `json:"content"`
+	ToolUses []KiroToolUse `json:"toolUses,omitempty"`
 }
 
 // KiroToolUse represents a tool use by the assistant.
@@ -81,10 +81,10 @@ type KiroPayload struct {
 
 // KiroConversationState holds the conversation context.
 type KiroConversationState struct {
-	ChatTriggerType string         `json:"chatTriggerType"`
-	ConversationID  string         `json:"conversationId"`
-	CurrentMessage  KiroMessage    `json:"currentMessage"`
-	History         []KiroMessage  `json:"history"`
+	ChatTriggerType string        `json:"chatTriggerType"`
+	ConversationID  string        `json:"conversationId"`
+	CurrentMessage  KiroMessage   `json:"currentMessage"`
+	History         []KiroMessage `json:"history"`
 }
 
 // KiroInferenceConfig holds inference parameters.
@@ -109,10 +109,10 @@ type OpenAIRequest struct {
 
 // OpenAIMessage is a message in OpenAI format.
 type OpenAIMessage struct {
-	Role       string          `json:"role"`
-	Content    json.RawMessage `json:"content"` // string or []ContentBlock
+	Role       string           `json:"role"`
+	Content    json.RawMessage  `json:"content"` // string or []ContentBlock
 	ToolCalls  []OpenAIToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string          `json:"tool_call_id,omitempty"`
+	ToolCallID string           `json:"tool_call_id,omitempty"`
 }
 
 // ContentBlock is a content block in OpenAI multimodal format.
@@ -138,8 +138,8 @@ type OpenAIFunctionCall struct {
 
 // OpenAITool is a tool definition in OpenAI format.
 type OpenAITool struct {
-	Type     string          `json:"type"`
-	Function OpenAIFunction  `json:"function"`
+	Type     string         `json:"type"`
+	Function OpenAIFunction `json:"function"`
 }
 
 // OpenAIFunction is a function definition.
@@ -196,6 +196,9 @@ func BuildKiroPayload(req *OpenAIRequest, model string, creds *domain.Credential
 	// Inference config
 	payload.InferenceConfig = &KiroInferenceConfig{
 		MaxTokens: 32000,
+	}
+	if req.MaxTokens != nil && *req.MaxTokens > 0 {
+		payload.InferenceConfig.MaxTokens = *req.MaxTokens
 	}
 	if req.Temperature != nil {
 		payload.InferenceConfig.Temperature = req.Temperature
@@ -365,7 +368,8 @@ func convertMessages(messages []OpenAIMessage, tools []KiroTool, model string) (
 	// Pop last userInputMessage as currentMessage
 	for i := len(history) - 1; i >= 0; i-- {
 		if history[i].UserInputMessage != nil {
-			currentMessage = &history[i]
+			msg := history[i]
+			currentMessage = &msg
 			history = append(history[:i], history[i+1:]...)
 			break
 		}

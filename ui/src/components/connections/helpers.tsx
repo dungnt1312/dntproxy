@@ -1,4 +1,6 @@
 import { Shield, Check, X, Clock, Lock, AlertTriangle, RefreshCw } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
+import { Progress } from '@/components/ui/progress'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -44,54 +46,36 @@ export function connectionAttentionRank(c: { isActive?: boolean; rateLimitedUnti
 
 // ─── Provider Logos ───────────────────────────────────────────────────────────
 
-export const AwsLogo = ({ size = 24, className = '' }: any) => (
-  <img 
-    src="https://img.icons8.com/color/48/amazon-web-services.png" 
-    width={size} 
-    height={size} 
-    className={`${className} object-contain`} 
-    alt="AWS"
-  />
+export const AwsLogo = ({ size = 24, className = '' }: { size?: number; className?: string }) => (
+  <img src="https://img.icons8.com/color/48/amazon-web-services.png" width={size} height={size} className={`${className} object-contain`} alt="AWS" />
 )
 
-export const OpenAILogo = ({ size = 24, className = '' }: any) => (
-  <img 
-    src="https://img.icons8.com/color/48/openai.png" 
-    width={size} 
-    height={size} 
-    className={`${className} object-contain`} 
-    alt="OpenAI"
-  />
+export const OpenAILogo = ({ size = 24, className = '' }: { size?: number; className?: string }) => (
+  <img src="https://img.icons8.com/color/48/openai.png" width={size} height={size} className={`${className} object-contain`} alt="OpenAI" />
 )
 
-export const CustomLogo = ({ size = 24, className = '' }: any) => (
-  <img 
-    src="https://img.icons8.com/fluency/48/server.png" 
-    width={size} 
-    height={size} 
-    className={`${className} object-contain opacity-80`} 
-    alt="Custom"
-  />
+export const CustomLogo = ({ size = 24, className = '' }: { size?: number; className?: string }) => (
+  <img src="https://img.icons8.com/fluency/48/server.png" width={size} height={size} className={`${className} object-contain opacity-80`} alt="Custom" />
 )
 
 export function getProviderInfo(provider: string) {
-  if (provider === 'kiro') return { 
-    icon: <AwsLogo size={20} />, 
-    bg: 'rgba(255, 153, 0, 0.12)',
-    border: 'rgba(255, 153, 0, 0.25)',
-    color: '#FF9900',
+  if (provider === 'kiro') return {
+    icon: <AwsLogo size={20} />,
+    colorClass: 'bg-orange-500/10 border-orange-500/20',
+    dotClass: 'bg-orange-500',
+    label: 'AWS / Kiro',
   }
-  if (provider === 'openai') return { 
-    icon: <OpenAILogo size={20} />, 
-    bg: 'rgba(16, 163, 127, 0.12)',
-    border: 'rgba(16, 163, 127, 0.25)',
-    color: '#10a37f',
+  if (provider === 'openai') return {
+    icon: <OpenAILogo size={20} />,
+    colorClass: 'bg-emerald-500/10 border-emerald-500/20',
+    dotClass: 'bg-emerald-500',
+    label: 'OpenAI',
   }
-  return { 
-    icon: <CustomLogo size={20} />, 
-    bg: 'rgba(168, 85, 247, 0.12)',
-    border: 'rgba(107, 33, 168, 0.25)',
-    color: '#a855f7',
+  return {
+    icon: <CustomLogo size={20} />,
+    colorClass: 'bg-purple-500/10 border-purple-500/20',
+    dotClass: 'bg-purple-500',
+    label: 'Custom API',
   }
 }
 
@@ -102,9 +86,9 @@ export function TokenBar({ conn }: { conn: any }) {
 
   if (conn.hasApiKey) {
     return (
-      <span className="chip chip-success">
-        <Shield size={10} /> API Key
-      </span>
+      <Badge variant="outline" className="gap-1 text-emerald-600 border-emerald-500/30 bg-emerald-500/10 text-[10px] py-0 h-5">
+        <Shield size={9} /> API Key
+      </Badge>
     )
   }
 
@@ -114,16 +98,16 @@ export function TokenBar({ conn }: { conn: any }) {
 
   if (expired) {
     return (
-      <span className="chip chip-danger">
-        <X size={10} /> Token expired
-      </span>
+      <Badge variant="outline" className="gap-1 text-destructive border-destructive/30 bg-destructive/10 text-[10px] py-0 h-5">
+        <X size={9} /> Expired
+      </Badge>
     )
   }
 
   return (
-    <span className="chip chip-success">
-      <Check size={10} /> Token valid ({secsLeft > 3600*24 ? `${Math.floor(secsLeft/(3600*24))}d left` : secsToHuman(secsLeft)})
-    </span>
+    <Badge variant="outline" className="gap-1 text-emerald-600 border-emerald-500/30 bg-emerald-500/10 text-[10px] py-0 h-5">
+      <Check size={9} /> {secsLeft > 3600 * 24 ? `${Math.floor(secsLeft / (3600 * 24))}d` : secsToHuman(secsLeft)}
+    </Badge>
   )
 }
 
@@ -137,24 +121,24 @@ export function StatusRow({ conn }: { conn: any }) {
   return (
     <div className="flex items-center gap-1.5 flex-wrap mt-1">
       {isRL && (
-        <span className="chip chip-warning">
-          <Clock size={10} /> RL: {secsToHuman(rlSecs)}
-        </span>
+        <Badge variant="outline" className="gap-1 text-amber-600 border-amber-500/30 bg-amber-500/10 text-[10px] py-0 h-5">
+          <Clock size={9} /> RL: {secsToHuman(rlSecs)}
+        </Badge>
       )}
       {conn.backoffLevel > 0 && (
-        <span className="chip chip-warning">
-          <RefreshCw size={10} /> Backoff: {conn.backoffLevel}/7
-        </span>
+        <Badge variant="outline" className="gap-1 text-amber-600 border-amber-500/30 bg-amber-500/10 text-[10px] py-0 h-5">
+          <RefreshCw size={9} /> Backoff: {conn.backoffLevel}/7
+        </Badge>
       )}
       {lockCount > 0 && (
-        <span className="chip chip-warning">
-          <Lock size={10} /> {lockCount} models
-        </span>
+        <Badge variant="outline" className="gap-1 text-amber-600 border-amber-500/30 bg-amber-500/10 text-[10px] py-0 h-5">
+          <Lock size={9} /> {lockCount} locked
+        </Badge>
       )}
       {conn.lastError && (
-        <span className="chip chip-danger truncate max-w-[180px]" title={conn.lastError}>
-          <AlertTriangle size={10} /> {conn.lastError.slice(0, 40)}{conn.lastError.length > 40 ? '…' : ''}
-        </span>
+        <Badge variant="outline" className="gap-1 text-destructive border-destructive/30 bg-destructive/10 text-[10px] py-0 h-5 max-w-[200px] truncate" title={conn.lastError}>
+          <AlertTriangle size={9} /> {conn.lastError.slice(0, 40)}{conn.lastError.length > 40 ? '…' : ''}
+        </Badge>
       )}
     </div>
   )
@@ -172,137 +156,79 @@ interface QuotaBucket {
 export function QuotaPanel({ data, loading }: { data: any; loading: boolean }) {
   if (loading) {
     return (
-      <div className="flex items-center gap-2 text-xs text-[var(--text-muted)] py-2">
-        <RefreshCw size={12} className="animate-spin text-[var(--accent)]" />
+      <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
+        <RefreshCw size={12} className="animate-spin text-primary" />
         Checking quota…
       </div>
     )
   }
   if (!data) return null
 
-  // ── Codex / ChatGPT OAuth ─ map to progress bar format ──────────────────
   if (data.quotaSupported && (data.usageLimitReached !== undefined || data.quotaAvailable !== undefined)) {
     const exhausted = !!data.usageLimitReached
     const secsLeft = data.resetsInSeconds ?? 0
     const planType = data.planType ?? ''
-    const planLabel = planType
-      ? planType.charAt(0).toUpperCase() + planType.slice(1) + ' plan quota'
-      : 'ChatGPT quota'
-
-    const barColor = exhausted ? '#f87171' : '#4ade80'
-    const barWidth = 100
-    const statusText = exhausted ? 'Exhausted' : 'Available'
-    const statusColor = exhausted ? '#f87171' : '#4ade80'
-
+    const planLabel = planType ? planType.charAt(0).toUpperCase() + planType.slice(1) + ' plan quota' : 'ChatGPT quota'
     const subLabel = exhausted && data.resetsAtHuman
       ? `Resets ${data.resetsAtHuman}${secsLeft > 0 ? ` (in ${secsToHuman(secsLeft)})` : ''}`
-      : data.note || 'Quota is available for this session'
+      : data.note || 'Quota available'
 
     return (
-      <div className="space-y-2.5 pt-0.5">
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between text-xs">
-            <span className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: barColor }} />
-              <span className="text-[var(--text-muted)]">{planLabel}</span>
-            </span>
-            <span className="font-medium text-[10px] px-2 py-0.5 rounded-full" style={{ color: statusColor, backgroundColor: `${statusColor}18` }}>
-              {statusText}
-            </span>
-          </div>
-          <div className="progress-bar">
-            <div
-              className="progress-fill"
-              style={{ width: `${barWidth}%`, backgroundColor: barColor }}
-            />
-          </div>
-          <p className="text-[10px] text-[var(--text-dim)] mt-0.5">{subLabel}</p>
+      <div className="space-y-2">
+        <div className="flex items-center justify-between text-xs">
+          <span className="text-muted-foreground">{planLabel}</span>
+          <Badge variant="outline" className={exhausted ? 'text-destructive border-destructive/30 bg-destructive/10 text-[10px]' : 'text-emerald-600 border-emerald-500/30 bg-emerald-500/10 text-[10px]'}>
+            {exhausted ? 'Exhausted' : 'Available'}
+          </Badge>
         </div>
+        <Progress value={100} className={exhausted ? '[&>div]:bg-destructive' : '[&>div]:bg-emerald-500'} />
+        <p className="text-[10px] text-muted-foreground">{subLabel}</p>
       </div>
     )
   }
 
-  // ── Standard quota buckets (Kiro, OpenAI API key) ───────────────────────
   const buckets: QuotaBucket[] = []
-
   if (data.quotaSupported !== false) {
     if (data.requestsLimit != null && data.requestsLimit >= 0) {
-      buckets.push({
-        label: 'requests',
-        used: data.requestsLimit - (data.requestsRemaining ?? 0),
-        limit: data.requestsLimit,
-        pct: data.requestsPct ?? 0,
-        checkedAt: data.resetRequests,
-      })
+      buckets.push({ label: 'requests', used: data.requestsLimit - (data.requestsRemaining ?? 0), limit: data.requestsLimit, pct: data.requestsPct ?? 0, checkedAt: data.resetRequests })
     }
     if (data.freeTrialLimit != null && data.freeTrialLimit >= 0) {
-      buckets.push({
-        label: 'free trial',
-        used: data.freeTrialLimit - (data.freeTrialRemaining ?? 0),
-        limit: data.freeTrialLimit,
-        pct: data.freeTrialPct ?? 0,
-        expiresAt: data.freeTrialExpiresAt,
-      })
+      buckets.push({ label: 'free trial', used: data.freeTrialLimit - (data.freeTrialRemaining ?? 0), limit: data.freeTrialLimit, pct: data.freeTrialPct ?? 0, expiresAt: data.freeTrialExpiresAt })
     }
     if (data.tokensLimit != null && data.tokensLimit >= 0) {
-      buckets.push({
-        label: 'tokens',
-        used: data.tokensLimit - (data.tokensRemaining ?? 0),
-        limit: data.tokensLimit,
-        pct: data.tokensPct ?? 0,
-        checkedAt: data.resetTokens,
-      })
+      buckets.push({ label: 'tokens', used: data.tokensLimit - (data.tokensRemaining ?? 0), limit: data.tokensLimit, pct: data.tokensPct ?? 0, checkedAt: data.resetTokens })
     }
   }
 
-  const color = (pct: number) =>
-    pct >= 90 ? '#f87171' : pct >= 70 ? '#fbbf24' : '#4ade80'
+  const getProgressClass = (pct: number) =>
+    pct >= 90 ? '[&>div]:bg-destructive' : pct >= 70 ? '[&>div]:bg-amber-500' : '[&>div]:bg-emerald-500'
 
   const fmt = (n: number) => n.toLocaleString()
 
   return (
-    <div className="space-y-2.5 pt-0.5">
+    <div className="space-y-2.5">
       {buckets.length === 0 && (!data.overageCharges || data.overageCharges <= 0) && (
-        <p className="text-xs text-[var(--text-dim)] italic">
-          {data.note || 'No quota information available for this connection.'}
-        </p>
+        <p className="text-xs text-muted-foreground italic">{data.note || 'No quota info available.'}</p>
       )}
       {data.overageCharges > 0 && (
-        <div className="chip chip-warning">
-          <AlertTriangle size={10} /> Overage: ${data.overageCharges.toLocaleString()}
-        </div>
+        <Badge variant="outline" className="gap-1 text-amber-600 border-amber-500/30 bg-amber-500/10 text-[10px]">
+          <AlertTriangle size={9} /> Overage: ${data.overageCharges.toLocaleString()}
+        </Badge>
       )}
       {buckets.map((b) => {
         const usedPct = Math.max(0, Math.min(b.pct, 100))
-        const remainingPct = Math.max(0, 100 - usedPct)
-        const c = color(usedPct)
         return (
-          <div key={b.label} className="space-y-1.5">
+          <div key={b.label} className="space-y-1">
             <div className="flex items-center justify-between text-xs">
-              <span className="flex items-center gap-1.5">
-                <span
-                  className="w-2 h-2 rounded-full flex-shrink-0"
-                  style={{ backgroundColor: c }}
-                />
-                <span className="text-[var(--text-muted)]">{b.label}</span>
-              </span>
-              <div className="flex items-center gap-2 text-[var(--text-muted)]">
-                <span className="font-mono text-[11px]">
-                  {fmt(b.used)}&nbsp;/&nbsp;{fmt(b.limit)}
-                </span>
-              </div>
+              <span className="text-muted-foreground capitalize">{b.label}</span>
+              <span className="font-mono text-[11px] text-muted-foreground">{fmt(b.used)} / {fmt(b.limit)}</span>
             </div>
-            <div className="progress-bar">
-              <div
-                className="progress-fill"
-                style={{ width: `${remainingPct}%`, backgroundColor: c }}
-              />
-            </div>
+            <Progress value={usedPct} className={`h-1.5 ${getProgressClass(usedPct)}`} />
           </div>
         )
       })}
       {data.statusCode != null && data.statusCode !== 200 && (
-        <p className="text-xs text-[var(--danger)]">HTTP {data.statusCode} from upstream</p>
+        <p className="text-xs text-destructive">HTTP {data.statusCode} from upstream</p>
       )}
     </div>
   )

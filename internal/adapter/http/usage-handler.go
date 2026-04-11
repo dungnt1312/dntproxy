@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/dungnt/dntproxy/internal/adapter/auth"
 	"github.com/dungnt/dntproxy/internal/domain"
@@ -176,7 +178,7 @@ func (h *UsageHandler) getKiroUsage(conn *domain.ProviderConnection) (interface{
 	req.Header.Set("Accept", "application/json")
 	req.Body = newJSONReader(payloadBytes)
 
-	client := &http.Client{}
+	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
@@ -251,23 +253,9 @@ func isAuthExpiredError(err error) bool {
 	if err == nil {
 		return false
 	}
-	msg := err.Error()
-	keywords := []string{"expired", "authentication", "unauthorized", "401", "403"}
-	for _, kw := range keywords {
-		if contains(msg, kw) {
-			return true
-		}
-	}
-	return false
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) && findSubstring(s, substr))
-}
-
-func findSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
+	msg := strings.ToLower(err.Error())
+	for _, kw := range []string{"expired", "authentication", "unauthorized", "401", "403"} {
+		if strings.Contains(msg, kw) {
 			return true
 		}
 	}

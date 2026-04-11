@@ -14,27 +14,14 @@ import (
 	"github.com/google/uuid"
 )
 
+const maxChatBodySize = 10 * 1024 * 1024
+
 func chatHandler(chatService port.ChatService, store port.CredentialStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
 		requestID := uuid.New().String()
 
-		// Check API key if required
-		settings, _ := store.GetSettings()
-		if settings != nil && settings.RequireAPIKey {
-			key := extractAPIKey(c.Request)
-			if key == "" {
-				c.JSON(http.StatusUnauthorized, gin.H{"error": gin.H{"message": "Missing API key"}})
-				return
-			}
-			if !store.ValidateAPIKey(key) {
-				c.JSON(http.StatusUnauthorized, gin.H{"error": gin.H{"message": "Invalid API key"}})
-				return
-			}
-		}
-
-		// Read body
-		body, err := io.ReadAll(c.Request.Body)
+		body, err := io.ReadAll(io.LimitReader(c.Request.Body, maxChatBodySize))
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"message": "Failed to read body"}})
 			return
@@ -79,7 +66,9 @@ func chatHandler(chatService port.ChatService, store port.CredentialStore) gin.H
 			for {
 				n, readErr := result.Stream.Read(buf)
 				if n > 0 {
-					c.Writer.Write(buf[:n])
+					if _, writeErr := c.Writer.Write(buf[:n]); writeErr != nil {
+						break
+					}
 					c.Writer.Flush()
 				}
 				if readErr != nil {
@@ -87,6 +76,12 @@ func chatHandler(chatService port.ChatService, store port.CredentialStore) gin.H
 						log.Printf("[CHAT] Stream error: %s", readErr)
 					}
 					break
+				}
+				select {
+				case <-c.Request.Context().Done():
+					result.Stream.Close()
+					return
+				default:
 				}
 			}
 			result.Stream.Close()

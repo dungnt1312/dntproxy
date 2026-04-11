@@ -1,11 +1,22 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import {
-  X, Loader2, Search, Upload, Shield, ExternalLink,
+  Loader2, Search, Upload, Shield, ExternalLink,
   Globe, GitBranch, Link2, CheckCircle2, AlertTriangle, Play
 } from 'lucide-react'
 import { api } from '../../api'
 import type { ImportMode, DeviceCodeState, SocialLoginState } from './helpers'
 import { AwsLogo, OpenAILogo, CustomLogo } from './helpers'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
+import { cn } from '@/lib/utils'
 
 interface AddConnectionModalProps {
   onSuccess: (message: string) => void
@@ -20,7 +31,6 @@ export default function AddConnectionModal({ onSuccess, onClose }: AddConnection
   const [customForm, setCustomForm] = useState({ name: '', apiKey: '', baseUrl: '', supportedModels: '' })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [success, setSuccess] = useState('')
   const [deviceCode, setDeviceCode] = useState<DeviceCodeState | null>(null)
   const [polling, setPolling] = useState(false)
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -29,7 +39,7 @@ export default function AddConnectionModal({ onSuccess, onClose }: AddConnection
   const [socialCallbackUrl, setSocialCallbackUrl] = useState('')
   const [socialProvider, setSocialProvider] = useState<'google' | 'github'>('google')
   const [openaiMode, setOpenaiMode] = useState<'oauth' | 'apikey'>('oauth')
-  const [openaiOAuthSession, setOpenaiOAuthSession] = useState<{sessionId: string; authUrl: string} | null>(null)
+  const [openaiOAuthSession, setOpenaiOAuthSession] = useState<{ sessionId: string; authUrl: string } | null>(null)
   const [openaiManualCallback, setOpenaiManualCallback] = useState('')
   const openaiPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -40,12 +50,6 @@ export default function AddConnectionModal({ onSuccess, onClose }: AddConnection
     }
   }, [])
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
-
   const resetForm = () => {
     setForm({ refreshToken: '', clientId: '', clientSecret: '', region: '', authMethod: 'builder-id' })
     setOpenaiForm({ name: '', apiKey: '', supportedModels: '' })
@@ -55,35 +59,29 @@ export default function AddConnectionModal({ onSuccess, onClose }: AddConnection
     setSocialLogin(null); setSocialCallbackUrl('')
     setOpenaiOAuthSession(null); setOpenaiManualCallback('')
     if (openaiPollRef.current) { clearInterval(openaiPollRef.current); openaiPollRef.current = null }
-    setError(''); setSuccess('')
+    setError('')
     if (pollTimerRef.current) { clearTimeout(pollTimerRef.current); pollTimerRef.current = null }
   }
 
   const parseSupportedModels = (str: string) => str.split('\n').map(s => s.trim()).filter(Boolean)
 
-  const done = (msg: string) => {
-    resetForm()
-    onSuccess(msg)
-  }
+  const done = (msg: string) => { resetForm(); onSuccess(msg) }
 
-  // ── Functions (AWS/IDC/Social/Detect/Upload/Manual/OpenAI/Custom)
   const handleStartBuilderID = async () => {
-    setLoading(true); setError(''); setSuccess('')
+    setLoading(true); setError('')
     try {
       const res = await api.startBuilderID()
       setDeviceCode(res); setPolling(true); startPolling(res.sessionId, res.interval)
-    } catch (e: any) { setError(e.message) }
-    finally { setLoading(false) }
+    } catch (e: any) { setError(e.message) } finally { setLoading(false) }
   }
 
   const handleStartIDC = async () => {
     if (!idcForm.startUrl) { setError('Start URL is required'); return }
-    setLoading(true); setError(''); setSuccess('')
+    setLoading(true); setError('')
     try {
       const res = await api.startIDC({ startUrl: idcForm.startUrl, region: idcForm.region || undefined })
       setDeviceCode(res); setPolling(true); startPolling(res.sessionId, res.interval)
-    } catch (e: any) { setError(e.message) }
-    finally { setLoading(false) }
+    } catch (e: any) { setError(e.message) } finally { setLoading(false) }
   }
 
   const startPolling = useCallback((sessionId: string, interval: number) => {
@@ -101,13 +99,12 @@ export default function AddConnectionModal({ onSuccess, onClose }: AddConnection
   }, [])
 
   const handleStartSocial = async () => {
-    setLoading(true); setError(''); setSuccess('')
+    setLoading(true); setError('')
     try {
       const res = await api.startSocialLogin(socialProvider)
       setSocialLogin({ ...res, provider: socialProvider })
       window.open(res.loginUrl, '_blank')
-    } catch (e: any) { setError(e.message) }
-    finally { setLoading(false) }
+    } catch (e: any) { setError(e.message) } finally { setLoading(false) }
   }
 
   const handleExchangeSocial = async () => {
@@ -116,41 +113,38 @@ export default function AddConnectionModal({ onSuccess, onClose }: AddConnection
     try {
       await api.exchangeSocialCode({ sessionId: socialLogin.sessionId, callbackUrl: socialCallbackUrl })
       done('Social login connected!')
-    } catch (e: any) { setError(e.message) }
-    finally { setLoading(false) }
+    } catch (e: any) { setError(e.message) } finally { setLoading(false) }
   }
 
   const handleDetect = async () => {
-    setLoading(true); setError(''); setSuccess('')
+    setLoading(true); setError('')
     try {
       const res = await api.detectKiroToken()
       if (res.found) {
         await api.importConnection({ refreshToken: res.refreshToken, clientId: res.clientId || '', clientSecret: res.clientSecret || '', region: res.region || '', authMethod: res.authMethod || 'builder-id' })
         done('Connection imported!')
       } else setError(res.error || 'No Kiro token found.')
-    } catch (e: any) { setError(e.message) }
-    finally { setLoading(false) }
+    } catch (e: any) { setError(e.message) } finally { setLoading(false) }
   }
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]; if (!file) return
-    setLoading(true); setError(''); setSuccess('')
+    setLoading(true); setError('')
     try {
       const data = JSON.parse(await file.text())
       if (!data.refreshToken) { setError('Invalid file: missing refreshToken'); return }
       await api.importConnection({ refreshToken: data.refreshToken, clientId: data.clientId || '', clientSecret: data.clientSecret || '', region: data.region || '', authMethod: data.authMethod?.toLowerCase() || 'builder-id' })
       done('Imported!')
-    } catch (e: any) { setError(e.message) }
-    finally { setLoading(false) }
+    } catch (e: any) { setError(e.message) } finally { setLoading(false) }
   }
 
   const handleManualImport = async () => {
-    setLoading(true); setError(''); setSuccess('')
+    setLoading(true); setError('')
     try { await api.importConnection(form); done('Imported!') } catch (e: any) { setError(e.message) } finally { setLoading(false) }
   }
 
   const handleAddOpenAI = async () => {
-    setLoading(true); setError(''); setSuccess('')
+    setLoading(true); setError('')
     try {
       const models = parseSupportedModels(openaiForm.supportedModels)
       await api.addOpenAIConnection({ name: openaiForm.name || undefined, apiKey: openaiForm.apiKey, supportedModels: models.length > 0 ? models : undefined })
@@ -159,7 +153,7 @@ export default function AddConnectionModal({ onSuccess, onClose }: AddConnection
   }
 
   const handleAddCustom = async () => {
-    setLoading(true); setError(''); setSuccess('')
+    setLoading(true); setError('')
     try {
       const models = parseSupportedModels(customForm.supportedModels)
       await api.addCustomConnection({ name: customForm.name || undefined, apiKey: customForm.apiKey || undefined, baseUrl: customForm.baseUrl, supportedModels: models.length > 0 ? models : undefined })
@@ -168,115 +162,129 @@ export default function AddConnectionModal({ onSuccess, onClose }: AddConnection
   }
 
   const DeviceCodePanel = () => deviceCode ? (
-    <div className="space-y-3 mt-4 glass-sm p-4 animate-fade-in border-[var(--accent)]/30">
+    <div className="space-y-3 mt-4 rounded-lg border bg-muted/40 p-4">
       <div className="text-center">
-        <p className="text-xs text-[var(--text-muted)] mb-2">Enter this code on the authorization page:</p>
-        <div className="text-2xl font-mono font-bold tracking-[0.2em] text-[var(--accent)] mb-3">{deviceCode.userCode}</div>
-        <a href={deviceCode.verificationUriComplete || deviceCode.verificationUri} target="_blank" rel="noopener noreferrer"
-          className="btn-primary flex items-center justify-center gap-2 mx-auto decoration-transparent">
-          <ExternalLink size={14} /> Open Authorization Page
-        </a>
+        <p className="text-xs text-muted-foreground mb-2">Enter this code on the authorization page:</p>
+        <div className="text-2xl font-mono font-bold tracking-[0.2em] text-primary mb-3">{deviceCode.userCode}</div>
+        <Button asChild size="sm" className="gap-2">
+          <a href={deviceCode.verificationUriComplete || deviceCode.verificationUri} target="_blank" rel="noopener noreferrer">
+            <ExternalLink size={14} /> Open Authorization Page
+          </a>
+        </Button>
       </div>
       {polling && (
-        <div className="flex items-center justify-center gap-2 text-xs text-[var(--accent)] bg-[var(--accent-glow)] rounded-lg py-2 mt-2">
+        <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground mt-2">
           <Loader2 size={12} className="animate-spin" /> Waiting for authorization ({deviceCode.interval}s)…
         </div>
       )}
     </div>
   ) : null
 
+  const providerTabs = [
+    { id: 'kiro', name: 'AWS / Kiro', icon: <AwsLogo size={14} /> },
+    { id: 'openai', name: 'OpenAI', icon: <OpenAILogo size={14} /> },
+    { id: 'openai-compatible', name: 'Custom API', icon: <CustomLogo size={14} /> },
+  ]
+
+  const kiroModes = [
+    { id: 'detect' as ImportMode, label: 'Auto Detect', icon: <Search size={13} /> },
+    { id: 'builder-id' as ImportMode, label: 'Builder ID', icon: <ExternalLink size={13} /> },
+    { id: 'social' as ImportMode, label: 'Social Login', icon: <Globe size={13} /> },
+    { id: 'idc' as ImportMode, label: 'IAM IDC', icon: <Shield size={13} /> },
+    { id: 'file' as ImportMode, label: 'Import File', icon: <Upload size={13} /> },
+    { id: 'manual' as ImportMode, label: 'Manual', icon: <Play size={13} /> },
+  ]
+
   return (
-    <div className="modal-overlay" role="presentation" onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
-      <div role="dialog" aria-modal="true" aria-labelledby="add-conn-title" className="modal-content sm:max-w-2xl" onMouseDown={e => e.stopPropagation()}>
-        
-        {/* Header */}
-        <div className="modal-header pb-4 pt-5 px-5">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="w-10 h-10 rounded-xl bg-[var(--accent-glow)] border border-[var(--accent)]/20 flex items-center justify-center shrink-0">
-              <Link2 size={18} className="text-[var(--accent)]" />
+    <Dialog open onOpenChange={open => { if (!open) onClose() }}>
+      <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
+        <DialogHeader>
+          <div className="flex items-center gap-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary/10">
+              <Link2 className="h-4 w-4 text-primary" />
             </div>
             <div>
-              <h3 id="add-conn-title" className="modal-title text-base">Add Connection</h3>
-              <p className="modal-subtitle text-xs">Configure your AI provider account.</p>
+              <DialogTitle>Add Connection</DialogTitle>
+              <DialogDescription>Configure your AI provider account.</DialogDescription>
             </div>
           </div>
-          <button onClick={onClose} className="btn-icon shrink-0" aria-label="Close"><X size={16} /></button>
-        </div>
+        </DialogHeader>
 
-        <div className="modal-body p-5 space-y-6">
-          {/* Provider Tabs */}
-          <div className="flex bg-[var(--bg-card)] rounded-lg p-1 border border-[var(--border)] overflow-x-auto gap-1 hide-scrollbar w-fit mx-auto">
-            {[
-              { id: 'kiro', name: 'AWS / Kiro', icon: <AwsLogo size={14} />, color: '#FF9900' },
-              { id: 'openai', name: 'OpenAI', icon: <OpenAILogo size={14} />, color: '#10a37f' },
-              { id: 'openai-compatible', name: 'Custom API', icon: <CustomLogo size={14} />, color: '#a855f7' }
-            ].map(p => (
-              <button key={p.id} onClick={() => { setProvider(p.id); resetForm() }}
-                 className={`flex items-center gap-2 px-4 py-2 text-xs font-medium rounded-md transition-colors whitespace-nowrap cursor-pointer ${provider === p.id ? 'bg-[var(--bg-surface)] text-[var(--text)] shadow-sm border border-[var(--border)]' : 'text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-white/[0.02]'}`}>
-                 {p.icon} {p.name}
+        <div className="flex-1 overflow-y-auto space-y-4 py-2">
+          {/* Provider tabs */}
+          <div className="flex gap-1 rounded-lg border bg-muted/40 p-1 w-fit mx-auto">
+            {providerTabs.map(p => (
+              <button
+                key={p.id}
+                onClick={() => { setProvider(p.id); resetForm() }}
+                className={cn(
+                  'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer',
+                  provider === p.id
+                    ? 'bg-background text-foreground shadow-sm border'
+                    : 'text-muted-foreground hover:text-foreground'
+                )}
+              >
+                {p.icon} {p.name}
               </button>
             ))}
           </div>
 
-          <div className="animate-fade-in glass p-5 min-h-[300px]">
-            {/* Kiro Config */}
+          <div className="rounded-lg border bg-muted/20 p-4 min-h-[280px]">
+            {/* Kiro */}
             {provider === 'kiro' && (
-              <div className="space-y-5">
-                <div className="flex flex-wrap gap-2 justify-center">
-                  {[
-                    { id: 'detect' as ImportMode, label: 'Auto Detect', icon: <Search size={14} /> },
-                    { id: 'builder-id' as ImportMode, label: 'Builder ID', icon: <ExternalLink size={14} /> },
-                    { id: 'social' as ImportMode, label: 'Social Login', icon: <Globe size={14} /> },
-                    { id: 'idc' as ImportMode, label: 'IAM IDC', icon: <Shield size={14} /> },
-                    { id: 'file' as ImportMode, label: 'Import File', icon: <Upload size={14} /> },
-                    { id: 'manual' as ImportMode, label: 'Manual', icon: <Play size={14} /> }
-                  ].map(m => (
-                    <button key={m.id} onClick={() => { setImportMode(m.id); setDeviceCode(null); setPolling(false); setSocialLogin(null); setError(''); setSuccess('') }}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs transition-colors cursor-pointer border ${importMode === m.id ? 'bg-[var(--accent-glow)] text-[var(--accent)] border-[var(--accent)]/30 font-medium' : 'bg-transparent text-[var(--text-muted)] border-transparent hover:bg-white/[0.04]'}`}>
+              <div className="space-y-4">
+                <div className="flex flex-wrap gap-1.5 justify-center">
+                  {kiroModes.map(m => (
+                    <button
+                      key={m.id}
+                      onClick={() => { setImportMode(m.id); setDeviceCode(null); setPolling(false); setSocialLogin(null); setError('') }}
+                      className={cn(
+                        'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors cursor-pointer border',
+                        importMode === m.id
+                          ? 'bg-primary/10 text-primary border-primary/30'
+                          : 'bg-transparent text-muted-foreground border-transparent hover:bg-muted'
+                      )}
+                    >
                       {m.icon} {m.label}
                     </button>
                   ))}
                 </div>
-                
-                <div className="border-t border-[var(--border)] pt-5">
+
+                <div className="border-t pt-4">
                   {importMode === 'detect' && (
-                    <div className="text-center max-w-sm mx-auto space-y-4">
-                      <p className="text-xs text-[var(--text-muted)] leading-relaxed">Automatically discover credentials from <code className="font-mono bg-white/[0.05] px-1 rounded">kiro-auth-token.json</code></p>
-                      <button onClick={handleDetect} disabled={loading} className="btn-primary w-full max-w-[200px] mx-auto">
-                        {loading ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />} 
+                    <div className="text-center space-y-3 max-w-sm mx-auto">
+                      <p className="text-xs text-muted-foreground">Auto-detect credentials from <code className="bg-muted px-1 rounded">kiro-auth-token.json</code></p>
+                      <Button onClick={handleDetect} disabled={loading} size="sm" className="gap-2">
+                        {loading ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
                         {loading ? 'Detecting…' : 'Scan & Import'}
-                      </button>
+                      </Button>
                     </div>
                   )}
 
                   {importMode === 'builder-id' && (
-                    <div className="text-center max-w-sm mx-auto space-y-4">
-                      <p className="text-xs text-[var(--text-muted)]">Authenticate via AWS Builder ID (Device Code Flow).</p>
+                    <div className="text-center space-y-3 max-w-sm mx-auto">
+                      <p className="text-xs text-muted-foreground">Authenticate via AWS Builder ID (Device Code Flow).</p>
                       {!deviceCode && (
-                        <button onClick={handleStartBuilderID} disabled={loading} className="btn-primary w-full max-w-[200px] mx-auto">
-                          {loading ? <Loader2 size={14} className="animate-spin" /> : <ExternalLink size={14} />} Start Login
-                        </button>
+                        <Button onClick={handleStartBuilderID} disabled={loading} size="sm" className="gap-2">
+                          {loading ? <Loader2 size={13} className="animate-spin" /> : <ExternalLink size={13} />}
+                          Start Login
+                        </Button>
                       )}
                       <DeviceCodePanel />
                     </div>
                   )}
 
                   {importMode === 'idc' && (
-                    <div className="max-w-sm mx-auto space-y-4">
-                      <p className="text-xs text-[var(--text-muted)] text-center">AWS IAM Identity Center (Enterprise SSO).</p>
+                    <div className="space-y-3 max-w-sm mx-auto">
+                      <p className="text-xs text-muted-foreground text-center">AWS IAM Identity Center (Enterprise SSO).</p>
                       {!deviceCode && (
                         <>
-                          <div className="space-y-3">
-                            <div>
-                              <input value={idcForm.startUrl} onChange={e => setIdcForm({ ...idcForm, startUrl: e.target.value })} placeholder="Start URL (https://mycompany.awsapps.com/start)" className="glass-input w-full text-xs" />
-                            </div>
-                            <div>
-                              <input value={idcForm.region} onChange={e => setIdcForm({ ...idcForm, region: e.target.value })} placeholder="Region (e.g. us-east-1)" className="glass-input w-full text-xs" />
-                            </div>
-                          </div>
-                          <button onClick={handleStartIDC} disabled={loading || !idcForm.startUrl} className="btn-primary w-full">
-                            {loading ? <Loader2 size={14} className="animate-spin" /> : <ExternalLink size={14} />} Start Login
-                          </button>
+                          <Input value={idcForm.startUrl} onChange={e => setIdcForm({ ...idcForm, startUrl: e.target.value })} placeholder="Start URL (https://mycompany.awsapps.com/start)" className="text-xs" />
+                          <Input value={idcForm.region} onChange={e => setIdcForm({ ...idcForm, region: e.target.value })} placeholder="Region (e.g. us-east-1)" className="text-xs" />
+                          <Button onClick={handleStartIDC} disabled={loading || !idcForm.startUrl} size="sm" className="w-full gap-2">
+                            {loading ? <Loader2 size={13} className="animate-spin" /> : <ExternalLink size={13} />}
+                            Start Login
+                          </Button>
                         </>
                       )}
                       <DeviceCodePanel />
@@ -284,37 +292,46 @@ export default function AddConnectionModal({ onSuccess, onClose }: AddConnection
                   )}
 
                   {importMode === 'social' && (
-                    <div className="max-w-sm mx-auto space-y-4 text-center">
-                      <p className="text-xs text-[var(--text-muted)]">Authenticate with Google or GitHub via Kiro Identity.</p>
+                    <div className="space-y-3 max-w-sm mx-auto text-center">
+                      <p className="text-xs text-muted-foreground">Authenticate with Google or GitHub via Kiro Identity.</p>
                       {!socialLogin && (
                         <>
                           <div className="flex gap-2 justify-center">
                             {(['google', 'github'] as const).map(p => (
-                              <button key={p} onClick={() => setSocialProvider(p)} className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-medium cursor-pointer transition-colors border ${socialProvider === p ? 'bg-[var(--accent-glow)] text-[var(--accent)] border-[var(--accent)]/30' : 'bg-transparent text-[var(--text-muted)] border-[var(--border)] hover:bg-white/[0.04]'}`}>
-                                {p === 'google' ? <Globe size={14} /> : <GitBranch size={14} />} {p === 'google' ? 'Google' : 'GitHub'}
+                              <button
+                                key={p}
+                                onClick={() => setSocialProvider(p)}
+                                className={cn(
+                                  'flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-medium cursor-pointer transition-colors border',
+                                  socialProvider === p ? 'bg-primary/10 text-primary border-primary/30' : 'bg-transparent text-muted-foreground border-border hover:bg-muted'
+                                )}
+                              >
+                                {p === 'google' ? <Globe size={13} /> : <GitBranch size={13} />}
+                                {p === 'google' ? 'Google' : 'GitHub'}
                               </button>
                             ))}
                           </div>
-                          <button onClick={handleStartSocial} disabled={loading} className="btn-primary w-full max-w-[200px] mx-auto mt-2">
-                            {loading ? <Loader2 size={14} className="animate-spin" /> : <Globe size={14} />} Start Login
-                          </button>
+                          <Button onClick={handleStartSocial} disabled={loading} size="sm" className="gap-2">
+                            {loading ? <Loader2 size={13} className="animate-spin" /> : <Globe size={13} />}
+                            Start Login
+                          </Button>
                         </>
                       )}
                       {socialLogin && (
                         <div className="space-y-3 text-left">
-                          <div className="glass-sm p-3 text-xs text-[var(--text-muted)] space-y-1.5 border-blue-500/20">
-                            <p>1. The login page has been opened in your browser.</p>
-                            <p>2. After logging in, copy the <code className="bg-white/[0.05] px-1 rounded">kiro://</code> URL.</p>
+                          <div className="rounded-lg border bg-muted/40 p-3 text-xs text-muted-foreground space-y-1">
+                            <p>1. Login page opened in browser.</p>
+                            <p>2. After login, copy the <code className="bg-muted px-1 rounded">kiro://</code> URL.</p>
                             <p>3. Paste it below to complete authorization.</p>
                           </div>
-                          <input value={socialCallbackUrl} onChange={e => setSocialCallbackUrl(e.target.value)} placeholder="kiro://kiro.kiroAgent/authenticate-success?..." className="glass-input w-full text-xs font-mono" />
+                          <Input value={socialCallbackUrl} onChange={e => setSocialCallbackUrl(e.target.value)} placeholder="kiro://kiro.kiroAgent/authenticate-success?..." className="text-xs font-mono" />
                           <div className="flex gap-2">
-                            <button onClick={handleExchangeSocial} disabled={loading || !socialCallbackUrl} className="btn-primary flex-1 text-xs">
+                            <Button onClick={handleExchangeSocial} disabled={loading || !socialCallbackUrl} size="sm" className="flex-1">
                               {loading ? 'Processing…' : 'Submit'}
-                            </button>
-                            <a href={socialLogin.loginUrl} target="_blank" rel="noopener noreferrer" className="btn-ghost flex items-center justify-center text-xs px-3 decoration-transparent" title="Re-open browser">
-                              <ExternalLink size={14} />
-                            </a>
+                            </Button>
+                            <Button asChild variant="outline" size="sm">
+                              <a href={socialLogin.loginUrl} target="_blank" rel="noopener noreferrer"><ExternalLink size={13} /></a>
+                            </Button>
                           </div>
                         </div>
                       )}
@@ -322,10 +339,10 @@ export default function AddConnectionModal({ onSuccess, onClose }: AddConnection
                   )}
 
                   {importMode === 'file' && (
-                    <div className="text-center max-w-sm mx-auto space-y-4">
-                      <p className="text-xs text-[var(--text-muted)]">Upload the <code className="font-mono bg-white/[0.05] px-1 rounded">kiro-auth-token.json</code> config file.</p>
-                      <label className="flex flex-col items-center justify-center gap-2 p-6 glass-sm border-dashed hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors cursor-pointer rounded-xl group select-none">
-                        <Upload size={20} className="text-[var(--text-muted)] group-hover:text-[var(--accent)] transition-colors" />
+                    <div className="text-center space-y-3 max-w-sm mx-auto">
+                      <p className="text-xs text-muted-foreground">Upload <code className="bg-muted px-1 rounded">kiro-auth-token.json</code></p>
+                      <label className="flex flex-col items-center justify-center gap-2 p-6 rounded-lg border border-dashed cursor-pointer hover:border-primary hover:bg-muted/40 transition-colors">
+                        <Upload size={20} className="text-muted-foreground" />
                         <span className="text-xs font-medium">{loading ? 'Processing…' : 'Select JSON file'}</span>
                         <input type="file" accept=".json" onChange={handleFileUpload} className="hidden" disabled={loading} />
                       </label>
@@ -334,45 +351,49 @@ export default function AddConnectionModal({ onSuccess, onClose }: AddConnection
 
                   {importMode === 'manual' && (
                     <div className="space-y-3 max-w-md mx-auto">
-                      <textarea value={form.refreshToken} onChange={e => setForm({ ...form, refreshToken: e.target.value })} placeholder="Refresh Token *" rows={3} className="glass-input w-full text-xs font-mono" />
+                      <Textarea value={form.refreshToken} onChange={e => setForm({ ...form, refreshToken: e.target.value })} placeholder="Refresh Token *" rows={3} className="text-xs font-mono" />
                       <div className="grid grid-cols-2 gap-3">
-                        <select value={form.authMethod} onChange={e => setForm({ ...form, authMethod: e.target.value })} className="glass-select w-full text-xs">
+                        <select value={form.authMethod} onChange={e => setForm({ ...form, authMethod: e.target.value })} className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-xs shadow-sm">
                           <option value="builder-id">AWS Builder ID</option>
                           <option value="idc">IAM Identity Center</option>
                           <option value="social">Social Login</option>
                         </select>
-                        <input value={form.region} onChange={e => setForm({ ...form, region: e.target.value })} placeholder="Region (optional)" className="glass-input w-full text-xs" />
+                        <Input value={form.region} onChange={e => setForm({ ...form, region: e.target.value })} placeholder="Region (optional)" className="text-xs" />
                       </div>
-                      <button onClick={handleManualImport} disabled={loading || !form.refreshToken} className="btn-primary w-full text-xs py-2">
+                      <Button onClick={handleManualImport} disabled={loading || !form.refreshToken} size="sm" className="w-full">
                         {loading ? 'Validating…' : 'Import Configuration'}
-                      </button>
+                      </Button>
                     </div>
                   )}
                 </div>
               </div>
             )}
 
-            {/* OpenAI Config */}
+            {/* OpenAI */}
             {provider === 'openai' && (
-              <div className="space-y-5 max-w-md mx-auto">
-                <div className="flex gap-2 justify-center mb-5">
-                  <button onClick={() => { setOpenaiMode('oauth'); setOpenaiOAuthSession(null); setOpenaiManualCallback(''); setError(''); setSuccess('') }}
-                    className={`flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-medium cursor-pointer transition-colors border ${openaiMode === 'oauth' ? 'bg-[#10a37f]/10 text-[#10a37f] border-[#10a37f]/30' : 'bg-transparent text-[var(--text-muted)] border-transparent hover:bg-white/[0.04]'}`}>
-                    <Globe size={14} /> OAuth Flow
-                  </button>
-                  <button onClick={() => { setOpenaiMode('apikey'); setOpenaiOAuthSession(null); setOpenaiManualCallback(''); setError(''); setSuccess('') }}
-                    className={`flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-medium cursor-pointer transition-colors border ${openaiMode === 'apikey' ? 'bg-[#10a37f]/10 text-[#10a37f] border-[#10a37f]/30' : 'bg-transparent text-[var(--text-muted)] border-transparent hover:bg-white/[0.04]'}`}>
-                    <Shield size={14} /> API Key
-                  </button>
+              <div className="space-y-4 max-w-md mx-auto">
+                <div className="flex gap-1.5 justify-center">
+                  {(['oauth', 'apikey'] as const).map(mode => (
+                    <button
+                      key={mode}
+                      onClick={() => { setOpenaiMode(mode); setOpenaiOAuthSession(null); setOpenaiManualCallback(''); setError('') }}
+                      className={cn(
+                        'flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-medium cursor-pointer transition-colors border',
+                        openaiMode === mode ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/30' : 'bg-transparent text-muted-foreground border-transparent hover:bg-muted'
+                      )}
+                    >
+                      {mode === 'oauth' ? <><Globe size={13} /> OAuth Flow</> : <><Shield size={13} /> API Key</>}
+                    </button>
+                  ))}
                 </div>
 
                 {openaiMode === 'oauth' && (
-                  <div className="space-y-4 text-center">
-                    {!openaiOAuthSession && (
+                  <div className="space-y-3 text-center">
+                    {!openaiOAuthSession ? (
                       <>
-                        <p className="text-xs text-[var(--text-muted)] leading-relaxed">Securely connect your OpenAI account without sharing passwords. You will be redirected to official OpenAI login.</p>
-                        <button onClick={async () => {
-                          setLoading(true); setError(''); setSuccess('')
+                        <p className="text-xs text-muted-foreground">Securely connect your OpenAI account via OAuth PKCE flow.</p>
+                        <Button onClick={async () => {
+                          setLoading(true); setError('')
                           try {
                             const res = await api.startOpenAIOAuth()
                             setOpenaiOAuthSession({ sessionId: res.sessionId, authUrl: res.authUrl })
@@ -390,26 +411,25 @@ export default function AddConnectionModal({ onSuccess, onClose }: AddConnection
                               }
                             }, 2000)
                           } catch (e: any) { setError(e.message) } finally { setLoading(false) }
-                        }} disabled={loading} className="btn-primary w-full max-w-[200px] mx-auto bg-[#10a37f] hover:bg-[#0d8a6b] border-transparent shadow-[#10a37f]/20">
-                          {loading ? <Loader2 size={14} className="animate-spin" /> : <ExternalLink size={14} />} Start Login
-                        </button>
+                        }} disabled={loading} size="sm" className="gap-2 bg-emerald-600 hover:bg-emerald-700">
+                          {loading ? <Loader2 size={13} className="animate-spin" /> : <ExternalLink size={13} />}
+                          Start Login
+                        </Button>
                       </>
-                    )}
-
-                    {openaiOAuthSession && (
+                    ) : (
                       <div className="space-y-3 text-left">
-                        <div className="glass-sm p-4 border-[#10a37f]/30 text-center animate-fade-in">
-                          <Loader2 size={24} className="animate-spin text-[#10a37f] mx-auto mb-2" />
-                          <h4 className="font-medium text-sm text-[var(--text)]">Waiting for authorization</h4>
-                          <a href={openaiOAuthSession.authUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-[#10a37f] hover:underline mt-1 inline-flex items-center gap-1 decoration-transparent">
+                        <div className="rounded-lg border bg-muted/40 p-4 text-center">
+                          <Loader2 size={20} className="animate-spin text-emerald-600 mx-auto mb-2" />
+                          <p className="text-sm font-medium">Waiting for authorization…</p>
+                          <a href={openaiOAuthSession.authUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-emerald-600 hover:underline inline-flex items-center gap-1 mt-1">
                             Open browser manually <ExternalLink size={10} />
                           </a>
                         </div>
-                        <div className="pt-2">
-                          <p className="text-[10px] text-[var(--text-dim)] mb-1 flex items-center gap-1"><AlertTriangle size={10} /> If not redirected automatically, paste the callback URL below:</p>
+                        <div>
+                          <p className="text-[10px] text-muted-foreground mb-1 flex items-center gap-1"><AlertTriangle size={10} /> Paste callback URL if not redirected automatically:</p>
                           <div className="flex gap-2">
-                            <input value={openaiManualCallback} onChange={e => setOpenaiManualCallback(e.target.value)} placeholder="http://localhost:1455/auth/callback?..." className="glass-input flex-1 text-xs font-mono" />
-                            <button onClick={async () => {
+                            <Input value={openaiManualCallback} onChange={e => setOpenaiManualCallback(e.target.value)} placeholder="http://localhost:1455/auth/callback?..." className="text-xs font-mono" />
+                            <Button onClick={async () => {
                               if (!openaiManualCallback.trim()) return
                               setLoading(true); setError('')
                               try {
@@ -417,17 +437,16 @@ export default function AddConnectionModal({ onSuccess, onClose }: AddConnection
                                 const poll = await api.pollOpenAIOAuth(openaiOAuthSession.sessionId, openaiManualCallback.trim())
                                 if (poll.status === 'success') { done(`Connected! ${poll.email || poll.name || ''}`) }
                                 else { setError(poll.error || 'Authorization failed'); setOpenaiOAuthSession(null) }
-                              } catch (e: any) { setError(e.message); setOpenaiOAuthSession(null) }
-                              finally { setLoading(false) }
-                            }} disabled={loading || !openaiManualCallback.trim()} className="btn-primary text-xs bg-[#10a37f] hover:bg-[#0d8a6b] border-transparent">
+                              } catch (e: any) { setError(e.message); setOpenaiOAuthSession(null) } finally { setLoading(false) }
+                            }} disabled={loading || !openaiManualCallback.trim()} size="sm">
                               {loading ? <Loader2 size={12} className="animate-spin" /> : 'Submit'}
-                            </button>
+                            </Button>
                           </div>
                         </div>
-                        <button onClick={() => {
+                        <Button variant="outline" size="sm" className="w-full" onClick={() => {
                           if (openaiPollRef.current) clearInterval(openaiPollRef.current)
                           setOpenaiOAuthSession(null); setOpenaiManualCallback(''); setError('')
-                        }} className="btn-ghost w-full text-xs mt-2">Cancel</button>
+                        }}>Cancel</Button>
                       </div>
                     )}
                   </div>
@@ -435,43 +454,41 @@ export default function AddConnectionModal({ onSuccess, onClose }: AddConnection
 
                 {openaiMode === 'apikey' && (
                   <div className="space-y-3">
-                    <input type="password" value={openaiForm.apiKey} onChange={e => setOpenaiForm({ ...openaiForm, apiKey: e.target.value })} placeholder="API Key (sk-proj-…) *" className="glass-input w-full text-xs font-mono" />
-                    <input value={openaiForm.name} onChange={e => setOpenaiForm({ ...openaiForm, name: e.target.value })} placeholder="Display Name (optional)" className="glass-input w-full text-xs" />
-                    <textarea value={openaiForm.supportedModels} onChange={e => setOpenaiForm({ ...openaiForm, supportedModels: e.target.value })} placeholder="Supported Models (one per line, optional)" rows={3} className="glass-input w-full text-xs font-mono" />
-                    <button onClick={handleAddOpenAI} disabled={loading || !openaiForm.apiKey} className="btn-primary w-full text-xs py-2 bg-[#10a37f] hover:bg-[#0d8a6b] border-transparent shadow-[#10a37f]/20">
+                    <Input type="password" value={openaiForm.apiKey} onChange={e => setOpenaiForm({ ...openaiForm, apiKey: e.target.value })} placeholder="API Key (sk-proj-…) *" className="text-xs font-mono" />
+                    <Input value={openaiForm.name} onChange={e => setOpenaiForm({ ...openaiForm, name: e.target.value })} placeholder="Display Name (optional)" className="text-xs" />
+                    <Textarea value={openaiForm.supportedModels} onChange={e => setOpenaiForm({ ...openaiForm, supportedModels: e.target.value })} placeholder="Supported Models (one per line, optional)" rows={3} className="text-xs font-mono" />
+                    <Button onClick={handleAddOpenAI} disabled={loading || !openaiForm.apiKey} size="sm" className="w-full bg-emerald-600 hover:bg-emerald-700">
                       {loading ? 'Adding…' : 'Add Connection'}
-                    </button>
+                    </Button>
                   </div>
                 )}
               </div>
             )}
 
-            {/* Custom API Config */}
+            {/* Custom API */}
             {provider === 'openai-compatible' && (
-              <div className="space-y-3 max-w-md mx-auto pt-2">
-                <div>
-                  <input value={customForm.baseUrl} onChange={e => setCustomForm({ ...customForm, baseUrl: e.target.value })} placeholder="Base URL (e.g. https://api.together.xyz/v1) *" className="glass-input w-full text-xs font-mono" />
-                </div>
+              <div className="space-y-3 max-w-md mx-auto">
+                <Input value={customForm.baseUrl} onChange={e => setCustomForm({ ...customForm, baseUrl: e.target.value })} placeholder="Base URL (e.g. https://api.together.xyz/v1) *" className="text-xs font-mono" />
                 <div className="grid grid-cols-2 gap-3">
-                  <input type="password" value={customForm.apiKey} onChange={e => setCustomForm({ ...customForm, apiKey: e.target.value })} placeholder="API Key (sk-…)" className="glass-input w-full text-xs font-mono" />
-                  <input value={customForm.name} onChange={e => setCustomForm({ ...customForm, name: e.target.value })} placeholder="Display Name" className="glass-input w-full text-xs" />
+                  <Input type="password" value={customForm.apiKey} onChange={e => setCustomForm({ ...customForm, apiKey: e.target.value })} placeholder="API Key (optional)" className="text-xs font-mono" />
+                  <Input value={customForm.name} onChange={e => setCustomForm({ ...customForm, name: e.target.value })} placeholder="Display Name" className="text-xs" />
                 </div>
-                <textarea value={customForm.supportedModels} onChange={e => setCustomForm({ ...customForm, supportedModels: e.target.value })} placeholder="Supported Models (one per line, optional)" rows={3} className="glass-input w-full text-xs font-mono" />
-                <button onClick={handleAddCustom} disabled={loading || !customForm.baseUrl} className="btn-primary w-full text-xs py-2 bg-[var(--purple)] hover:bg-[#9333ea] border-transparent shadow-[var(--purple)]/20 shadow-md">
+                <Textarea value={customForm.supportedModels} onChange={e => setCustomForm({ ...customForm, supportedModels: e.target.value })} placeholder="Supported Models (one per line, optional)" rows={3} className="text-xs font-mono" />
+                <Button onClick={handleAddCustom} disabled={loading || !customForm.baseUrl} size="sm" className="w-full bg-purple-600 hover:bg-purple-700">
                   {loading ? 'Adding…' : 'Add Custom Connection'}
-                </button>
+                </Button>
               </div>
             )}
           </div>
 
-          {(error || success) && (
-            <div className={`p-3 rounded-xl border text-xs flex items-center gap-2 animate-slide-up ${error ? 'bg-[var(--danger-glow)] text-[var(--danger)] border-[var(--danger)]/20' : 'bg-[var(--success-glow)] text-[var(--success)] border-[var(--success)]/20'}`}>
-              {error ? <AlertTriangle size={14} className="shrink-0" /> : <CheckCircle2 size={14} className="shrink-0" />}
-              <span className="leading-relaxed">{error || success}</span>
+          {error && (
+            <div className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+              <AlertTriangle size={13} className="shrink-0" />
+              {error}
             </div>
           )}
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   )
 }

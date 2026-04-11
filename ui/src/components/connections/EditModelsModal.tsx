@@ -1,7 +1,16 @@
 import { useState, useEffect } from 'react'
-import { X, Download, Loader2, Settings2 } from 'lucide-react'
+import { Download, Loader2, Settings2 } from 'lucide-react'
 import { api } from '../../api'
 import ModelSelector from '../ModelSelector'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
 
 interface EditModelsModalProps {
   conn: any
@@ -15,7 +24,6 @@ export default function EditModelsModal({ conn, onSave, onClose }: EditModelsMod
   const [saving, setSaving] = useState(false)
   const [fetchError, setFetchError] = useState('')
 
-  // Initialize with current models (with provider prefix)
   useEffect(() => {
     const withPrefix = (conn.supportedModels || []).map((m: string) =>
       m.includes('/') ? m : `${conn.provider}/${m}`
@@ -23,30 +31,18 @@ export default function EditModelsModal({ conn, onSave, onClose }: EditModelsMod
     setSelectedModels(withPrefix)
   }, [conn.id, conn.supportedModels, conn.provider])
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
-
   const handleFetchModels = async () => {
     setFetching(true)
     setFetchError('')
     try {
       const res = await api.fetchConnectionModels(conn.id)
       const fetched = res.models || []
-      const withPrefix = fetched.map((m: string) => m.includes('/') ? m : `${conn.provider}/${m}`)
-      setSelectedModels(withPrefix)
+      setSelectedModels(fetched.map((m: string) => m.includes('/') ? m : `${conn.provider}/${m}`))
     } catch (e: any) {
       if (conn.provider === 'openai' || conn.provider === 'openai-compatible') {
-        const fallbacks = [
-          'gpt-4o', 'gpt-4o-mini', 'o1', 'o1-mini', 'o3-mini', 'chatgpt-4o-latest',
-          'gpt-4-turbo', 'gpt-3.5-turbo', 'claude-3-5-sonnet-20240620', 'claude-3-opus-20240229'
-        ]
+        const fallbacks = ['gpt-4o', 'gpt-4o-mini', 'o1', 'o1-mini', 'o3-mini', 'chatgpt-4o-latest', 'gpt-4-turbo', 'gpt-3.5-turbo']
         setSelectedModels(fallbacks)
-        setFetchError('Fetch failed. Loaded fallback model list.')
+        setFetchError('Fetch failed. Loaded fallback list.')
       } else {
         setFetchError(e.message || 'Failed to fetch models')
       }
@@ -71,87 +67,41 @@ export default function EditModelsModal({ conn, onSave, onClose }: EditModelsMod
   }
 
   return (
-    <div
-      className="modal-overlay"
-      role="presentation"
-      onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="edit-models-title"
-        className="modal-content sm:max-w-2xl"
-        onMouseDown={e => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="modal-header">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="w-10 h-10 rounded-xl bg-[var(--purple-glow)] border border-[var(--purple)]/20 flex items-center justify-center shrink-0">
-              <Settings2 size={18} className="text-[var(--purple)]" />
+    <Dialog open onOpenChange={open => { if (!open) onClose() }}>
+      <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col">
+        <DialogHeader>
+          <div className="flex items-center gap-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-md bg-purple-500/10">
+              <Settings2 className="h-4 w-4 text-purple-500" />
             </div>
-            <div className="min-w-0">
-              <h3 id="edit-models-title" className="modal-title truncate">
-                Edit Models — {conn.name}
-              </h3>
-              <p className="modal-subtitle">
-                Select which models this connection can serve. Leave empty to allow all.
-              </p>
+            <div>
+              <DialogTitle>Edit Models — {conn.name}</DialogTitle>
+              <DialogDescription>Select which models this connection can serve. Leave empty to allow all.</DialogDescription>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="btn-icon shrink-0"
-            aria-label="Close"
-          >
-            <X size={18} />
-          </button>
-        </div>
+        </DialogHeader>
 
-        {/* Content */}
-        <div className="modal-body space-y-4">
-          {/* Fetch from API button */}
+        <div className="flex-1 overflow-y-auto space-y-4 py-2">
           {(conn.provider === 'openai' || conn.provider === 'openai-compatible') && (
             <div className="flex items-center gap-3">
-              <button
-                onClick={handleFetchModels}
-                disabled={fetching}
-                className="btn-ghost text-xs"
-              >
+              <Button variant="outline" size="sm" onClick={handleFetchModels} disabled={fetching} className="gap-2">
                 {fetching ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
                 Fetch from API
-              </button>
-              {fetchError && (
-                <span className="text-xs text-[var(--warning)]">{fetchError}</span>
-              )}
+              </Button>
+              {fetchError && <span className="text-xs text-amber-600">{fetchError}</span>}
             </div>
           )}
-
-          <ModelSelector
-            selected={selectedModels}
-            onChange={setSelectedModels}
-            provider={conn.provider}
-          />
+          <ModelSelector selected={selectedModels} onChange={setSelectedModels} provider={conn.provider} />
         </div>
 
-        {/* Footer */}
-        <div className="flex items-center justify-end gap-3 px-5 py-4 border-t border-[var(--border)] shrink-0">
-          <button
-            onClick={onClose}
-            className="btn-ghost"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="btn-primary"
-          >
-            {saving ? (
-              <span className="flex items-center gap-2"><Loader2 size={14} className="animate-spin" /> Saving…</span>
-            ) : 'Save Models'}
-          </button>
-        </div>
-      </div>
-    </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button onClick={handleSave} disabled={saving} className="gap-2">
+            {saving && <Loader2 size={14} className="animate-spin" />}
+            {saving ? 'Saving…' : 'Save Models'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }

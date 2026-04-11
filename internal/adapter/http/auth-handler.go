@@ -22,6 +22,11 @@ import (
 var (
 	authSessions   = make(map[string]*authSession)
 	authSessionsMu sync.Mutex
+
+	openaiSessions   = make(map[string]*openaiSession)
+	openaiSessionsMu sync.Mutex
+
+	maxAuthSessions = 1000
 )
 
 type authSession struct {
@@ -43,19 +48,35 @@ type authSession struct {
 }
 
 func init() {
-	// Background cleanup of expired sessions (>15 min)
 	go func() {
 		for {
 			time.Sleep(5 * time.Minute)
-			authSessionsMu.Lock()
-			for id, s := range authSessions {
-				if time.Since(s.CreatedAt) > 15*time.Minute {
-					delete(authSessions, id)
-				}
-			}
-			authSessionsMu.Unlock()
+			cleanupAuthSessions()
+			cleanupOpenAISessions()
 		}
 	}()
+}
+
+func cleanupAuthSessions() {
+	authSessionsMu.Lock()
+	defer authSessionsMu.Unlock()
+	now := time.Now()
+	for id, s := range authSessions {
+		if now.Sub(s.CreatedAt) > 15*time.Minute {
+			delete(authSessions, id)
+		}
+	}
+}
+
+func cleanupOpenAISessions() {
+	openaiSessionsMu.Lock()
+	defer openaiSessionsMu.Unlock()
+	now := time.Now()
+	for id, s := range openaiSessions {
+		if now.Sub(s.CreatedAt) > 15*time.Minute {
+			delete(openaiSessions, id)
+		}
+	}
 }
 
 // RegisterAuthRoutes adds auth flow endpoints.
@@ -562,14 +583,8 @@ type openaiSession struct {
 	CreatedAt    time.Time
 }
 
-var (
-	openaiSessions   = make(map[string]*openaiSession)
-	openaiSessionsMu sync.Mutex
-)
-
 func authOpenAIStart() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Generate PKCE
 		codeVerifier, codeChallenge, state, err := auth.GeneratePKCE()
 		if err != nil {
 			c.JSON(500, gin.H{"error": "Failed to generate PKCE: " + err.Error()})
@@ -578,7 +593,6 @@ func authOpenAIStart() gin.HandlerFunc {
 
 		redirectURI := fmt.Sprintf("http://localhost:%d/auth/callback", openaiCallbackPort)
 
-		// Build OpenAI auth URL (space encoded as %20 like real Codex CLI)
 		params := map[string]string{
 			"response_type":              "code",
 			"client_id":                  openaiClientID,

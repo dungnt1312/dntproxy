@@ -171,52 +171,71 @@ func (s *AccountSelector) SelectCredentials(provider string, excludeIDs map[stri
 
 // MarkUnavailable marks a connection as unavailable with cooldown.
 func (s *AccountSelector) MarkUnavailable(connectionID string, status int, errorText string, model string) error {
-	conn, err := s.store.GetConnectionByID(connectionID)
-	if err != nil || conn == nil {
+	var result *domain.FallbackResult
+	err := s.store.Update(func(cfg *domain.AppConfig) {
+		var conn *domain.ProviderConnection
+		for i := range cfg.ProviderConnections {
+			if cfg.ProviderConnections[i].ID == connectionID {
+				conn = &cfg.ProviderConnections[i]
+				break
+			}
+		}
+		if conn == nil {
+			return
+		}
+
+		fb := domain.CheckFallbackError(status, errorText, conn.BackoffLevel)
+		if !fb.ShouldFallback {
+			return
+		}
+		result = &fb
+
+		if fb.CooldownMs > 0 {
+			conn.RateLimitedUntil = domain.CooldownUntil(fb.CooldownMs)
+			conn.BackoffLevel = fb.NewBackoffLevel
+			conn.LastError = errorText
+			conn.LastErrorAt = time.Now().UTC().Format(time.RFC3339)
+
+			if model != "" {
+				if conn.ModelLocks == nil {
+					conn.ModelLocks = make(map[string]string)
+				}
+				conn.ModelLocks[model] = domain.CooldownUntil(fb.CooldownMs)
+			}
+		}
+	})
+	if err != nil {
+		return err
+	}
+	if result == nil {
 		return fmt.Errorf("connection not found: %s", connectionID)
 	}
-
-	result := domain.CheckFallbackError(status, errorText, conn.BackoffLevel)
-	if !result.ShouldFallback {
-		return nil
-	}
-
-	if result.CooldownMs > 0 {
-		conn.RateLimitedUntil = domain.CooldownUntil(result.CooldownMs)
-		conn.BackoffLevel = result.NewBackoffLevel
-		conn.LastError = errorText
-		conn.LastErrorAt = time.Now().UTC().Format(time.RFC3339)
-
-		// Set model lock if applicable
-		if model != "" {
-			if conn.ModelLocks == nil {
-				conn.ModelLocks = make(map[string]string)
-			}
-			conn.ModelLocks[model] = domain.CooldownUntil(result.CooldownMs)
-		}
-	}
-
-	return s.store.UpdateConnection(conn)
+	return nil
 }
 
 // ClearError resets a connection's error state after a successful request.
 func (s *AccountSelector) ClearError(connectionID string, model string) error {
-	conn, err := s.store.GetConnectionByID(connectionID)
-	if err != nil || conn == nil {
-		return nil
-	}
+	return s.store.Update(func(cfg *domain.AppConfig) {
+		var conn *domain.ProviderConnection
+		for i := range cfg.ProviderConnections {
+			if cfg.ProviderConnections[i].ID == connectionID {
+				conn = &cfg.ProviderConnections[i]
+				break
+			}
+		}
+		if conn == nil {
+			return
+		}
 
-	conn.RateLimitedUntil = ""
-	conn.BackoffLevel = 0
-	conn.LastError = ""
-	conn.LastErrorAt = ""
+		conn.RateLimitedUntil = ""
+		conn.BackoffLevel = 0
+		conn.LastError = ""
+		conn.LastErrorAt = ""
 
-	// Clear model lock
-	if model != "" && conn.ModelLocks != nil {
-		delete(conn.ModelLocks, model)
-	}
-
-	return s.store.UpdateConnection(conn)
+		if model != "" && conn.ModelLocks != nil {
+			delete(conn.ModelLocks, model)
+		}
+	})
 }
 
 func connectionToCredentials(conn *domain.ProviderConnection) *domain.Credentials {

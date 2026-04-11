@@ -25,7 +25,7 @@ func apiListConnections(store port.CredentialStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cfg, err := store.Load()
 		if err != nil {
-			c.JSON(500, gin.H{"error": err.Error()})
+			c.JSON(500, gin.H{"error": "Failed to load config"})
 			return
 		}
 

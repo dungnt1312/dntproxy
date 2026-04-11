@@ -78,7 +78,7 @@ export default function Dashboard() {
             return (
               <div key={c.id} className="glass-sm px-4 py-3 flex items-center justify-between hover:border-[var(--border-hover)] transition-all cursor-pointer group" onClick={() => navigate('/connections')}>
                 <div className="flex items-center gap-3 min-w-0">
-                  <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: info.bg, border: `1px solid ${info.border}` }}>
+                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 border ${info.colorClass}`}>
                     {info.icon}
                   </div>
                   <div className="min-w-0">

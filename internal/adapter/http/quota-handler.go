@@ -1,6 +1,7 @@
 package http
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -23,7 +24,7 @@ func apiCheckQuota(store port.CredentialStore) gin.HandlerFunc {
 		id := c.Param("id")
 		cfg, err := store.Load()
 		if err != nil {
-			c.JSON(500, gin.H{"error": err.Error()})
+			c.JSON(500, gin.H{"error": "Failed to load config"})
 			return
 		}
 
@@ -100,8 +101,9 @@ func handleKiroQuota(c *gin.Context, conn *domain.ProviderConnection, result gin
 		req.Header.Set("Accept", "application/json")
 		qResp, err = client.Do(req)
 	} else {
-		body := fmt.Sprintf(`{"origin":"AI_EDITOR","profileArn":"%s","resourceType":"AGENTIC_REQUEST"}`, profileArn)
-		req, _ := http.NewRequest("POST", "https://codewhisperer.us-east-1.amazonaws.com", strings.NewReader(body))
+		payload := map[string]string{"origin": "AI_EDITOR", "profileArn": profileArn, "resourceType": "AGENTIC_REQUEST"}
+		payloadBytes, _ := json.Marshal(payload)
+		req, _ := http.NewRequest("POST", "https://codewhisperer.us-east-1.amazonaws.com", bytes.NewReader(payloadBytes))
 		req.Header.Set("Authorization", "Bearer "+conn.AccessToken)
 		req.Header.Set("Content-Type", "application/x-amz-json-1.0")
 		req.Header.Set("x-amz-target", "AmazonCodeWhispererService.GetUsageLimits")
@@ -123,7 +125,7 @@ func handleKiroQuota(c *gin.Context, conn *domain.ProviderConnection, result gin
 	if err == nil && qResp != nil {
 		defer qResp.Body.Close()
 		qBodyBytes, _ := io.ReadAll(qResp.Body)
-		fmt.Printf("[Kiro Quota] ProfileArn: %q, StatusCode: %d, Body: %s\n", profileArn, qResp.StatusCode, string(qBodyBytes))
+		fmt.Printf("[Kiro Quota] StatusCode: %d\n", qResp.StatusCode)
 
 		// Check for error responses (401, 403, etc.)
 		if qResp.StatusCode != 200 {

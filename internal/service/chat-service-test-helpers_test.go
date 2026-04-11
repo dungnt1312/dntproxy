@@ -66,6 +66,13 @@ func (s *testCredentialStore) GetConnectionByID(id string) (*domain.ProviderConn
 	return nil, nil
 }
 
+func (s *testCredentialStore) Update(fn func(cfg *domain.AppConfig)) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	fn(s.cfg)
+	return nil
+}
+
 func (s *testCredentialStore) UpdateConnection(conn *domain.ProviderConnection) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

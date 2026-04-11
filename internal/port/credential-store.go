@@ -8,6 +8,8 @@ type CredentialStore interface {
 	Load() (*domain.AppConfig, error)
 	// Save writes the full config to storage.
 	Save(cfg *domain.AppConfig) error
+	// Update loads config, applies fn, and saves atomically (single lock).
+	Update(fn func(cfg *domain.AppConfig)) error
 
 	// GetActiveConnections returns active connections for a provider, sorted by priority.
 	GetActiveConnections(provider string) ([]domain.ProviderConnection, error)

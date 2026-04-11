@@ -78,7 +78,7 @@ func apiExportBackup(store port.CredentialStore) gin.HandlerFunc {
 			return
 		}
 
-		maskTokens := c.Query("mask") == "true"
+		maskTokens := c.Query("mask") != "false"
 		connections := make([]ProviderConnectionBackup, len(cfg.ProviderConnections))
 		for i, conn := range cfg.ProviderConnections {
 			connections[i] = ProviderConnectionBackup{

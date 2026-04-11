@@ -102,7 +102,13 @@ func (e *Executor) executeStandard(model string, body []byte, credentials *domai
 
 	start := time.Now()
 
-	client := &http.Client{}
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+		Transport: &http.Transport{
+			ResponseHeaderTimeout: 15 * time.Second,
+			IdleConnTimeout:       90 * time.Second,
+		},
+	}
 	resp, err := client.Do(req)
 	duration := time.Since(start)
 
@@ -128,9 +134,9 @@ func (e *Executor) executeStandard(model string, body []byte, credentials *domai
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		bodyBytes, err := io.ReadAll(resp.Body)
+		bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 1*1024*1024))
 		resp.Body.Close()
-		
+
 		respBodyStr := "Unknown error"
 		if err == nil {
 			respBodyStr = string(bodyBytes)
@@ -138,7 +144,7 @@ func (e *Executor) executeStandard(model string, body []byte, credentials *domai
 		log.Printf("[OPENAI] <-- %s | conn=%s | model=%s | status=%d | duration=%s | error body_size=%d",
 			url, credentials.ConnectionName, model, resp.StatusCode, duration, len(bodyBytes))
 		log.Printf("[OPENAI] ERROR body: %s", respBodyStr)
-		
+
 		appLogger.AddEntry(domain.LogEntry{
 			Level:          "ERROR",
 			Provider:       "OPENAI",
@@ -250,7 +256,13 @@ func (e *Executor) executeCodexResponses(model string, body []byte, credentials 
 
 	start := time.Now()
 
-	client := &http.Client{}
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+		Transport: &http.Transport{
+			ResponseHeaderTimeout: 15 * time.Second,
+			IdleConnTimeout:       90 * time.Second,
+		},
+	}
 	resp, err := client.Do(req)
 	duration := time.Since(start)
 
@@ -279,7 +291,7 @@ func (e *Executor) executeCodexResponses(model string, body []byte, credentials 
 		url, credentials.ConnectionName, model, resp.StatusCode, duration)
 
 	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(resp.Body)
+		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 1*1024*1024))
 		resp.Body.Close()
 		respBodyStr := string(bodyBytes)
 		log.Printf("[CODEX] ERROR body: %s", respBodyStr)
@@ -321,6 +333,7 @@ func (e *Executor) executeCodexResponses(model string, body []byte, credentials 
 	pr, pw := io.Pipe()
 	go func() {
 		defer pw.Close()
+		defer resp.Body.Close()
 		state := NewCodexResponseState(model)
 		scanner := bufio.NewScanner(resp.Body)
 		// Increase scanner buffer for large SSE events
@@ -361,8 +374,6 @@ func (e *Executor) executeCodexResponses(model string, body []byte, credentials 
 			pw.Write([]byte(formatSSEChunk(state, map[string]interface{}{}, &finishReason)))
 			pw.Write([]byte("data: [DONE]\n\n"))
 		}
-
-		resp.Body.Close()
 	}()
 
 	return pr, 200, nil

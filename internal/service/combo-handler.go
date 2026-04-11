@@ -25,7 +25,6 @@ type ComboResult struct {
 	StatusCode int
 	Error      string
 	RetryAfter string
-	Body       []byte
 }
 
 // HandleCombo tries models in order (or round-robin) until one succeeds.
@@ -75,9 +74,7 @@ func (ch *ComboHandler) HandleCombo(
 		}
 
 		lastError = result.Error
-		if lastStatus == 0 {
-			lastStatus = result.StatusCode
-		}
+		lastStatus = result.StatusCode
 		log.Printf("[COMBO] Model %s failed (%d), trying next", modelStr, result.StatusCode)
 	}
 
@@ -114,6 +111,10 @@ func (ch *ComboHandler) getRotatedModels(models []string, comboName string, stra
 	ch.rotationState.Store(comboName, nextIndex)
 
 	return rotated
+}
+
+func (ch *ComboHandler) ClearRotation(comboName string) {
+	ch.rotationState.Delete(comboName)
 }
 
 func shouldComboFallback(status int) bool {

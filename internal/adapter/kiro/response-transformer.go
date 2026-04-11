@@ -314,6 +314,9 @@ func (t *ResponseTransformer) emitToolUse(toolCallID, toolName string, toolInput
 }
 
 func (t *ResponseTransformer) handleMessageStop() []byte {
+	if t.finishSent {
+		return nil
+	}
 	finishReason := "stop"
 	if t.hasToolCalls {
 		finishReason = "tool_calls"

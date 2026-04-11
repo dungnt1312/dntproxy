@@ -35,7 +35,7 @@ func NewJsonDB(path string) (*JsonDB, error) {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		cfg := domain.DefaultConfig()
 		data, _ := json.MarshalIndent(cfg, "", "  ")
-		if err := os.WriteFile(path, data, 0644); err != nil {
+		if err := os.WriteFile(path, data, 0600); err != nil {
 			return nil, fmt.Errorf("seed db file: %w", err)
 		}
 	}
@@ -72,6 +72,10 @@ func (db *JsonDB) Load() (*domain.AppConfig, error) {
 	}
 	defer db.fileLock.Unlock()
 
+	return db.readFromDisk()
+}
+
+func (db *JsonDB) readFromDisk() (*domain.AppConfig, error) {
 	data, err := os.ReadFile(db.filePath)
 	if err != nil {
 		return nil, fmt.Errorf("read db file: %w", err)
@@ -79,7 +83,6 @@ func (db *JsonDB) Load() (*domain.AppConfig, error) {
 
 	var cfg domain.AppConfig
 	if err := json.Unmarshal(data, &cfg); err != nil {
-		// Corrupt JSON — reset to defaults
 		cfg = domain.DefaultConfig()
 	}
 
@@ -97,14 +100,17 @@ func (db *JsonDB) Save(cfg *domain.AppConfig) error {
 	}
 	defer db.fileLock.Unlock()
 
+	return db.writeToDisk(cfg)
+}
+
+func (db *JsonDB) writeToDisk(cfg *domain.AppConfig) error {
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal config: %w", err)
 	}
 
-	// Atomic write: temp file → rename
 	tmp := db.filePath + ".tmp"
-	if err := os.WriteFile(tmp, data, 0644); err != nil {
+	if err := os.WriteFile(tmp, data, 0600); err != nil {
 		return fmt.Errorf("write temp file: %w", err)
 	}
 	if err := os.Rename(tmp, db.filePath); err != nil {
@@ -156,20 +162,36 @@ func (db *JsonDB) GetConnectionByID(id string) (*domain.ProviderConnection, erro
 	return nil, nil
 }
 
-// UpdateConnection persists changes to a connection.
-func (db *JsonDB) UpdateConnection(conn *domain.ProviderConnection) error {
-	cfg, err := db.Load()
+// Update loads config, applies fn, and saves atomically under a single lock.
+func (db *JsonDB) Update(fn func(cfg *domain.AppConfig)) error {
+	db.mu.Lock()
+	defer db.mu.Unlock()
+
+	if err := db.fileLock.Lock(); err != nil {
+		return fmt.Errorf("acquire file lock: %w", err)
+	}
+	defer db.fileLock.Unlock()
+
+	cfg, err := db.readFromDisk()
 	if err != nil {
 		return err
 	}
 
-	for i := range cfg.ProviderConnections {
-		if cfg.ProviderConnections[i].ID == conn.ID {
-			cfg.ProviderConnections[i] = *conn
-			return db.Save(cfg)
+	fn(cfg)
+
+	return db.writeToDisk(cfg)
+}
+
+// UpdateConnection persists changes to a connection (atomic).
+func (db *JsonDB) UpdateConnection(conn *domain.ProviderConnection) error {
+	return db.Update(func(cfg *domain.AppConfig) {
+		for i := range cfg.ProviderConnections {
+			if cfg.ProviderConnections[i].ID == conn.ID {
+				cfg.ProviderConnections[i] = *conn
+				return
+			}
 		}
-	}
-	return fmt.Errorf("connection %s not found", conn.ID)
+	})
 }
 
 // GetCombos returns all combos.

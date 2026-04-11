@@ -89,7 +89,13 @@ func (e *Executor) Execute(model string, body []byte, credentials *domain.Creden
 	start := time.Now()
 
 	// Execute request
-	client := &http.Client{}
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+		Transport: &http.Transport{
+			ResponseHeaderTimeout: 15 * time.Second,
+			IdleConnTimeout:       90 * time.Second,
+		},
+	}
 	resp, err := client.Do(req)
 	duration := time.Since(start)
 
@@ -115,9 +121,9 @@ func (e *Executor) Execute(model string, body []byte, credentials *domain.Creden
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		bodyBytes, err := io.ReadAll(resp.Body)
+		bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 1*1024*1024))
 		resp.Body.Close()
-		
+
 		respBodyStr := "Unknown error"
 		if err == nil {
 			respBodyStr = string(bodyBytes)
@@ -148,7 +154,7 @@ func (e *Executor) Execute(model string, body []byte, credentials *domain.Creden
 
 	log.Printf("[KIRO] <-- %s | conn=%s | model=%s | status=%d | duration=%s | req_id=%s | stream_started=true",
 		kiroBaseURL, credentials.ConnectionName, model, resp.StatusCode, duration, requestID)
-		
+
 	appLogger.AddEntry(domain.LogEntry{
 		Level:          "INFO",
 		Provider:       "KIRO",

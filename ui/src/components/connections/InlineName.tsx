@@ -1,5 +1,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { Loader2, Pencil, Check, X } from 'lucide-react'
+import { Input } from '@/components/ui/input'
+import { Button } from '@/components/ui/button'
 
 interface InlineNameProps {
   conn: any
@@ -27,44 +29,36 @@ export default function InlineName({ conn, onRename }: InlineNameProps) {
   if (editing) {
     return (
       <div className="flex items-center gap-1">
-        <input
+        <Input
           ref={inputRef}
           value={value}
           onChange={e => setValue(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') cancel() }}
-          className="bg-[var(--bg)] border border-[var(--accent)] rounded px-2 py-0.5 text-sm font-medium outline-none w-48"
           onClick={e => e.stopPropagation()}
+          className="h-6 w-44 text-sm px-2 py-0"
         />
-        <button
-          onClick={e => { e.stopPropagation(); save() }}
-          disabled={saving}
-          aria-label="Save connection name"
-          className="p-0.5 text-[var(--success)] hover:opacity-80 disabled:opacity-50"
-        >
-          {saving ? <Loader2 size={12} className="animate-spin" /> : <Check size={13} />}
-        </button>
-        <button
-          onClick={e => { e.stopPropagation(); cancel() }}
-          aria-label="Cancel editing connection name"
-          className="p-0.5 text-[var(--text-muted)] hover:opacity-80"
-        >
-          <X size={13} />
-        </button>
+        <Button variant="ghost" size="icon" className="h-5 w-5" onClick={e => { e.stopPropagation(); save() }} disabled={saving}>
+          {saving ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} className="text-emerald-500" />}
+        </Button>
+        <Button variant="ghost" size="icon" className="h-5 w-5" onClick={e => { e.stopPropagation(); cancel() }}>
+          <X size={11} className="text-muted-foreground" />
+        </Button>
       </div>
     )
   }
 
   return (
     <div className="flex items-center gap-1 group/name">
-      <span className="font-semibold text-[var(--text)] line-clamp-1 truncate">{conn.name}</span>
-      <button
-        onClick={(e) => { e.stopPropagation(); setEditing(true) }}
-        aria-label={`Rename ${conn.name}`}
-        className="opacity-0 group-hover/name:opacity-100 p-0.5 text-[var(--text-muted)] hover:text-[var(--text)] transition-opacity"
+      <span className="font-semibold text-sm truncate">{conn.name}</span>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-5 w-5 opacity-0 group-hover/name:opacity-100 transition-opacity"
+        onClick={e => { e.stopPropagation(); setEditing(true) }}
         title="Rename"
       >
-        <Pencil size={11} />
-      </button>
+        <Pencil size={10} className="text-muted-foreground" />
+      </Button>
     </div>
   )
 }

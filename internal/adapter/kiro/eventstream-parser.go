@@ -89,8 +89,7 @@ func parseOneFrame(data []byte) *EventFrame {
 			offset += valueLen
 			headers[name] = value
 		} else {
-			// Unknown header type — stop parsing headers
-			break
+			offset += skipHeaderValueType(headerType, data, offset)
 		}
 	}
 
@@ -111,6 +110,39 @@ func parseOneFrame(data []byte) *EventFrame {
 	return &EventFrame{
 		Headers: headers,
 		Payload: payload,
+	}
+}
+
+func skipHeaderValueType(headerType byte, data []byte, offset int) int {
+	switch headerType {
+	case 0: // bool true
+		return 0
+	case 1: // bool false
+		return 0
+	case 2: // byte
+		return 1
+	case 3: // short
+		return 2
+	case 4: // int
+		return 4
+	case 5: // long
+		return 8
+	case 6: // bytes
+		if offset+2 > len(data) {
+			return len(data) - offset
+		}
+		return 2 + int(binary.BigEndian.Uint16(data[offset:offset+2]))
+	case 7: // string
+		if offset+2 > len(data) {
+			return len(data) - offset
+		}
+		return 2 + int(binary.BigEndian.Uint16(data[offset:offset+2]))
+	case 8: // timestamp
+		return 8
+	case 9: // uuid
+		return 16
+	default:
+		return 0
 	}
 }
 

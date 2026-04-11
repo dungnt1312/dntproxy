@@ -23,11 +23,6 @@ func modelsHandler(store port.CredentialStore) gin.HandlerFunc {
 		if err == nil && cfg != nil {
 			seen := make(map[string]bool)
 
-			activeConns := make([]interface{ GetProvider() string }, 0)
-			_ = activeConns
-
-			// Collect model IDs from active connections' SupportedModels
-			// Key: "provider/modelID" — same format as registry
 			for _, conn := range cfg.ProviderConnections {
 				if !conn.IsActive {
 					continue

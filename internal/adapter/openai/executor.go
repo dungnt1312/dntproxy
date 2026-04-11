@@ -99,7 +99,12 @@ func (e *Executor) executeStandard(model string, body []byte, credentials *domai
 		RequestID:      requestID,
 		Message:        "OpenAI-compatible request sent",
 		BodySize:       len(body),
-		RequestBody:    shared.TruncateBody(shared.SanitizeBody(body), 8192),
+		RequestBody: shared.TruncateBody(func() []byte {
+			if shared.ShouldLogRawBodies() {
+				return body
+			}
+			return shared.SanitizeBody(body)
+		}(), 8192),
 	})
 
 	start := time.Now()
@@ -155,7 +160,12 @@ func (e *Executor) executeStandard(model string, body []byte, credentials *domai
 			Message:        "OpenAI-compatible request failed",
 			BodySize:       len(bodyBytes),
 			Error:          respBodyStr,
-			ResponseBody:   shared.TruncateBody(shared.SanitizeBody(bodyBytes), 8192),
+			ResponseBody: shared.TruncateBody(func() []byte {
+				if shared.ShouldLogRawBodies() {
+					return bodyBytes
+				}
+				return shared.SanitizeBody(bodyBytes)
+			}(), 8192),
 		})
 		return nil, resp.StatusCode, fmt.Errorf("openai returned %d: %s", resp.StatusCode, respBodyStr)
 	}
@@ -249,7 +259,12 @@ func (e *Executor) executeCodexResponses(model string, body []byte, credentials 
 		RequestID:      requestID,
 		Message:        "Codex Responses API request sent",
 		BodySize:       len(translatedBody),
-		RequestBody:    shared.TruncateBody(shared.SanitizeBody(translatedBody), 8192),
+		RequestBody: shared.TruncateBody(func() []byte {
+			if shared.ShouldLogRawBodies() {
+				return translatedBody
+			}
+			return shared.SanitizeBody(translatedBody)
+		}(), 8192),
 	})
 
 	start := time.Now()
@@ -301,8 +316,13 @@ func (e *Executor) executeCodexResponses(model string, body []byte, credentials 
 			RequestID:      requestID,
 			Message:        "Codex Responses API error",
 			Error:          respBodyStr,
-			ResponseBody:   shared.TruncateBody(shared.SanitizeBody(bodyBytes), 8192),
-			BodySize:       len(bodyBytes),
+			ResponseBody: shared.TruncateBody(func() []byte {
+				if shared.ShouldLogRawBodies() {
+					return bodyBytes
+				}
+				return shared.SanitizeBody(bodyBytes)
+			}(), 8192),
+			BodySize: len(bodyBytes),
 		})
 		return nil, resp.StatusCode, fmt.Errorf("codex returned %d: %s", resp.StatusCode, respBodyStr)
 	}

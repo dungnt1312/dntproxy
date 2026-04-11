@@ -83,7 +83,12 @@ func (e *Executor) Execute(model string, body []byte, credentials *domain.Creden
 		RequestID:      requestID,
 		Message:        "Kiro request sent",
 		BodySize:       len(payloadBytes),
-		RequestBody:    shared.TruncateBody(shared.SanitizeBody(payloadBytes), 8192),
+		RequestBody: shared.TruncateBody(func() []byte {
+			if shared.ShouldLogRawBodies() {
+				return payloadBytes
+			}
+			return shared.SanitizeBody(payloadBytes)
+		}(), 8192),
 	})
 
 	start := time.Now()
@@ -140,7 +145,12 @@ func (e *Executor) Execute(model string, body []byte, credentials *domain.Creden
 			Message:        "Kiro response error",
 			BodySize:       len(bodyBytes),
 			Error:          respBodyStr,
-			ResponseBody:   shared.TruncateBody(shared.SanitizeBody(bodyBytes), 8192),
+			ResponseBody: shared.TruncateBody(func() []byte {
+				if shared.ShouldLogRawBodies() {
+					return bodyBytes
+				}
+				return shared.SanitizeBody(bodyBytes)
+			}(), 8192),
 		})
 		return nil, resp.StatusCode, fmt.Errorf("kiro returned %d: %s", resp.StatusCode, respBodyStr)
 	}

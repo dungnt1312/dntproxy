@@ -6,6 +6,9 @@ set -e
 
 PORT=${PORT:-20199}
 
+# Dev: log raw request/response bodies without sanitization
+export DNTPROXY_LOG_RAW_BODIES=${DNTPROXY_LOG_RAW_BODIES:-1}
+
 echo "🎨 Building UI..."
 cd ui
 bun i

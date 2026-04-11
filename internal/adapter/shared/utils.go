@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"sync"
 	"time"
 
 	"github.com/dungnt/dntproxy/internal/domain"
@@ -31,6 +33,23 @@ func MaskedToken(token string) string {
 		return "***"
 	}
 	return token[:4] + "***" + token[len(token)-4:]
+}
+
+// logRawBodies caches whether raw bodies should be logged (for dev environments).
+var (
+	logRawBodies     bool
+	logRawBodiesOnce sync.Once
+)
+
+// ShouldLogRawBodies returns true when the DNTPROXY_LOG_RAW_BODIES env var
+// is set to "1" or "true", indicating a dev environment where full request
+// and response bodies should be logged without sanitization.
+func ShouldLogRawBodies() bool {
+	logRawBodiesOnce.Do(func() {
+		v := os.Getenv("DNTPROXY_LOG_RAW_BODIES")
+		logRawBodies = v == "1" || v == "true"
+	})
+	return logRawBodies
 }
 
 // TruncateBody returns at most maxBytes of the body as a string,

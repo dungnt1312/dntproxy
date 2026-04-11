@@ -13,6 +13,7 @@ import (
 	"github.com/dungnt/dntproxy/internal/adapter/auth"
 	"github.com/dungnt/dntproxy/internal/adapter/kiro"
 	openai "github.com/dungnt/dntproxy/internal/adapter/openai"
+	"github.com/dungnt/dntproxy/internal/adapter/shared"
 	"github.com/dungnt/dntproxy/internal/domain"
 	"github.com/dungnt/dntproxy/internal/port"
 	"github.com/gin-gonic/gin"
@@ -196,27 +197,21 @@ func apiImportConnection(store port.CredentialStore) gin.HandlerFunc {
 func apiDeleteConnection(store port.CredentialStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
-		cfg, err := store.Load()
-		if err != nil {
+		found := false
+		if err := store.Update(func(cfg *domain.AppConfig) {
+			for i, conn := range cfg.ProviderConnections {
+				if conn.ID == id {
+					cfg.ProviderConnections = append(cfg.ProviderConnections[:i], cfg.ProviderConnections[i+1:]...)
+					found = true
+					break
+				}
+			}
+		}); err != nil {
 			c.JSON(500, gin.H{"error": err.Error()})
 			return
-		}
-
-		found := false
-		for i, conn := range cfg.ProviderConnections {
-			if conn.ID == id {
-				cfg.ProviderConnections = append(cfg.ProviderConnections[:i], cfg.ProviderConnections[i+1:]...)
-				found = true
-				break
-			}
 		}
 		if !found {
 			c.JSON(404, gin.H{"error": "Connection not found"})
-			return
-		}
-
-		if err := store.Save(cfg); err != nil {
-			c.JSON(500, gin.H{"error": err.Error()})
 			return
 		}
 		c.JSON(200, gin.H{"ok": true})
@@ -318,40 +313,34 @@ func apiUpdateConnection(store port.CredentialStore) gin.HandlerFunc {
 			return
 		}
 
-		cfg, err := store.Load()
-		if err != nil {
-			c.JSON(500, gin.H{"error": err.Error()})
-			return
-		}
-
-		var conn *domain.ProviderConnection
-		for i := range cfg.ProviderConnections {
-			if cfg.ProviderConnections[i].ID == id {
-				conn = &cfg.ProviderConnections[i]
-				break
+		found := false
+		if err := store.Update(func(cfg *domain.AppConfig) {
+			for i := range cfg.ProviderConnections {
+				if cfg.ProviderConnections[i].ID == id {
+					conn := &cfg.ProviderConnections[i]
+					found = true
+					if req.Name != nil {
+						conn.Name = *req.Name
+					}
+					if req.IsActive != nil {
+						conn.IsActive = *req.IsActive
+					}
+					if req.Priority != nil {
+						conn.Priority = *req.Priority
+					}
+					if req.SetModels {
+						conn.SupportedModels = req.SupportedModels
+					}
+					conn.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+					break
+				}
 			}
-		}
-		if conn == nil {
-			c.JSON(404, gin.H{"error": "Connection not found"})
+		}); err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
 			return
 		}
-
-		if req.Name != nil {
-			conn.Name = *req.Name
-		}
-		if req.IsActive != nil {
-			conn.IsActive = *req.IsActive
-		}
-		if req.Priority != nil {
-			conn.Priority = *req.Priority
-		}
-		if req.SetModels {
-			conn.SupportedModels = req.SupportedModels
-		}
-		conn.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
-
-		if err := store.Save(cfg); err != nil {
-			c.JSON(500, gin.H{"error": err.Error()})
+		if !found {
+			c.JSON(404, gin.H{"error": "Connection not found"})
 			return
 		}
 		c.JSON(200, gin.H{"ok": true})
@@ -363,33 +352,27 @@ func apiUpdateConnection(store port.CredentialStore) gin.HandlerFunc {
 func apiResetCooldown(store port.CredentialStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
-		cfg, err := store.Load()
-		if err != nil {
-			c.JSON(500, gin.H{"error": err.Error()})
-			return
-		}
-
-		var conn *domain.ProviderConnection
-		for i := range cfg.ProviderConnections {
-			if cfg.ProviderConnections[i].ID == id {
-				conn = &cfg.ProviderConnections[i]
-				break
+		found := false
+		if err := store.Update(func(cfg *domain.AppConfig) {
+			for i := range cfg.ProviderConnections {
+				if cfg.ProviderConnections[i].ID == id {
+					conn := &cfg.ProviderConnections[i]
+					found = true
+					conn.RateLimitedUntil = ""
+					conn.BackoffLevel = 0
+					conn.LastError = ""
+					conn.LastErrorAt = ""
+					conn.ModelLocks = nil
+					conn.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+					break
+				}
 			}
-		}
-		if conn == nil {
-			c.JSON(404, gin.H{"error": "Connection not found"})
+		}); err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
 			return
 		}
-
-		conn.RateLimitedUntil = ""
-		conn.BackoffLevel = 0
-		conn.LastError = ""
-		conn.LastErrorAt = ""
-		conn.ModelLocks = nil
-		conn.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
-
-		if err := store.Save(cfg); err != nil {
-			c.JSON(500, gin.H{"error": err.Error()})
+		if !found {
+			c.JSON(404, gin.H{"error": "Connection not found"})
 			return
 		}
 		c.JSON(200, gin.H{"ok": true})
@@ -506,6 +489,231 @@ func apiAddCustomConnection(store port.CredentialStore) gin.HandlerFunc {
 			BaseURL:         req.BaseURL,
 			TestStatus:      "active",
 			SupportedModels: req.SupportedModels,
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		}
+
+		cfg.ProviderConnections = append(cfg.ProviderConnections, conn)
+		if err := store.Save(cfg); err != nil {
+			c.JSON(500, gin.H{"error": "Failed to save: " + err.Error()})
+			return
+		}
+
+		c.JSON(200, gin.H{"id": conn.ID, "name": conn.Name})
+	}
+}
+
+// === Add GLM Connection ===
+
+const defaultGLMBaseURL = "https://open.bigmodel.cn/api/paas/v4"
+
+func apiAddGLMConnection(store port.CredentialStore) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req struct {
+			Name            string   `json:"name"`
+			APIKey          string   `json:"apiKey"`
+			BaseURL         string   `json:"baseUrl,omitempty"`
+			SupportedModels []string `json:"supportedModels,omitempty"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil || req.APIKey == "" {
+			c.JSON(400, gin.H{"error": "apiKey is required"})
+			return
+		}
+
+		cfg, err := store.Load()
+		if err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+
+		name := req.Name
+		if name == "" {
+			name = "GLM Account"
+			if cfg != nil {
+				count := 0
+				for _, conn := range cfg.ProviderConnections {
+					if conn.Provider == "glm" {
+						count++
+					}
+				}
+				if count > 0 {
+					name = fmt.Sprintf("GLM Account %d", count+1)
+				}
+			}
+		}
+
+		baseURL := req.BaseURL
+		if baseURL == "" {
+			baseURL = defaultGLMBaseURL
+		}
+
+		supportedModels := req.SupportedModels
+		if len(supportedModels) == 0 {
+			supportedModels = domain.DefaultGLMModels()
+		}
+
+		now := time.Now().UTC().Format(time.RFC3339)
+		conn := domain.ProviderConnection{
+			ID:              uuid.New().String(),
+			Provider:        "glm",
+			AuthType:        "apikey",
+			Name:            name,
+			Priority:        len(cfg.ProviderConnections) + 1,
+			IsActive:        true,
+			APIKey:          req.APIKey,
+			BaseURL:         baseURL,
+			TestStatus:      "active",
+			SupportedModels: supportedModels,
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		}
+
+		cfg.ProviderConnections = append(cfg.ProviderConnections, conn)
+		if err := store.Save(cfg); err != nil {
+			c.JSON(500, gin.H{"error": "Failed to save: " + err.Error()})
+			return
+		}
+
+		c.JSON(200, gin.H{"id": conn.ID, "name": conn.Name})
+	}
+}
+
+// === Add MiniMax Connection ===
+
+const defaultMiniMaxBaseURL = "https://api.minimax.io/v1"
+
+func apiAddMiniMaxConnection(store port.CredentialStore) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req struct {
+			Name            string   `json:"name"`
+			APIKey          string   `json:"apiKey"`
+			BaseURL         string   `json:"baseUrl,omitempty"`
+			SupportedModels []string `json:"supportedModels,omitempty"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil || req.APIKey == "" {
+			c.JSON(400, gin.H{"error": "apiKey is required"})
+			return
+		}
+
+		cfg, err := store.Load()
+		if err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+
+		name := req.Name
+		if name == "" {
+			name = "MiniMax Account"
+			if cfg != nil {
+				count := 0
+				for _, conn := range cfg.ProviderConnections {
+					if conn.Provider == "minimax" {
+						count++
+					}
+				}
+				if count > 0 {
+					name = fmt.Sprintf("MiniMax Account %d", count+1)
+				}
+			}
+		}
+
+		baseURL := req.BaseURL
+		if baseURL == "" {
+			baseURL = defaultMiniMaxBaseURL
+		}
+
+		supportedModels := req.SupportedModels
+		if len(supportedModels) == 0 {
+			supportedModels = domain.DefaultMiniMaxModels()
+		}
+
+		now := time.Now().UTC().Format(time.RFC3339)
+		conn := domain.ProviderConnection{
+			ID:              uuid.New().String(),
+			Provider:        "minimax",
+			AuthType:        "apikey",
+			Name:            name,
+			Priority:        len(cfg.ProviderConnections) + 1,
+			IsActive:        true,
+			APIKey:          req.APIKey,
+			BaseURL:         baseURL,
+			TestStatus:      "active",
+			SupportedModels: supportedModels,
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		}
+
+		cfg.ProviderConnections = append(cfg.ProviderConnections, conn)
+		if err := store.Save(cfg); err != nil {
+			c.JSON(500, gin.H{"error": "Failed to save: " + err.Error()})
+			return
+		}
+
+		c.JSON(200, gin.H{"id": conn.ID, "name": conn.Name})
+	}
+}
+
+// === Add Qwen Connection (API Key mode — DashScope) ===
+
+const defaultQwenAPIBaseURL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
+func apiAddQwenConnection(store port.CredentialStore) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req struct {
+			Name            string   `json:"name"`
+			APIKey          string   `json:"apiKey"`
+			BaseURL         string   `json:"baseUrl,omitempty"`
+			SupportedModels []string `json:"supportedModels,omitempty"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil || req.APIKey == "" {
+			c.JSON(400, gin.H{"error": "apiKey is required"})
+			return
+		}
+
+		cfg, err := store.Load()
+		if err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+
+		name := req.Name
+		if name == "" {
+			name = "Qwen API Account"
+			if cfg != nil {
+				count := 0
+				for _, conn := range cfg.ProviderConnections {
+					if conn.Provider == "qwen" {
+						count++
+					}
+				}
+				if count > 0 {
+					name = fmt.Sprintf("Qwen API Account %d", count+1)
+				}
+			}
+		}
+
+		baseURL := req.BaseURL
+		if baseURL == "" {
+			baseURL = defaultQwenAPIBaseURL
+		}
+
+		supportedModels := req.SupportedModels
+		if len(supportedModels) == 0 {
+			supportedModels = domain.DefaultQwenModels()
+		}
+
+		now := time.Now().UTC().Format(time.RFC3339)
+		conn := domain.ProviderConnection{
+			ID:              uuid.New().String(),
+			Provider:        "qwen",
+			AuthType:        "apikey",
+			Name:            name,
+			Priority:        len(cfg.ProviderConnections) + 1,
+			IsActive:        true,
+			APIKey:          req.APIKey,
+			BaseURL:         baseURL,
+			TestStatus:      "active",
+			SupportedModels: supportedModels,
 			CreatedAt:       now,
 			UpdatedAt:       now,
 		}
@@ -664,7 +872,7 @@ func apiTestModel(store port.CredentialStore, providers port.ProviderRegistry) g
 			store.Save(cfg)
 		}
 
-		creds := connectionToCreds(conn)
+		creds := shared.ConnectionToCredentials(conn)
 
 		// Build the test body based on the connection type.
 		// OpenAI OAuth → Codex Responses API: does NOT support max_tokens.
@@ -735,26 +943,7 @@ func apiTestModel(store port.CredentialStore, providers port.ProviderRegistry) g
 	}
 }
 
-// connectionToCreds converts a ProviderConnection to runtime Credentials.
-func connectionToCreds(conn *domain.ProviderConnection) *domain.Credentials {
-	creds := &domain.Credentials{
-		ConnectionID:         conn.ID,
-		ConnectionName:       conn.Name,
-		AccessToken:          conn.AccessToken,
-		RefreshToken:         conn.RefreshToken,
-		APIKey:               conn.APIKey,
-		BaseURL:              conn.BaseURL,
-		ProviderSpecificData: conn.ProviderSpecificData,
-	}
-	if conn.ProviderSpecificData != nil {
-		if v, ok := conn.ProviderSpecificData["profileArn"]; ok {
-			if s, ok := v.(string); ok {
-				creds.ProfileArn = s
-			}
-		}
-	}
-	return creds
-}
+
 
 // maskString masks a string, showing first n and last m characters.
 func maskString(s string, first, last int) string {

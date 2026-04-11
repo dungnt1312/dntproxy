@@ -52,6 +52,7 @@ func (l *Logger) Add(provider, level, message string) {
 }
 
 func (l *Logger) AddEntry(entry domain.LogEntry) {
+	ctx := context.Background()
 	now := time.Now()
 	if entry.ID == "" {
 		entry.ID = uuid.New().String()
@@ -78,21 +79,23 @@ func (l *Logger) AddEntry(entry domain.LogEntry) {
 	log.Printf("[%s] %s | %s", entry.Provider, entry.Level, entry.Message)
 
 	if l.store != nil {
-		if err := l.store.Insert(context.Background(), &entry); err != nil {
+		if err := l.store.Insert(ctx, &entry); err != nil {
 			log.Printf("[LOG] Failed to persist log: %s", err)
 		}
 	}
 
-	l.mu.Lock()
-	l.logs = append(l.logs, entry)
-	if len(l.logs) > l.maxSize {
-		l.logs = l.logs[len(l.logs)-l.maxSize:]
+	// Only maintain in-memory buffer when no persistent store exists.
+	if l.store == nil {
+		l.mu.Lock()
+		l.logs = append(l.logs, entry)
+		if len(l.logs) > l.maxSize {
+			l.logs = l.logs[len(l.logs)-l.maxSize:]
+		}
+		logsCopy := make([]domain.LogEntry, len(l.logs))
+		copy(logsCopy, l.logs)
+		l.mu.Unlock()
+		l.broadcast(logsCopy)
 	}
-	logsCopy := make([]domain.LogEntry, len(l.logs))
-	copy(logsCopy, l.logs)
-	l.mu.Unlock()
-
-	l.broadcast(logsCopy)
 }
 
 func (l *Logger) AddUsage(provider, requestID, connectionID, connectionName, model string, inputTokens, outputTokens int, source string) {
@@ -127,7 +130,7 @@ func (l *Logger) GetAll() []domain.LogEntry {
 func (l *Logger) Subscribe() chan []domain.LogEntry {
 	l.subMu.Lock()
 	defer l.subMu.Unlock()
-	ch := make(chan []domain.LogEntry, 10)
+	ch := make(chan []domain.LogEntry, 100)
 	l.subscribers[ch] = true
 	return ch
 }
@@ -145,11 +148,11 @@ func (l *Logger) Clear() {
 			log.Printf("[LOG] Failed to clear persisted logs: %s", err)
 		}
 	}
-	l.mu.Lock()
-	l.logs = l.logs[:0]
-	logsCopy := make([]domain.LogEntry, 0)
-	l.mu.Unlock()
-	l.broadcast(logsCopy)
+	if l.store == nil {
+		l.mu.Lock()
+		l.logs = l.logs[:0]
+		l.mu.Unlock()
+	}
 }
 
 func (l *Logger) broadcast(logsCopy []domain.LogEntry) {

@@ -17,12 +17,16 @@ import (
 //   - backup-handler.go      — backup export/import
 func RegisterAPIRoutes(r *gin.Engine, store port.CredentialStore, providers port.ProviderRegistry) {
 	api := r.Group("/api")
+	api.Use(apiKeyMiddleware(store))
 	{
 		// Connections
 		api.GET("/connections", apiListConnections(store))
 		api.POST("/connections/import", apiImportConnection(store))
 		api.POST("/connections/add-openai", apiAddOpenAIConnection(store))
 		api.POST("/connections/add-custom", apiAddCustomConnection(store))
+		api.POST("/connections/add-glm", apiAddGLMConnection(store))
+		api.POST("/connections/add-minimax", apiAddMiniMaxConnection(store))
+		api.POST("/connections/add-qwen", apiAddQwenConnection(store))
 		api.POST("/connections/detect-kiro", apiDetectKiroToken(store))
 		api.DELETE("/connections/:id", apiDeleteConnection(store))
 		api.POST("/connections/:id/test", apiTestConnection(store))
@@ -65,6 +69,9 @@ func RegisterAPIRoutes(r *gin.Engine, store port.CredentialStore, providers port
 		api.GET("/logs/summary", apiGetLogSummary)
 		api.GET("/logs/connections", apiGetLogConnections)
 		api.GET("/logs/prices", apiGetLogPrices)
+		api.POST("/logs/prices", apiCreatePrice)
+		api.PUT("/logs/prices/:id", apiUpdatePrice)
+		api.DELETE("/logs/prices/:id", apiDeletePrice)
 		api.GET("/logs/stream", apiLogStream)
 		api.POST("/logs/clear", apiClearLogs)
 

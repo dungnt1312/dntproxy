@@ -32,6 +32,12 @@ export const api = {
     request('/connections/add-openai', { method: 'POST', body: JSON.stringify(data) }),
   addCustomConnection: (data: { name?: string; apiKey?: string; baseUrl: string; supportedModels?: string[] }) =>
     request('/connections/add-custom', { method: 'POST', body: JSON.stringify(data) }),
+  addGLMConnection: (data: { name?: string; apiKey: string; baseUrl?: string; supportedModels?: string[] }) =>
+    request('/connections/add-glm', { method: 'POST', body: JSON.stringify(data) }),
+  addMiniMaxConnection: (data: { name?: string; apiKey: string; baseUrl?: string; supportedModels?: string[] }) =>
+    request('/connections/add-minimax', { method: 'POST', body: JSON.stringify(data) }),
+  addQwenConnection: (data: { name?: string; apiKey: string; baseUrl?: string; supportedModels?: string[] }) =>
+    request('/connections/add-qwen', { method: 'POST', body: JSON.stringify(data) }),
   deleteConnection: (id: string) => request(`/connections/${id}`, { method: 'DELETE' }),
   testConnection: (id: string) => request(`/connections/${id}/test`, { method: 'POST' }),
   updateConnection: (id: string, data: Record<string, unknown>) =>
@@ -55,6 +61,11 @@ export const api = {
   pollOpenAIOAuth: (sessionId: string, callbackUrl?: string) =>
     request('/auth/openai/exchange', { method: 'POST', body: JSON.stringify({ sessionId, callbackUrl }) }),
 
+  // Qwen OAuth (Device Code)
+  startQwenOAuth: () => request('/auth/qwen/start', { method: 'POST' }),
+  pollQwenOAuth: (sessionId: string) =>
+    request('/auth/qwen/poll', { method: 'POST', body: JSON.stringify({ sessionId }) }),
+
   // Fetch models from provider API
   fetchConnectionModels: (id: string) =>
     request(`/connections/${id}/fetch-models`, { method: 'POST', body: JSON.stringify({}) }),
@@ -71,6 +82,7 @@ export const api = {
     request(`/combos/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteCombo: (id: string) => request(`/combos/${id}`, { method: 'DELETE' }),
   checkQuota: (id: string) => request(`/connections/${id}/check-quota`, { method: 'POST' }),
+  getUsage: (id: string) => request(`/usage/${id}`),
 
   // Aliases
   getAliases: () => request('/aliases'),

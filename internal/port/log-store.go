@@ -14,6 +14,9 @@ type LogStore interface {
 	ConnectionSummaries(ctx context.Context, query domain.LogQuery) ([]domain.LogConnectionSummary, error)
 	ListPrices(ctx context.Context) ([]domain.ModelPrice, error)
 	PriceFor(ctx context.Context, provider, model string) (*domain.ModelPrice, error)
+	InsertPrice(ctx context.Context, price *domain.ModelPrice) error
+	UpdatePrice(ctx context.Context, price *domain.ModelPrice) error
+	DeletePrice(ctx context.Context, id string) error
 	Clear(ctx context.Context) error
 	PurgeOlderThan(ctx context.Context, cutoffMs int64) error
 }

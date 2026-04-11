@@ -2,6 +2,7 @@ package openai
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dungnt/dntproxy/internal/adapter/shared"
 	"github.com/dungnt/dntproxy/internal/domain"
 	"github.com/dungnt/dntproxy/internal/logger"
 )
@@ -64,7 +66,7 @@ func (e *Executor) executeStandard(model string, body []byte, credentials *domai
 
 	url := baseURL + "/v1/chat/completions"
 
-	req, err := http.NewRequest("POST", url, io.NopCloser(newBytesReader(body)))
+	req, err := http.NewRequest("POST", url, bytes.NewReader(body))
 	if err != nil {
 		return nil, 500, fmt.Errorf("create request: %w", err)
 	}
@@ -83,7 +85,7 @@ func (e *Executor) executeStandard(model string, body []byte, credentials *domai
 
 	log.Printf("[OPENAI] --> %s | conn=%s | model=%s | body_size=%d", url, credentials.ConnectionName, model, len(body))
 	if apiKey != "" {
-		log.Printf("[OPENAI]     Authorization: Bearer %s", maskedToken(apiKey))
+		log.Printf("[OPENAI]     Authorization: Bearer %s", shared.MaskedToken(apiKey))
 	}
 	appLogger := logger.Get()
 	appLogger.AddEntry(domain.LogEntry{
@@ -97,19 +99,13 @@ func (e *Executor) executeStandard(model string, body []byte, credentials *domai
 		RequestID:      requestID,
 		Message:        "OpenAI-compatible request sent",
 		BodySize:       len(body),
-		RequestBody:    truncateBody(body, 8192),
+		RequestBody:    shared.TruncateBody(shared.SanitizeBody(body), 8192),
 	})
 
 	start := time.Now()
 
-	client := &http.Client{
-		Timeout: 30 * time.Second,
-		Transport: &http.Transport{
-			ResponseHeaderTimeout: 15 * time.Second,
-			IdleConnTimeout:       90 * time.Second,
-		},
-	}
-	resp, err := client.Do(req)
+	// Execute request using shared client (connection reuse, no stream timeout)
+	resp, err := shared.StreamingHTTPClient.Do(req)
 	duration := time.Since(start)
 
 	if err != nil {
@@ -159,7 +155,7 @@ func (e *Executor) executeStandard(model string, body []byte, credentials *domai
 			Message:        "OpenAI-compatible request failed",
 			BodySize:       len(bodyBytes),
 			Error:          respBodyStr,
-			ResponseBody:   truncateBody(bodyBytes, 8192),
+			ResponseBody:   shared.TruncateBody(shared.SanitizeBody(bodyBytes), 8192),
 		})
 		return nil, resp.StatusCode, fmt.Errorf("openai returned %d: %s", resp.StatusCode, respBodyStr)
 	}
@@ -224,7 +220,7 @@ func (e *Executor) executeCodexResponses(model string, body []byte, credentials 
 
 	url := codexResponsesURL
 
-	req, err := http.NewRequest("POST", url, io.NopCloser(newBytesReader(translatedBody)))
+	req, err := http.NewRequest("POST", url, bytes.NewReader(translatedBody))
 	if err != nil {
 		return nil, 500, fmt.Errorf("create request: %w", err)
 	}
@@ -235,9 +231,11 @@ func (e *Executor) executeCodexResponses(model string, body []byte, credentials 
 	// Codex CLI headers
 	req.Header.Set("originator", "codex-cli")
 	req.Header.Set("User-Agent", "codex-cli/1.0.18 (macOS; arm64)")
+	// Random session_id per request (matches real Codex CLI behavior)
+	req.Header.Set("session_id", fmt.Sprintf("%d-%s", time.Now().UnixMilli(), randomAlphaNum(9)))
 
 	log.Printf("[CODEX] --> %s | conn=%s | model=%s | body_size=%d", url, credentials.ConnectionName, model, len(translatedBody))
-	log.Printf("[CODEX]     Authorization: Bearer %s", maskedToken(credentials.AccessToken))
+	log.Printf("[CODEX]     Authorization: Bearer %s", shared.MaskedToken(credentials.AccessToken))
 
 	appLogger := logger.Get()
 	appLogger.AddEntry(domain.LogEntry{
@@ -251,19 +249,13 @@ func (e *Executor) executeCodexResponses(model string, body []byte, credentials 
 		RequestID:      requestID,
 		Message:        "Codex Responses API request sent",
 		BodySize:       len(translatedBody),
-		RequestBody:    truncateBody(translatedBody, 8192),
+		RequestBody:    shared.TruncateBody(shared.SanitizeBody(translatedBody), 8192),
 	})
 
 	start := time.Now()
 
-	client := &http.Client{
-		Timeout: 30 * time.Second,
-		Transport: &http.Transport{
-			ResponseHeaderTimeout: 15 * time.Second,
-			IdleConnTimeout:       90 * time.Second,
-		},
-	}
-	resp, err := client.Do(req)
+	// Execute request using shared client (connection reuse, no stream timeout)
+	resp, err := shared.StreamingHTTPClient.Do(req)
 	duration := time.Since(start)
 
 	if err != nil {
@@ -309,7 +301,7 @@ func (e *Executor) executeCodexResponses(model string, body []byte, credentials 
 			RequestID:      requestID,
 			Message:        "Codex Responses API error",
 			Error:          respBodyStr,
-			ResponseBody:   truncateBody(bodyBytes, 8192),
+			ResponseBody:   shared.TruncateBody(shared.SanitizeBody(bodyBytes), 8192),
 			BodySize:       len(bodyBytes),
 		})
 		return nil, resp.StatusCode, fmt.Errorf("codex returned %d: %s", resp.StatusCode, respBodyStr)
@@ -377,180 +369,4 @@ func (e *Executor) executeCodexResponses(model string, body []byte, credentials 
 	}()
 
 	return pr, 200, nil
-}
-
-// bytesReader wraps a byte slice as an io.Reader.
-type bytesReader struct {
-	data []byte
-	pos  int
-}
-
-func newBytesReader(data []byte) *bytesReader {
-	return &bytesReader{data: data}
-}
-
-func (r *bytesReader) Read(p []byte) (int, error) {
-	if r.pos >= len(r.data) {
-		return 0, io.EOF
-	}
-	n := copy(p, r.data[r.pos:])
-	r.pos += n
-	return n, nil
-}
-
-func maskedToken(token string) string {
-	if len(token) <= 8 {
-		return "***"
-	}
-	return token[:4] + "***" + token[len(token)-4:]
-}
-
-// truncateBody returns at most maxBytes of body as a readable string.
-func truncateBody(b []byte, maxBytes int) string {
-	if len(b) <= maxBytes {
-		return string(b)
-	}
-	return string(b[:maxBytes]) + fmt.Sprintf("... [truncated %d bytes]", len(b)-maxBytes)
-}
-
-type openAIUsage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
-}
-
-func extractUsage(body []byte) *openAIUsage {
-	lines := strings.Split(string(body), "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "data: ") {
-			continue
-		}
-		payload := strings.TrimPrefix(line, "data: ")
-		if payload == "[DONE]" {
-			continue
-		}
-		var chunk struct {
-			Usage *openAIUsage `json:"usage"`
-		}
-		if err := json.Unmarshal([]byte(payload), &chunk); err == nil && chunk.Usage != nil && chunk.Usage.TotalTokens > 0 {
-			return chunk.Usage
-		}
-	}
-	return nil
-}
-
-func extractResponsePreview(body []byte) (string, bool) {
-	var builder strings.Builder
-	const maxPreviewBytes = 4000
-	appendContent := func(content string) bool {
-		for _, r := range content {
-			runeBytes := len(string(r))
-			if builder.Len()+runeBytes > maxPreviewBytes {
-				return true
-			}
-			builder.WriteRune(r)
-		}
-		return false
-	}
-
-	lines := strings.Split(string(body), "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "data: ") {
-			continue
-		}
-		payload := strings.TrimPrefix(line, "data: ")
-		if payload == "[DONE]" {
-			continue
-		}
-
-		var chunk struct {
-			Choices []struct {
-				Delta struct {
-					Content string `json:"content"`
-				} `json:"delta"`
-				Message struct {
-					Content string `json:"content"`
-				} `json:"message"`
-			} `json:"choices"`
-		}
-		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
-			continue
-		}
-		for _, choice := range chunk.Choices {
-			content := choice.Delta.Content
-			if content == "" {
-				content = choice.Message.Content
-			}
-			if content == "" {
-				continue
-			}
-			if appendContent(content) {
-				return strings.TrimSpace(builder.String()), true
-			}
-		}
-	}
-
-	if preview := strings.TrimSpace(builder.String()); preview != "" {
-		return preview, false
-	}
-
-	var response struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-			Text string `json:"text"`
-		} `json:"choices"`
-		OutputText string `json:"output_text"`
-	}
-	if err := json.Unmarshal(body, &response); err != nil {
-		return "", false
-	}
-	if response.OutputText != "" && appendContent(response.OutputText) {
-		return strings.TrimSpace(builder.String()), true
-	}
-	for _, choice := range response.Choices {
-		content := choice.Message.Content
-		if content == "" {
-			content = choice.Text
-		}
-		if appendContent(content) {
-			return strings.TrimSpace(builder.String()), true
-		}
-	}
-	return strings.TrimSpace(builder.String()), false
-}
-
-func openAIResponseLevel(status int) string {
-	if status >= 400 {
-		return "ERROR"
-	}
-	return "INFO"
-}
-
-type openaiStreamSniffer struct {
-	io.ReadCloser
-	bodyBuf []byte
-	onClose func([]byte)
-}
-
-func (s *openaiStreamSniffer) Read(p []byte) (n int, err error) {
-	n, err = s.ReadCloser.Read(p)
-	if n > 0 {
-		// keep up to maxBytes to avoid memory explosion if stream is huge
-		if len(s.bodyBuf) < 100*1024 {
-			s.bodyBuf = append(s.bodyBuf, p[:n]...)
-		}
-	}
-	return n, err
-}
-
-func (s *openaiStreamSniffer) Close() error {
-	err := s.ReadCloser.Close()
-	if s.onClose != nil && len(s.bodyBuf) > 0 {
-		s.onClose(s.bodyBuf)
-	}
-	return err
 }

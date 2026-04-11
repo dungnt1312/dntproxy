@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from 'react'
 import { api } from '../api'
 import {
-  Plus, Search, Link2, AlertTriangle
+  Plus, Search, Link2, AlertTriangle, ChevronDown
 } from 'lucide-react'
 import { getProviderLabel } from '../components/connections/helpers'
 import ConnectionCard from '../components/connections/ConnectionCard'
@@ -20,6 +20,11 @@ export default function Connections() {
   const [quotaResult, setQuotaResult] = useState<Record<string, any>>({})
   const [searchQuery, setSearchQuery] = useState('')
   const [autoRefreshQuota, setAutoRefreshQuota] = useState(false)
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({})
+
+  const toggleGroup = (id: string) => {
+    setCollapsedGroups(prev => ({ ...prev, [id]: !prev[id] }))
+  }
 
   // ── Stats ──────────────────────────────────────────────────────────────────
   const connectionStats = useMemo(() => {
@@ -82,7 +87,7 @@ export default function Connections() {
     setConns(d || [])
     d?.forEach((c: any) => {
       if (c.isActive) {
-        api.checkQuota(c.id)
+        api.getUsage(c.id)
           .then(res => setQuotaResult(prev => ({ ...prev, [c.id]: res })))
           .catch(e => setQuotaResult(prev => ({ ...prev, [c.id]: { error: e.message } })))
       }
@@ -96,7 +101,7 @@ export default function Connections() {
     const t = setInterval(() => {
       conns.forEach((c: any) => {
         if (c.isActive) {
-          api.checkQuota(c.id)
+          api.getUsage(c.id)
             .then(res => setQuotaResult(prev => ({ ...prev, [c.id]: res })))
             .catch(e => setQuotaResult(prev => ({ ...prev, [c.id]: { error: e.message } })))
         }
@@ -230,29 +235,41 @@ export default function Connections() {
         </div>
       ) : (
         <div className="space-y-6">
-          {groupedConns.map(group => (
+          {groupedConns.map(group => {
+            const isCollapsed = collapsedGroups[group.id]
+            return (
             <div key={group.id} className="animate-fade-in">
-              <div className="flex items-center gap-2 mb-3 px-1">
-                <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ backgroundColor: `${group.color}15`, border: `1px solid ${group.color}25` }}>
+              <div 
+                className="flex items-center gap-2 mb-3 px-1 cursor-pointer select-none group/col"
+                onClick={() => toggleGroup(group.id)}
+              >
+                <div className="w-7 h-7 rounded-lg flex items-center justify-center transition-transform group-hover/col:scale-105" style={{ backgroundColor: `${group.color}15`, border: `1px solid ${group.color}25` }}>
                   {group.icon}
                 </div>
                 <h3 className="text-sm font-semibold" style={{ fontFamily: 'var(--font-heading)' }}>{group.label}</h3>
                 <span className="chip chip-muted text-[10px]">{group.items.length}</span>
+                <div className="ml-auto">
+                  <ChevronDown className={`h-4 w-4 text-[var(--text-muted)] transition-transform ${isCollapsed ? '-rotate-90' : ''}`} />
+                </div>
               </div>
-              <div className="flex flex-col gap-2">
-                {group.items.map((c: any) => (
-                  <ConnectionCard
-                    key={c.id}
-                    conn={c}
-                    initialQuotaResult={quotaResult[c.id]}
-                    onReload={load}
-                    onDelete={(id, name) => setDeleteTarget({ id, name })}
-                    onEditModels={setEditModelsConn}
-                  />
-                ))}
-              </div>
+              
+              {!isCollapsed && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                  {group.items.map((c: any) => (
+                    <ConnectionCard
+                      key={c.id}
+                      conn={c}
+                      initialQuotaResult={quotaResult[c.id]}
+                      onReload={load}
+                      onDelete={(id, name) => setDeleteTarget({ id, name })}
+                      onEditModels={setEditModelsConn}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
-          ))}
+            )
+          })}
         </div>
       )}
 

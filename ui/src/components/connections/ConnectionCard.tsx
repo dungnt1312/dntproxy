@@ -7,7 +7,7 @@ import { api } from '../../api'
 import { getModelName } from '../../models-config'
 import InlineName from './InlineName'
 import { TokenBar, QuotaPanel, getProviderInfo, secsToHuman } from './helpers'
-import { Card, CardContent } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -32,12 +32,30 @@ export default function ConnectionCard({ conn: c, initialQuotaResult, onReload, 
   const [testResult, setTestResult] = useState<any>(null)
   const [quotaResult, setQuotaResult] = useState<any>(initialQuotaResult ?? null)
   const [quotaLoading, setQuotaLoading] = useState(false)
-  const [quotaOpen, setQuotaOpen] = useState(false)
   const [modelTestResults, setModelTestResults] = useState<Record<string, { status: 'ok' | 'error' | 'loading'; message?: string }>>({})
 
   useEffect(() => {
-    if (initialQuotaResult !== undefined) setQuotaResult(initialQuotaResult)
-  }, [initialQuotaResult])
+    let mounted = true;
+    if (initialQuotaResult !== undefined) {
+      setQuotaResult(initialQuotaResult)
+    } else if (c.isActive) {
+      // Auto-load quota on mount if active
+      const check = async () => {
+        setQuotaLoading(true)
+        try {
+          const res = await api.getUsage(c.id)
+          if (mounted) setQuotaResult(res)
+        } catch (e: any) { 
+          if (mounted) setQuotaResult({ error: e.message }) 
+        } finally { 
+          if (mounted) setQuotaLoading(false) 
+        }
+      }
+      check()
+    }
+    return () => { mounted = false; }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const isRL = c.rateLimitedUntil && new Date(c.rateLimitedUntil) > new Date()
   const isExpired = c.expiresAt && new Date(c.expiresAt) < new Date()
@@ -68,9 +86,8 @@ export default function ConnectionCard({ conn: c, initialQuotaResult, onReload, 
 
   const handleCheckQuota = async () => {
     setQuotaLoading(true)
-    setQuotaOpen(true)
     try {
-      const res = await api.checkQuota(c.id)
+      const res = await api.getUsage(c.id)
       setQuotaResult(res)
     } catch (e: any) { setQuotaResult({ error: e.message }) }
     finally { setQuotaLoading(false) }
@@ -91,135 +108,149 @@ export default function ConnectionCard({ conn: c, initialQuotaResult, onReload, 
   }
 
   return (
-    <Card className={cn('transition-all', !c.isActive && 'opacity-60', hasIssue && c.isActive && 'border-amber-500/40')}>
-      <CardContent className="p-4 space-y-3">
-        {/* Header row */}
-        <div className="flex items-start gap-3">
-          <div className={cn('relative flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border', providerInfo.colorClass)}>
-            {providerInfo.icon}
-            <span className={cn('absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-background',
-              !c.isActive ? 'bg-muted-foreground' : isRL ? 'bg-amber-500' : hasIssue ? 'bg-destructive' : 'bg-emerald-500'
-            )} />
-          </div>
-
-          <div className="flex-1 min-w-0 space-y-1">
-            <div className="flex items-center gap-2 flex-wrap">
-              <InlineName conn={c} onRename={handleRename} />
-              <span className="text-[11px] text-muted-foreground truncate">
+    <Card className={cn('transition-all hover:shadow-md', !c.isActive && 'opacity-60', hasIssue && c.isActive && 'border-amber-500/40')}>
+      <CardHeader className="p-3 pb-2">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border', providerInfo.colorClass)}>
+              {providerInfo.icon}
+            </div>
+            <div className="min-w-0 space-y-0.5">
+              <CardTitle className="text-sm font-semibold truncate leading-none mt-0.5">
+                <InlineName conn={c} onRename={handleRename} />
+              </CardTitle>
+              <span className="text-xs text-muted-foreground truncate block">
                 {c.email || c.baseUrl?.replace('https://', '') || c.authMethod || 'API Key'}
               </span>
             </div>
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <TokenBar conn={c} />
-              {isRL && (
-                <Badge variant="outline" className="gap-1 text-amber-600 border-amber-500/30 bg-amber-500/10 text-[10px] py-0 h-5">
-                  <Clock size={9} /> RL: {secsToHuman(rlSecs)}
-                </Badge>
-              )}
-              {c.backoffLevel > 0 && (
-                <Badge variant="outline" className="gap-1 text-amber-600 border-amber-500/30 bg-amber-500/10 text-[10px] py-0 h-5">
-                  <RefreshCw size={9} /> Backoff: {c.backoffLevel}/7
-                </Badge>
-              )}
-              {lockCount > 0 && (
-                <Badge variant="outline" className="gap-1 text-amber-600 border-amber-500/30 bg-amber-500/10 text-[10px] py-0 h-5">
-                  <Lock size={9} /> {lockCount} locked
-                </Badge>
-              )}
-              {c.lastError && (
-                <Badge variant="outline" className="gap-1 text-destructive border-destructive/30 bg-destructive/10 text-[10px] py-0 h-5 max-w-[200px] truncate" title={c.lastError}>
-                  <AlertTriangle size={9} /> {c.lastError.slice(0, 30)}{c.lastError.length > 30 ? '…' : ''}
-                </Badge>
-              )}
-              {testResult && !testResult.loading && (
-                <span className={cn('text-[10px] font-medium', testResult.status === 'ok' ? 'text-emerald-600' : 'text-destructive')}>
-                  {testResult.status === 'ok' ? '✓ OK' : '✗ Failed'}
-                </span>
-              )}
-              {testResult?.loading && <Loader2 size={10} className="animate-spin text-muted-foreground" />}
-            </div>
           </div>
+          <Badge 
+            variant="outline" 
+            className={cn('shrink-0', 
+              !c.isActive ? 'bg-muted text-muted-foreground border-border' : 
+              isRL ? 'bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30' : 
+              hasIssue ? 'bg-destructive/15 text-destructive dark:text-red-400 border-destructive/30' : 
+              'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/30'
+            )}
+          >
+            {!c.isActive ? 'Idle' : isRL ? 'Rate Limited' : hasIssue ? 'Error' : 'Active'}
+          </Badge>
+        </div>
+      </CardHeader>
 
-          <div className="flex items-center gap-1.5 shrink-0">
-            <Switch checked={c.isActive} onCheckedChange={handleToggle} className="scale-75" />
-            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleTest} title="Test connection">
-              <TestTube size={13} />
+      <CardContent className="p-3 pt-0 space-y-3">
+        {/* Models summary row */}
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <Lock className="h-3.5 w-3.5" />
+          <TokenBar conn={c} />
+          {c.supportedModels?.length ? (
+            <Badge variant="secondary" className="ml-auto text-xs px-1.5 cursor-pointer hover:bg-muted-foreground/20" onClick={() => onEditModels(c)}>
+              {c.supportedModels.length} model{c.supportedModels.length !== 1 ? 's' : ''}
+            </Badge>
+          ) : (
+            <Badge variant="secondary" className="ml-auto text-xs px-1.5 cursor-pointer hover:bg-muted-foreground/20" onClick={() => onEditModels(c)}>
+              All models
+            </Badge>
+          )}
+        </div>
+
+        {/* Quota Panel */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-muted-foreground">Usage & Quota</span>
+            <Button variant="ghost" size="icon" className="h-5 w-5 hover:bg-muted" onClick={handleCheckQuota} title="Refresh quota" disabled={quotaLoading}>
+              <RefreshCw size={10} className={cn("text-muted-foreground", quotaLoading && "animate-spin")} />
             </Button>
-            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => onEditModels(c)} title="Edit models">
-              <Settings2 size={13} />
-            </Button>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-7 w-7">
-                  <MoreHorizontal size={14} />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-44">
-                <DropdownMenuItem onClick={handleCheckQuota} className="gap-2 text-xs">
-                  <BarChart2 size={13} /> Check Quota
-                </DropdownMenuItem>
-                {(isRL || c.backoffLevel > 0) && (
-                  <DropdownMenuItem onClick={handleResetCooldown} className="gap-2 text-xs text-amber-600">
-                    <RefreshCw size={13} /> Reset Cooldown
-                  </DropdownMenuItem>
-                )}
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => onDelete(c.id, c.name)} className="gap-2 text-xs text-destructive focus:text-destructive">
-                  <Trash2 size={13} /> Remove
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+          </div>
+          <div className="rounded-md border border-border/50 bg-muted/10 p-2.5 min-h-[56px] flex flex-col justify-center relative overflow-hidden">
+            {(!quotaResult && !quotaLoading && !c.isActive) ? (
+              <p className="text-[11px] text-muted-foreground text-center italic">Quota check unavailable for inactive connection.</p>
+            ) : (!quotaResult && !quotaLoading) ? (
+              <div className="text-center">
+                <p className="text-[11px] text-muted-foreground mb-2">Quota not loaded</p>
+                <Button variant="outline" size="sm" className="h-6 text-[10px]" onClick={handleCheckQuota}>Load Quota</Button>
+              </div>
+            ) : (
+              <QuotaPanel data={quotaResult} loading={quotaLoading} />
+            )}
           </div>
         </div>
 
-        {/* Models + Quota */}
-        <div className="border-t pt-3">
-          <div className="flex items-start gap-3">
-            <div className="flex-1 min-w-0">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">Supported Models</p>
-              {c.supportedModels?.length ? (
-                <div className="flex flex-wrap gap-1.5">
-                  {c.supportedModels.slice(0, 6).map((m: string, i: number) => {
-                    const mTest = modelTestResults[m]
-                    return (
-                      <div key={i} className="relative group/model">
-                        <Badge
-                          variant="outline"
-                          className={cn(
-                            'text-[11px] font-mono cursor-default',
-                            mTest?.status === 'ok' && 'text-emerald-600 border-emerald-500/30 bg-emerald-500/10',
-                            mTest?.status === 'error' && 'text-destructive border-destructive/30 bg-destructive/10',
-                          )}
-                        >
-                          {mTest?.status === 'loading' && <Loader2 size={9} className="animate-spin mr-1" />}
-                          {getModelName(m)}
-                        </Badge>
-                        <button
-                          onClick={() => handleTestModel(m)}
-                          className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/model:opacity-100 bg-primary rounded text-primary-foreground transition-opacity"
-                        >
-                          <Play size={9} fill="currentColor" />
-                        </button>
-                      </div>
-                    )
-                  })}
-                  {c.supportedModels.length > 6 && (
-                    <Button variant="outline" size="sm" className="h-6 text-[11px] gap-1 px-2" onClick={() => onEditModels(c)}>
-                      +{c.supportedModels.length - 6} <ChevronRight size={10} />
-                    </Button>
-                  )}
-                </div>
-              ) : (
-                <p className="text-xs text-muted-foreground">All models allowed</p>
-              )}
-            </div>
-
-            {(quotaResult || quotaLoading) && quotaOpen && (
-              <div className="shrink-0 w-52 rounded-lg border bg-muted/30 p-3">
-                <QuotaPanel data={quotaResult} loading={quotaLoading} />
+        {/* Issues & Warnings */}
+        {(isRL || c.lastError || c.backoffLevel > 0 || lockCount > 0) && (
+          <div className="space-y-1.5">
+            {isRL && (
+              <div className="flex items-center gap-1.5 rounded-md bg-amber-500/10 px-2.5 py-1.5 text-[11px] text-amber-700 dark:text-amber-400 w-full">
+                <Clock className="h-3 w-3 shrink-0" />
+                <span>Rate Limited: {secsToHuman(rlSecs)}</span>
+              </div>
+            )}
+            {c.backoffLevel > 0 && (
+              <div className="flex items-center gap-1.5 rounded-md bg-amber-500/10 px-2.5 py-1.5 text-[11px] text-amber-700 dark:text-amber-400 w-full">
+                <RefreshCw className="h-3 w-3 shrink-0" />
+                <span>Backoff: Level {c.backoffLevel}/7</span>
+              </div>
+            )}
+            {lockCount > 0 && (
+              <div className="flex items-center gap-1.5 rounded-md bg-amber-500/10 px-2.5 py-1.5 text-[11px] text-amber-700 dark:text-amber-400 w-full">
+                <Lock className="h-3 w-3 shrink-0" />
+                <span>{lockCount} model(s) locked manually</span>
+              </div>
+            )}
+            {c.lastError && (
+              <div className="flex items-start gap-1.5 rounded-md bg-destructive/10 px-2.5 py-1.5 text-[11px] text-destructive dark:text-red-400 w-full">
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span className="break-words line-clamp-2" title={c.lastError}>{c.lastError}</span>
               </div>
             )}
           </div>
+        )}
+
+        {/* Separator */}
+        <div className="h-px bg-border/60" />
+
+        {/* Actions Menu */}
+        <div className="flex items-center gap-1">
+          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleTest} title="Test Connection">
+            <TestTube className="h-3 w-3" />
+          </Button>
+          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => onEditModels(c)} title="Edit Models">
+            <Settings2 className="h-3 w-3" />
+          </Button>
+          
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-7 w-7">
+                <MoreHorizontal className="h-3 w-3" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-44">
+              {(isRL || c.backoffLevel > 0) && (
+                <DropdownMenuItem onClick={handleResetCooldown} className="gap-2 text-xs text-amber-600">
+                  <RefreshCw size={13} /> Reset Cooldown
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuItem onClick={handleTest} className="gap-2 text-xs">
+                <TestTube size={13} /> Test Connection
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          <div className="flex-1 flex justify-center">
+            {testResult && !testResult.loading && (
+              <span className={cn('text-[10px] font-medium px-2 py-0.5 rounded-sm', testResult.status === 'ok' ? 'bg-emerald-500/10 text-emerald-600' : 'bg-destructive/10 text-destructive')}>
+                {testResult.status === 'ok' ? '✓ OK' : '✗ Failed'}
+              </span>
+            )}
+            {testResult?.loading && <Loader2 size={12} className="animate-spin text-muted-foreground" />}
+          </div>
+
+          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleToggle} title={c.isActive ? 'Deactivate' : 'Activate'}>
+            <Switch checked={c.isActive} onCheckedChange={handleToggle} className="scale-[0.55] pointer-events-none" />
+          </Button>
+          <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => onDelete(c.id, c.name)} title="Remove">
+            <Trash2 className="h-3 w-3" />
+          </Button>
         </div>
       </CardContent>
     </Card>

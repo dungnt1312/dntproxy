@@ -26,8 +26,14 @@ type responsesRequest struct {
 	Stream       bool          `json:"stream"`
 	Store        bool          `json:"store"`
 	Tools        []interface{} `json:"tools,omitempty"`
-	Temperature  *float64      `json:"temperature,omitempty"`
-	TopP         *float64      `json:"top_p,omitempty"`
+	Reasoning    *codexReasoning `json:"reasoning,omitempty"`
+	Include      []string      `json:"include,omitempty"`
+}
+
+// codexReasoning configures the thinking/reasoning effort for Codex models.
+type codexReasoning struct {
+	Effort  string `json:"effort"`
+	Summary string `json:"summary"`
 }
 
 // responsesInputMessage is a message item in the Responses API input.
@@ -61,6 +67,9 @@ type responsesTool struct {
 	Strict      *bool       `json:"strict,omitempty"`
 }
 
+// codexEffortLevels are valid thinking effort suffixes for Codex model names.
+var codexEffortLevels = []string{"none", "low", "medium", "high", "xhigh"}
+
 // TranslateChatToCodexResponses converts a Chat Completions request body
 // to a Codex Responses API request body.
 func TranslateChatToCodexResponses(chatBody []byte) ([]byte, error) {
@@ -74,8 +83,18 @@ func TranslateChatToCodexResponses(chatBody []byte) ([]byte, error) {
 		Store:  false,
 	}
 
-	if model, ok := chat["model"].(string); ok {
-		req.Model = model
+	model, _ := chat["model"].(string)
+	req.Model = model
+
+	// Extract effort level from model name suffix (e.g. gpt-5.3-codex-high → high)
+	modelEffort := ""
+	for _, level := range codexEffortLevels {
+		suffix := "-" + level
+		if strings.HasSuffix(model, suffix) {
+			modelEffort = level
+			req.Model = strings.TrimSuffix(model, suffix)
+			break
+		}
 	}
 
 	// Extract messages
@@ -216,12 +235,25 @@ func TranslateChatToCodexResponses(chatBody []byte) ([]byte, error) {
 		}
 	}
 
-	// Set empty instructions if not set
+	// Inject default Codex instructions when none provided
 	if req.Instructions == "" {
-		req.Instructions = ""
+		req.Instructions = codexDefaultInstructions
 	}
 
-	// Convert tools format
+	// Guard empty input — Codex API rejects empty input array
+	if len(req.Input) == 0 {
+		req.Input = []interface{}{
+			map[string]interface{}{
+				"type": "message",
+				"role": "user",
+				"content": []interface{}{
+					map[string]interface{}{"type": "input_text", "text": "..."},
+				},
+			},
+		}
+	}
+
+	// Convert tools format (only include tools with valid names)
 	if tools, ok := chat["tools"].([]interface{}); ok {
 		var convertedTools []interface{}
 		for _, toolRaw := range tools {
@@ -231,6 +263,9 @@ func TranslateChatToCodexResponses(chatBody []byte) ([]byte, error) {
 			}
 			if fn, ok := tool["function"].(map[string]interface{}); ok {
 				name, _ := fn["name"].(string)
+				if name == "" {
+					continue // Skip hosted tools without names
+				}
 				desc, _ := fn["description"].(string)
 				params := fn["parameters"]
 
@@ -260,13 +295,28 @@ func TranslateChatToCodexResponses(chatBody []byte) ([]byte, error) {
 		}
 	}
 
-	// Pass through temperature and top_p (max_tokens is NOT supported by the Codex Responses API)
-	if temp, ok := chat["temperature"].(float64); ok {
-		req.Temperature = &temp
+	// Set reasoning effort: explicit reasoning > reasoning_effort param > model suffix > default (medium)
+	effort := "medium"
+	if re, ok := chat["reasoning_effort"].(string); ok && re != "" {
+		effort = re
 	}
-	if topP, ok := chat["top_p"].(float64); ok {
-		req.TopP = &topP
+	if modelEffort != "" {
+		effort = modelEffort
 	}
+	if re, ok := chat["reasoning"].(map[string]interface{}); ok {
+		if e, ok := re["effort"].(string); ok && e != "" {
+			effort = e
+		}
+	}
+	req.Reasoning = &codexReasoning{Effort: effort, Summary: "auto"}
+
+	// Include reasoning encrypted content (required for reasoning models)
+	if effort != "none" {
+		req.Include = []string{"reasoning.encrypted_content"}
+	}
+
+	// NOTE: temperature, top_p, max_tokens, frequency_penalty, etc. are NOT supported
+	// by the Codex Responses API — do NOT pass them through.
 
 	return json.Marshal(req)
 }
@@ -426,6 +476,18 @@ func TranslateCodexEvent(eventType string, data []byte, state *CodexResponseStat
 				"prompt_tokens":     promptTokens,
 				"completion_tokens": completionTokens,
 				"total_tokens":      promptTokens + completionTokens,
+			}
+
+			// Add prompt_tokens_details if cache tokens exist
+			if u.CacheReadTokens > 0 || u.CacheCreationTokens > 0 {
+				details := map[string]interface{}{}
+				if u.CacheReadTokens > 0 {
+					details["cached_tokens"] = u.CacheReadTokens
+				}
+				if u.CacheCreationTokens > 0 {
+					details["cache_creation_tokens"] = u.CacheCreationTokens
+				}
+				usage["prompt_tokens_details"] = details
 			}
 		}
 

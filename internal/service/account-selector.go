@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/dungnt/dntproxy/internal/adapter/auth"
+	"github.com/dungnt/dntproxy/internal/adapter/shared"
 	"github.com/dungnt/dntproxy/internal/domain"
 	"github.com/dungnt/dntproxy/internal/port"
 )
@@ -127,7 +128,7 @@ func (s *AccountSelector) SelectCredentials(provider string, excludeIDs map[stri
 			}
 		}
 
-		return connectionToCredentials(&conn), nil
+		return shared.ConnectionToCredentials(&conn), nil
 	}
 
 	if nonExcludedCount == 0 {
@@ -236,27 +237,4 @@ func (s *AccountSelector) ClearError(connectionID string, model string) error {
 			delete(conn.ModelLocks, model)
 		}
 	})
-}
-
-func connectionToCredentials(conn *domain.ProviderConnection) *domain.Credentials {
-	creds := &domain.Credentials{
-		ConnectionID:         conn.ID,
-		ConnectionName:       conn.Name,
-		AccessToken:          conn.AccessToken,
-		RefreshToken:         conn.RefreshToken,
-		APIKey:               conn.APIKey,
-		BaseURL:              conn.BaseURL,
-		ProviderSpecificData: conn.ProviderSpecificData,
-	}
-
-	// Extract profileArn from providerSpecificData
-	if conn.ProviderSpecificData != nil {
-		if v, ok := conn.ProviderSpecificData["profileArn"]; ok {
-			if s, ok := v.(string); ok {
-				creds.ProfileArn = s
-			}
-		}
-	}
-
-	return creds
 }

@@ -1,6 +1,7 @@
 package kiro
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -8,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/dungnt/dntproxy/internal/adapter/shared"
 	"github.com/dungnt/dntproxy/internal/domain"
 	"github.com/dungnt/dntproxy/internal/logger"
 	"github.com/google/uuid"
@@ -46,9 +48,7 @@ func (e *Executor) Execute(model string, body []byte, credentials *domain.Creden
 	}
 
 	// Build HTTP request
-	req, err := http.NewRequest("POST", kiroBaseURL, io.NopCloser(
-		newBytesReader(payloadBytes),
-	))
+	req, err := http.NewRequest("POST", kiroBaseURL, bytes.NewReader(payloadBytes))
 	if err != nil {
 		return nil, 500, fmt.Errorf("create request: %w", err)
 	}
@@ -71,7 +71,7 @@ func (e *Executor) Execute(model string, body []byte, credentials *domain.Creden
 	log.Printf("[KIRO] --> %s %s | conn=%s | model=%s | req_id=%s",
 		req.Method, kiroBaseURL, credentials.ConnectionName, model, requestID)
 	log.Printf("[KIRO]     Authorization: Bearer %s | Content-Type: %s | body_size=%d",
-		maskedToken(credentials.AccessToken), req.Header.Get("Content-Type"), len(payloadBytes))
+		shared.MaskedToken(credentials.AccessToken), req.Header.Get("Content-Type"), len(payloadBytes))
 	appLogger.AddEntry(domain.LogEntry{
 		Provider:       "KIRO",
 		Direction:      "outbound",
@@ -83,20 +83,13 @@ func (e *Executor) Execute(model string, body []byte, credentials *domain.Creden
 		RequestID:      requestID,
 		Message:        "Kiro request sent",
 		BodySize:       len(payloadBytes),
-		RequestBody:    truncateBody(payloadBytes, 8192),
+		RequestBody:    shared.TruncateBody(shared.SanitizeBody(payloadBytes), 8192),
 	})
 
 	start := time.Now()
 
-	// Execute request
-	client := &http.Client{
-		Timeout: 30 * time.Second,
-		Transport: &http.Transport{
-			ResponseHeaderTimeout: 15 * time.Second,
-			IdleConnTimeout:       90 * time.Second,
-		},
-	}
-	resp, err := client.Do(req)
+	// Execute request using shared client (connection reuse, no stream timeout)
+	resp, err := shared.StreamingHTTPClient.Do(req)
 	duration := time.Since(start)
 
 	if err != nil {
@@ -147,7 +140,7 @@ func (e *Executor) Execute(model string, body []byte, credentials *domain.Creden
 			Message:        "Kiro response error",
 			BodySize:       len(bodyBytes),
 			Error:          respBodyStr,
-			ResponseBody:   truncateBody(bodyBytes, 8192),
+			ResponseBody:   shared.TruncateBody(shared.SanitizeBody(bodyBytes), 8192),
 		})
 		return nil, resp.StatusCode, fmt.Errorf("kiro returned %d: %s", resp.StatusCode, respBodyStr)
 	}
@@ -237,46 +230,4 @@ func (e *Executor) Execute(model string, body []byte, credentials *domain.Creden
 	}()
 
 	return pr, 200, nil
-}
-
-func maskedToken(token string) string {
-	if len(token) <= 8 {
-		return "***"
-	}
-	return token[:4] + "***" + token[len(token)-4:]
-}
-
-// truncateBody returns at most maxBytes of the body as a string, with a suffix
-// indicating truncation when needed.
-func truncateBody(b []byte, maxBytes int) string {
-	if len(b) <= maxBytes {
-		return string(b)
-	}
-	return string(b[:maxBytes]) + fmt.Sprintf("... [truncated %d bytes]", len(b)-maxBytes)
-}
-
-func responseLevel(status int) string {
-	if status >= 400 {
-		return "ERROR"
-	}
-	return "INFO"
-}
-
-// bytesReader wraps a byte slice as an io.Reader.
-type bytesReader struct {
-	data []byte
-	pos  int
-}
-
-func newBytesReader(data []byte) *bytesReader {
-	return &bytesReader{data: data}
-}
-
-func (r *bytesReader) Read(p []byte) (int, error) {
-	if r.pos >= len(r.data) {
-		return 0, io.EOF
-	}
-	n := copy(p, r.data[r.pos:])
-	r.pos += n
-	return n, nil
 }

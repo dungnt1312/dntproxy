@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(C:/www/laragon/9router/**)",
+      "Bash(npx *)",
+      "Bash(bun *)",
+      "Bash(git config *)",
+      "Bash(git add *)",
+      "Bash(git *)",
+      "Bash(git checkout *)",
+      "Bash(powershell *)",
+      "Read(C:\\laragon\\www/**)",
+      "Bash(sed *)",
+      "Read(C:/laragon/www/9router/open-sse/translator/**)",
+      "Bash(dir *)",
+      "Bash(hash *)",
+      "Bash(go *)",
+      "Bash(git commit *)"
+    ]
+  },
+  "$version": 3
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -112,6 +113,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 	providers.RegisterExecutor("kiro", kiro.NewExecutor())
 	providers.RegisterExecutor("openai", openaiAdapter.NewExecutor())
 	providers.RegisterExecutor("openai-compatible", openaiAdapter.NewExecutor())
+	providers.RegisterExecutor("glm", openaiAdapter.NewExecutor())
+	providers.RegisterExecutor("minimax", openaiAdapter.NewExecutor())
+	providers.RegisterExecutor("qwen", openaiAdapter.NewExecutor())
 
 	router := httpAdapter.NewRouter(store, providers)
 
@@ -122,9 +126,14 @@ func runServe(cmd *cobra.Command, args []string) error {
 	log.Printf("[dntproxy] v%s starting on http://localhost%s", version, addr)
 	log.Printf("[dntproxy] OpenAI-compatible API: http://localhost%s/v1", addr)
 
+	srv := &http.Server{
+		Addr:    addr,
+		Handler: router,
+	}
+
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- router.Run(addr)
+		errCh <- srv.ListenAndServe()
 	}()
 
 	sigCh := make(chan os.Signal, 1)
@@ -134,9 +143,16 @@ func runServe(cmd *cobra.Command, args []string) error {
 	case sig := <-sigCh:
 		log.Printf("[dntproxy] Received signal %s, shutting down...", sig)
 	case err := <-errCh:
-		if err != nil {
+		if err != nil && err != http.ErrServerClosed {
 			log.Printf("[dntproxy] Server error: %s", err)
 		}
+	}
+
+	// Graceful shutdown: wait up to 10s for active requests to finish
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("[dntproxy] Graceful shutdown error: %s", err)
 	}
 
 	scheduler.Stop()

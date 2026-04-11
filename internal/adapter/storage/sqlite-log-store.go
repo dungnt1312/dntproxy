@@ -29,6 +29,8 @@ func NewSQLiteLogStore(path string) (*SQLiteLogStore, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open log db: %w", err)
 	}
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
 
 	store := &SQLiteLogStore{db: db}
 	if err := store.migrate(context.Background()); err != nil {

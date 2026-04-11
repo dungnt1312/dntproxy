@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(C:/www/laragon/9router/**)"
+    ]
+  }
+}

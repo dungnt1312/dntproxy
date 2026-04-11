@@ -5,7 +5,7 @@ import {
 } from 'lucide-react'
 import { api } from '../../api'
 import type { ImportMode, DeviceCodeState, SocialLoginState } from './helpers'
-import { AwsLogo, OpenAILogo, CustomLogo } from './helpers'
+import { AwsLogo, OpenAILogo, GLMLogo, MiniMaxLogo, QwenLogo, CustomLogo } from './helpers'
 import {
   Dialog,
   DialogContent,
@@ -29,6 +29,13 @@ export default function AddConnectionModal({ onSuccess, onClose }: AddConnection
   const [form, setForm] = useState({ refreshToken: '', clientId: '', clientSecret: '', region: '', authMethod: 'builder-id' })
   const [openaiForm, setOpenaiForm] = useState({ name: '', apiKey: '', supportedModels: '' })
   const [customForm, setCustomForm] = useState({ name: '', apiKey: '', baseUrl: '', supportedModels: '' })
+  const [glmForm, setGlmForm] = useState({ name: '', apiKey: '', baseUrl: '', supportedModels: '' })
+  const [minimaxForm, setMinimaxForm] = useState({ name: '', apiKey: '', baseUrl: '', supportedModels: '' })
+  const [qwenMode, setQwenMode] = useState<'oauth' | 'apikey'>('oauth')
+  const [qwenForm, setQwenForm] = useState({ name: '', apiKey: '', baseUrl: '', supportedModels: '' })
+  const [qwenDeviceCode, setQwenDeviceCode] = useState<DeviceCodeState | null>(null)
+  const [qwenPolling, setQwenPolling] = useState(false)
+  const qwenPollRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [deviceCode, setDeviceCode] = useState<DeviceCodeState | null>(null)
@@ -47,6 +54,7 @@ export default function AddConnectionModal({ onSuccess, onClose }: AddConnection
     return () => {
       if (pollTimerRef.current) clearTimeout(pollTimerRef.current)
       if (openaiPollRef.current) clearInterval(openaiPollRef.current)
+      if (qwenPollRef.current) clearTimeout(qwenPollRef.current)
     }
   }, [])
 
@@ -54,6 +62,11 @@ export default function AddConnectionModal({ onSuccess, onClose }: AddConnection
     setForm({ refreshToken: '', clientId: '', clientSecret: '', region: '', authMethod: 'builder-id' })
     setOpenaiForm({ name: '', apiKey: '', supportedModels: '' })
     setCustomForm({ name: '', apiKey: '', baseUrl: '', supportedModels: '' })
+    setGlmForm({ name: '', apiKey: '', baseUrl: '', supportedModels: '' })
+    setMinimaxForm({ name: '', apiKey: '', baseUrl: '', supportedModels: '' })
+    setQwenForm({ name: '', apiKey: '', baseUrl: '', supportedModels: '' })
+    setQwenDeviceCode(null); setQwenPolling(false)
+    if (qwenPollRef.current) { clearTimeout(qwenPollRef.current); qwenPollRef.current = null }
     setIdcForm({ startUrl: '', region: '' })
     setDeviceCode(null); setPolling(false)
     setSocialLogin(null); setSocialCallbackUrl('')
@@ -161,6 +174,56 @@ export default function AddConnectionModal({ onSuccess, onClose }: AddConnection
     } catch (e: any) { setError(e.message) } finally { setLoading(false) }
   }
 
+  const handleAddGLM = async () => {
+    setLoading(true); setError('')
+    try {
+      const models = parseSupportedModels(glmForm.supportedModels)
+      await api.addGLMConnection({ name: glmForm.name || undefined, apiKey: glmForm.apiKey, baseUrl: glmForm.baseUrl || undefined, supportedModels: models.length > 0 ? models : undefined })
+      done('GLM added!')
+    } catch (e: any) { setError(e.message) } finally { setLoading(false) }
+  }
+
+  const handleAddMiniMax = async () => {
+    setLoading(true); setError('')
+    try {
+      const models = parseSupportedModels(minimaxForm.supportedModels)
+      await api.addMiniMaxConnection({ name: minimaxForm.name || undefined, apiKey: minimaxForm.apiKey, baseUrl: minimaxForm.baseUrl || undefined, supportedModels: models.length > 0 ? models : undefined })
+      done('MiniMax added!')
+    } catch (e: any) { setError(e.message) } finally { setLoading(false) }
+  }
+
+  const handleStartQwenOAuth = async () => {
+    setLoading(true); setError('')
+    try {
+      const res = await api.startQwenOAuth()
+      setQwenDeviceCode(res); setQwenPolling(true); startQwenPolling(res.sessionId, res.interval)
+    } catch (e: any) { setError(e.message) } finally { setLoading(false) }
+  }
+
+  const startQwenPolling = useCallback((sessionId: string, interval: number) => {
+    const ms = Math.max(interval, 3) * 1000
+    const poll = async () => {
+      try {
+        const res = await api.pollQwenOAuth(sessionId)
+        if (res.status === 'pending') { qwenPollRef.current = setTimeout(poll, ms); return }
+        if (res.status === 'success') { done(`Qwen connected! ${res.email ? `(${res.email})` : res.name}`); return }
+        setError(res.errorDescription || res.error || 'Authorization failed')
+        setQwenDeviceCode(null); setQwenPolling(false)
+      } catch (e: any) { setError(e.message); setQwenDeviceCode(null); setQwenPolling(false) }
+    }
+    qwenPollRef.current = setTimeout(poll, ms)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const handleAddQwenAPIKey = async () => {
+    setLoading(true); setError('')
+    try {
+      const models = parseSupportedModels(qwenForm.supportedModels)
+      await api.addQwenConnection({ name: qwenForm.name || undefined, apiKey: qwenForm.apiKey, baseUrl: qwenForm.baseUrl || undefined, supportedModels: models.length > 0 ? models : undefined })
+      done('Qwen added!')
+    } catch (e: any) { setError(e.message) } finally { setLoading(false) }
+  }
+
   const DeviceCodePanel = () => deviceCode ? (
     <div className="space-y-3 mt-4 rounded-lg border bg-muted/40 p-4">
       <div className="text-center">
@@ -183,7 +246,10 @@ export default function AddConnectionModal({ onSuccess, onClose }: AddConnection
   const providerTabs = [
     { id: 'kiro', name: 'AWS / Kiro', icon: <AwsLogo size={14} /> },
     { id: 'openai', name: 'OpenAI', icon: <OpenAILogo size={14} /> },
-    { id: 'openai-compatible', name: 'Custom API', icon: <CustomLogo size={14} /> },
+    { id: 'qwen', name: 'Qwen', icon: <QwenLogo size={14} /> },
+    { id: 'glm', name: 'GLM', icon: <GLMLogo size={14} /> },
+    { id: 'minimax', name: 'MiniMax', icon: <MiniMaxLogo size={14} /> },
+    { id: 'openai-compatible', name: 'Custom', icon: <CustomLogo size={14} /> },
   ]
 
   const kiroModes = [
@@ -477,6 +543,95 @@ export default function AddConnectionModal({ onSuccess, onClose }: AddConnection
                 <Button onClick={handleAddCustom} disabled={loading || !customForm.baseUrl} size="sm" className="w-full bg-purple-600 hover:bg-purple-700">
                   {loading ? 'Adding…' : 'Add Custom Connection'}
                 </Button>
+              </div>
+            )}
+
+            {/* GLM (Zhipu AI) */}
+            {provider === 'glm' && (
+              <div className="space-y-3 max-w-md mx-auto">
+                <p className="text-xs text-muted-foreground text-center">Connect to <a href="https://open.bigmodel.cn" target="_blank" rel="noopener noreferrer" className="text-[#0066FF] hover:underline">Zhipu AI (bigmodel.cn)</a> — GLM models.</p>
+                <Input type="password" value={glmForm.apiKey} onChange={e => setGlmForm({ ...glmForm, apiKey: e.target.value })} placeholder="API Key *" className="text-xs font-mono" />
+                <div className="grid grid-cols-2 gap-3">
+                  <Input value={glmForm.name} onChange={e => setGlmForm({ ...glmForm, name: e.target.value })} placeholder="Display Name (optional)" className="text-xs" />
+                  <Input value={glmForm.baseUrl} onChange={e => setGlmForm({ ...glmForm, baseUrl: e.target.value })} placeholder="Base URL (default: bigmodel.cn)" className="text-xs font-mono" />
+                </div>
+                <Textarea value={glmForm.supportedModels} onChange={e => setGlmForm({ ...glmForm, supportedModels: e.target.value })} placeholder="Supported Models (one per line, auto-populated if empty)" rows={3} className="text-xs font-mono" />
+                <Button onClick={handleAddGLM} disabled={loading || !glmForm.apiKey} size="sm" className="w-full bg-[#0066FF] hover:bg-[#0055DD]">
+                  {loading ? 'Adding…' : 'Add GLM Connection'}
+                </Button>
+              </div>
+            )}
+
+            {/* MiniMax */}
+            {provider === 'minimax' && (
+              <div className="space-y-3 max-w-md mx-auto">
+                <p className="text-xs text-muted-foreground text-center">Connect to <a href="https://platform.minimax.io" target="_blank" rel="noopener noreferrer" className="text-[#FF6B35] hover:underline">MiniMax Platform</a> — M2 series models.</p>
+                <Input type="password" value={minimaxForm.apiKey} onChange={e => setMinimaxForm({ ...minimaxForm, apiKey: e.target.value })} placeholder="API Key *" className="text-xs font-mono" />
+                <div className="grid grid-cols-2 gap-3">
+                  <Input value={minimaxForm.name} onChange={e => setMinimaxForm({ ...minimaxForm, name: e.target.value })} placeholder="Display Name (optional)" className="text-xs" />
+                  <Input value={minimaxForm.baseUrl} onChange={e => setMinimaxForm({ ...minimaxForm, baseUrl: e.target.value })} placeholder="Base URL (default: api.minimax.io)" className="text-xs font-mono" />
+                </div>
+                <Textarea value={minimaxForm.supportedModels} onChange={e => setMinimaxForm({ ...minimaxForm, supportedModels: e.target.value })} placeholder="Supported Models (one per line, auto-populated if empty)" rows={3} className="text-xs font-mono" />
+                <Button onClick={handleAddMiniMax} disabled={loading || !minimaxForm.apiKey} size="sm" className="w-full bg-[#FF6B35] hover:bg-[#E85A25]">
+                  {loading ? 'Adding…' : 'Add MiniMax Connection'}
+                </Button>
+              </div>
+            )}
+
+            {/* Qwen */}
+            {provider === 'qwen' && (
+              <div className="space-y-3 max-w-md mx-auto">
+                <p className="text-xs text-muted-foreground text-center">Connect to <a href="https://qwen.ai" target="_blank" rel="noopener noreferrer" className="text-[#6366F1] hover:underline">Qwen AI</a> — Free coding models via OAuth or paid via API key.</p>
+
+                {/* Mode selector */}
+                <div className="flex gap-1 p-0.5 bg-muted rounded-lg">
+                  {([['oauth', '🔓 OAuth (Free)'], ['apikey', '🔑 API Key']] as const).map(([mode, label]) => (
+                    <button key={mode} onClick={() => setQwenMode(mode)} className={cn('flex-1 text-xs py-1.5 rounded-md transition-all font-medium', qwenMode === mode ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}>{label}</button>
+                  ))}
+                </div>
+
+                {qwenMode === 'oauth' && (
+                  <div className="space-y-3">
+                    {!qwenDeviceCode ? (
+                      <Button onClick={handleStartQwenOAuth} disabled={loading} size="sm" className="w-full bg-[#6366F1] hover:bg-[#5558E6]">
+                        {loading ? <><Loader2 size={14} className="animate-spin mr-2" />Starting…</> : <><Play size={14} className="mr-2" />Start Qwen Login</>}
+                      </Button>
+                    ) : (
+                      <div className="space-y-3 rounded-lg border bg-muted/40 p-4">
+                        <div className="text-center">
+                          <p className="text-xs text-muted-foreground mb-2">Enter this code on qwen.ai:</p>
+                          <div className="text-2xl font-mono font-bold tracking-[0.2em] text-[#6366F1] mb-3">{qwenDeviceCode.userCode}</div>
+                          <Button asChild size="sm" className="gap-2 bg-[#6366F1] hover:bg-[#5558E6]">
+                            <a href={qwenDeviceCode.verificationUriComplete || qwenDeviceCode.verificationUri} target="_blank" rel="noopener noreferrer">
+                              <ExternalLink size={14} /> Open Qwen Authorization
+                            </a>
+                          </Button>
+                        </div>
+                        {qwenPolling && (
+                          <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground mt-2">
+                            <Loader2 size={12} className="animate-spin" /> Waiting for authorization ({qwenDeviceCode.interval}s)…
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    <p className="text-[10px] text-muted-foreground text-center">Free tier: ~1,000–2,000 requests/day. No credit card needed.</p>
+                  </div>
+                )}
+
+                {qwenMode === 'apikey' && (
+                  <div className="space-y-3">
+                    <p className="text-[10px] text-muted-foreground">Get API key from <a href="https://dashscope.aliyun.com" target="_blank" rel="noopener noreferrer" className="text-[#6366F1] hover:underline">DashScope Console</a>.</p>
+                    <Input type="password" value={qwenForm.apiKey} onChange={e => setQwenForm({ ...qwenForm, apiKey: e.target.value })} placeholder="API Key *" className="text-xs font-mono" />
+                    <div className="grid grid-cols-2 gap-3">
+                      <Input value={qwenForm.name} onChange={e => setQwenForm({ ...qwenForm, name: e.target.value })} placeholder="Display Name (optional)" className="text-xs" />
+                      <Input value={qwenForm.baseUrl} onChange={e => setQwenForm({ ...qwenForm, baseUrl: e.target.value })} placeholder="Base URL (default: DashScope)" className="text-xs font-mono" />
+                    </div>
+                    <Textarea value={qwenForm.supportedModels} onChange={e => setQwenForm({ ...qwenForm, supportedModels: e.target.value })} placeholder="Supported Models (one per line, auto-populated if empty)" rows={3} className="text-xs font-mono" />
+                    <Button onClick={handleAddQwenAPIKey} disabled={loading || !qwenForm.apiKey} size="sm" className="w-full bg-[#6366F1] hover:bg-[#5558E6]">
+                      {loading ? 'Adding…' : 'Add Qwen Connection'}
+                    </Button>
+                  </div>
+                )}
               </div>
             )}
           </div>

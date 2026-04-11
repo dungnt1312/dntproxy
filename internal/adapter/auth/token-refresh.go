@@ -48,6 +48,12 @@ func (s *TokenRefreshService) Refresh(conn *domain.ProviderConnection) (*domain.
 		return s.refreshOpenAI(conn)
 	}
 
+	// Qwen OAuth refresh
+	if conn.Provider == "qwen" {
+		log.Printf("[TOKEN] Refreshing Qwen token for %s", conn.Name)
+		return s.refreshQwen(conn)
+	}
+
 	// Kiro refresh
 	authMethod := getStringFromMap(conn.ProviderSpecificData, "authMethod")
 	clientID := getStringFromMap(conn.ProviderSpecificData, "clientId")
@@ -100,6 +106,29 @@ func (s *TokenRefreshService) refreshOpenAI(conn *domain.ProviderConnection) (*d
 	tokens, err := RefreshOpenAIToken(conn.RefreshToken)
 	if err != nil {
 		return nil, fmt.Errorf("openai refresh failed: %w", err)
+	}
+
+	conn.AccessToken = tokens.AccessToken
+	if tokens.RefreshToken != "" {
+		conn.RefreshToken = tokens.RefreshToken
+	}
+
+	expiresIn := tokens.ExpiresIn
+	if expiresIn == 0 {
+		expiresIn = 3600
+	}
+	conn.ExpiresIn = expiresIn
+	conn.ExpiresAt = time.Now().Add(time.Duration(expiresIn) * time.Second).UTC().Format(time.RFC3339)
+	conn.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+
+	return conn, nil
+}
+
+// refreshQwen refreshes Qwen OAuth token.
+func (s *TokenRefreshService) refreshQwen(conn *domain.ProviderConnection) (*domain.ProviderConnection, error) {
+	tokens, err := RefreshQwenToken(conn.RefreshToken)
+	if err != nil {
+		return nil, fmt.Errorf("qwen refresh failed: %w", err)
 	}
 
 	conn.AccessToken = tokens.AccessToken

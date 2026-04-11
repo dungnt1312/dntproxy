@@ -168,6 +168,152 @@ func DefaultModelRegistry() *ModelRegistry {
 				Capabilities:    []string{"reasoning", "tools", "streaming"},
 				IsActive:        true,
 			},
+			// GLM (Zhipu AI / Z.ai) models
+			"glm/glm-5.1": {
+				ID:              "glm-5.1",
+				Name:            "GLM 5.1",
+				Provider:        "glm",
+				ContextWindow:   128000,
+				MaxOutputTokens: 16384,
+				InputPrice:      1.4,
+				OutputPrice:     4.4,
+				Capabilities:    []string{"vision", "tools", "streaming", "thinking"},
+				IsActive:        true,
+			},
+			"glm/glm-5": {
+				ID:              "glm-5",
+				Name:            "GLM 5",
+				Provider:        "glm",
+				ContextWindow:   128000,
+				MaxOutputTokens: 16384,
+				InputPrice:      1.4,
+				OutputPrice:     4.4,
+				Capabilities:    []string{"vision", "tools", "streaming", "thinking"},
+				IsActive:        true,
+			},
+			"glm/glm-4.7": {
+				ID:              "glm-4.7",
+				Name:            "GLM 4.7",
+				Provider:        "glm",
+				ContextWindow:   128000,
+				MaxOutputTokens: 8192,
+				InputPrice:      1.0,
+				OutputPrice:     3.0,
+				Capabilities:    []string{"vision", "tools", "streaming"},
+				IsActive:        true,
+			},
+			"glm/glm-4.6": {
+				ID:              "glm-4.6",
+				Name:            "GLM 4.6",
+				Provider:        "glm",
+				ContextWindow:   128000,
+				MaxOutputTokens: 8192,
+				InputPrice:      0.8,
+				OutputPrice:     2.5,
+				Capabilities:    []string{"vision", "tools", "streaming"},
+				IsActive:        true,
+			},
+			// MiniMax models
+			"minimax/MiniMax-M2.7": {
+				ID:              "MiniMax-M2.7",
+				Name:            "MiniMax M2.7",
+				Provider:        "minimax",
+				ContextWindow:   128000,
+				MaxOutputTokens: 16384,
+				InputPrice:      1.0,
+				OutputPrice:     4.0,
+				Capabilities:    []string{"tools", "streaming", "thinking"},
+				IsActive:        true,
+			},
+			"minimax/MiniMax-M2.7-highspeed": {
+				ID:              "MiniMax-M2.7-highspeed",
+				Name:            "MiniMax M2.7 HighSpeed",
+				Provider:        "minimax",
+				ContextWindow:   128000,
+				MaxOutputTokens: 16384,
+				InputPrice:      0.7,
+				OutputPrice:     2.8,
+				Capabilities:    []string{"tools", "streaming"},
+				IsActive:        true,
+			},
+			"minimax/MiniMax-M2.5": {
+				ID:              "MiniMax-M2.5",
+				Name:            "MiniMax M2.5",
+				Provider:        "minimax",
+				ContextWindow:   128000,
+				MaxOutputTokens: 16384,
+				InputPrice:      0.8,
+				OutputPrice:     3.2,
+				Capabilities:    []string{"tools", "streaming"},
+				IsActive:        true,
+			},
+			"minimax/MiniMax-M2.1": {
+				ID:              "MiniMax-M2.1",
+				Name:            "MiniMax M2.1",
+				Provider:        "minimax",
+				ContextWindow:   128000,
+				MaxOutputTokens: 16384,
+				InputPrice:      0.5,
+				OutputPrice:     2.0,
+				Capabilities:    []string{"tools", "streaming"},
+				IsActive:        true,
+			},
+			"minimax/MiniMax-M2": {
+				ID:              "MiniMax-M2",
+				Name:            "MiniMax M2",
+				Provider:        "minimax",
+				ContextWindow:   128000,
+				MaxOutputTokens: 8192,
+				InputPrice:      0.3,
+				OutputPrice:     1.2,
+				Capabilities:    []string{"tools", "streaming"},
+				IsActive:        true,
+			},
+			// Qwen models (Alibaba Cloud)
+			"qwen/qwen3-coder-plus": {
+				ID:              "qwen3-coder-plus",
+				Name:            "Qwen3 Coder Plus",
+				Provider:        "qwen",
+				ContextWindow:   131072,
+				MaxOutputTokens: 16384,
+				InputPrice:      0.0,
+				OutputPrice:     0.0,
+				Capabilities:    []string{"tools", "streaming", "thinking"},
+				IsActive:        true,
+			},
+			"qwen/qwen3-coder": {
+				ID:              "qwen3-coder",
+				Name:            "Qwen3 Coder",
+				Provider:        "qwen",
+				ContextWindow:   131072,
+				MaxOutputTokens: 16384,
+				InputPrice:      0.0,
+				OutputPrice:     0.0,
+				Capabilities:    []string{"tools", "streaming", "thinking"},
+				IsActive:        true,
+			},
+			"qwen/qwen-plus": {
+				ID:              "qwen-plus",
+				Name:            "Qwen Plus",
+				Provider:        "qwen",
+				ContextWindow:   131072,
+				MaxOutputTokens: 16384,
+				InputPrice:      0.0,
+				OutputPrice:     0.0,
+				Capabilities:    []string{"tools", "streaming"},
+				IsActive:        true,
+			},
+			"qwen/qwen-turbo": {
+				ID:              "qwen-turbo",
+				Name:            "Qwen Turbo",
+				Provider:        "qwen",
+				ContextWindow:   131072,
+				MaxOutputTokens: 8192,
+				InputPrice:      0.0,
+				OutputPrice:     0.0,
+				Capabilities:    []string{"tools", "streaming"},
+				IsActive:        true,
+			},
 		},
 	}
 }
@@ -182,12 +328,30 @@ func (r *ModelRegistry) GetModel(key string) *ModelDefinition {
 
 // DefaultKiroModels returns the default model IDs for Kiro connections.
 func DefaultKiroModels() []string {
+	return defaultModelsByProvider("kiro")
+}
+
+// DefaultGLMModels returns the default model IDs for GLM connections.
+func DefaultGLMModels() []string {
+	return defaultModelsByProvider("glm")
+}
+
+// DefaultMiniMaxModels returns the default model IDs for MiniMax connections.
+func DefaultMiniMaxModels() []string {
+	return defaultModelsByProvider("minimax")
+}
+
+// DefaultQwenModels returns the default model IDs for Qwen connections.
+func DefaultQwenModels() []string {
+	return defaultModelsByProvider("qwen")
+}
+
+// defaultModelsByProvider extracts active model IDs for a given provider.
+func defaultModelsByProvider(provider string) []string {
 	registry := DefaultModelRegistry()
 	var models []string
-	for key, m := range registry.Models {
-		if m.Provider == "kiro" && m.IsActive {
-			// Strip "kiro/" prefix to get bare model ID
-			_ = key
+	for _, m := range registry.Models {
+		if m.Provider == provider && m.IsActive {
 			models = append(models, m.ID)
 		}
 	}

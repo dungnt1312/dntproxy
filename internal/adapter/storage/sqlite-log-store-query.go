@@ -42,10 +42,9 @@ func (s *SQLiteLogStore) List(ctx context.Context, query domain.LogQuery) ([]dom
 // Summary returns aggregate request, error, token, and cost totals.
 func (s *SQLiteLogStore) Summary(ctx context.Context, query domain.LogQuery) (*domain.LogSummary, error) {
 	where, args := buildLogWhere(query)
+	// Always count "inbound" entries as requests — this is the direction logged
+	// by chat-handler.go when the client request arrives.
 	requestDirection := "inbound"
-	if (query.ConnectionID != "" && query.ConnectionID != "all") || (query.Provider != "" && query.Provider != "all") {
-		requestDirection = "response"
-	}
 	row := s.db.QueryRowContext(ctx, `SELECT
 		COUNT(CASE WHEN direction = '`+requestDirection+`' THEN 1 END),
 		COUNT(CASE WHEN level = 'ERROR' THEN 1 END),
@@ -111,7 +110,8 @@ func buildLogWhere(query domain.LogQuery) (string, []interface{}) {
 	}
 	if query.Search != "" {
 		clauses = append(clauses, "(message LIKE ? OR error LIKE ? OR model LIKE ? OR request_id LIKE ? OR metadata_json LIKE ?)")
-		search := "%" + query.Search + "%"
+		escaped := escapeLike(query.Search)
+		search := "%" + escaped + "%"
 		args = append(args, search, search, search, search, search)
 	}
 
@@ -158,4 +158,13 @@ func scanLogEntry(row logScanner) (*domain.LogEntry, error) {
 		return nil, err
 	}
 	return &entry, nil
+}
+
+// escapeLike escapes SQL LIKE special characters so user input is treated
+// as a literal pattern rather than a wildcard expression.
+func escapeLike(s string) string {
+	s = strings.ReplaceAll(s, "\\", "\\\\")
+	s = strings.ReplaceAll(s, "%", "\\%")
+	s = strings.ReplaceAll(s, "_", "\\_")
+	return s
 }

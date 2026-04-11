@@ -109,3 +109,43 @@ func parseLogQuery(c *gin.Context) domain.LogQuery {
 		Limit:        limit,
 	}
 }
+
+func apiCreatePrice(c *gin.Context) {
+	var price domain.ModelPrice
+	if err := c.ShouldBindJSON(&price); err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+	if err := logger.Get().InsertPrice(&price); err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	log.Printf("[LOG] Price created: %s/%s", price.Provider, price.ModelPattern)
+	c.JSON(201, price)
+}
+
+func apiUpdatePrice(c *gin.Context) {
+	id := c.Param("id")
+	var price domain.ModelPrice
+	if err := c.ShouldBindJSON(&price); err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+	price.ID = id
+	if err := logger.Get().UpdatePrice(&price); err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	log.Printf("[LOG] Price updated: %s", id)
+	c.JSON(200, price)
+}
+
+func apiDeletePrice(c *gin.Context) {
+	id := c.Param("id")
+	if err := logger.Get().DeletePrice(id); err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	log.Printf("[LOG] Price deleted: %s", id)
+	c.JSON(200, gin.H{"ok": true})
+}

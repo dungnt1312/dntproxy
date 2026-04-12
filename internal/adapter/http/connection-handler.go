@@ -505,7 +505,7 @@ func apiAddCustomConnection(store port.CredentialStore) gin.HandlerFunc {
 
 // === Add GLM Connection ===
 
-const defaultGLMBaseURL = "https://open.bigmodel.cn/api/paas/v4"
+const defaultGLMBaseURL = "https://api.z.ai/api/coding/paas/v4"
 
 func apiAddGLMConnection(store port.CredentialStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -580,7 +580,7 @@ func apiAddGLMConnection(store port.CredentialStore) gin.HandlerFunc {
 
 // === Add MiniMax Connection ===
 
-const defaultMiniMaxBaseURL = "https://api.minimax.io/v1"
+const defaultMiniMaxBaseURL = "https://api.minimax.io"
 
 func apiAddMiniMaxConnection(store port.CredentialStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -942,8 +942,6 @@ func apiTestModel(store port.CredentialStore, providers port.ProviderRegistry) g
 		})
 	}
 }
-
-
 
 // maskString masks a string, showing first n and last m characters.
 func maskString(s string, first, last int) string {

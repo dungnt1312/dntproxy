@@ -16,7 +16,57 @@ import (
 	"github.com/dungnt/dntproxy/internal/logger"
 )
 
-const defaultOpenAIBaseURL = "https://api.openai.com"
+const (
+	defaultOpenAIBaseURL  = "https://api.openai.com"
+	defaultGLMBaseURL     = "https://api.z.ai/api/coding/paas/v4"
+	defaultMiniMaxBaseURL = "https://api.minimax.io"
+	defaultQwenBaseURL    = "https://portal.qwen.ai"
+)
+
+// resolveBaseURL returns the appropriate base URL for a provider.
+// Uses credentials.BaseURL if set, otherwise falls back to provider default.
+// If the base URL ends with /v1 (or similar version), we strip it since
+// resolveChatPath will add the correct path.
+func resolveBaseURL(credentials *domain.Credentials) string {
+	baseURL := credentials.BaseURL
+	if baseURL == "" {
+		switch credentials.Provider {
+		case "glm":
+			baseURL = defaultGLMBaseURL
+		case "minimax":
+			baseURL = defaultMiniMaxBaseURL
+		case "qwen":
+			baseURL = defaultQwenBaseURL
+		default:
+			baseURL = defaultOpenAIBaseURL
+		}
+	}
+	// If user-set base URL already ends with /v1, /v2, /v4 etc, strip it
+	// because resolveChatPath will add the correct path.
+	for _, suffix := range []string{"/v1", "/v2", "/v3", "/v4"} {
+		if strings.HasSuffix(baseURL, suffix) {
+			baseURL = strings.TrimSuffix(baseURL, suffix)
+			break
+		}
+	}
+	return baseURL
+}
+
+// resolveChatPath returns the correct API path for chat completions.
+// Different providers use different endpoint paths:
+//   - OpenAI/Qwen: /v1/chat/completions (standard OpenAI-compatible)
+//   - GLM: /chat/completions (base URL already includes /v4)
+//   - MiniMax: /v1/text/chatcompletion_v2 (their own path)
+func resolveChatPath(credentials *domain.Credentials) string {
+	switch credentials.Provider {
+	case "glm":
+		return "/chat/completions"
+	case "minimax":
+		return "/text/chatcompletion_v2"
+	default:
+		return "/v1/chat/completions"
+	}
+}
 
 // Executor handles making requests to OpenAI or OpenAI-compatible APIs.
 // Since these APIs are already OpenAI-compatible, we just proxy the request
@@ -59,12 +109,9 @@ func (e *Executor) Execute(model string, body []byte, credentials *domain.Creden
 
 // executeStandard handles standard OpenAI API key requests (api.openai.com/v1/chat/completions).
 func (e *Executor) executeStandard(model string, body []byte, credentials *domain.Credentials, requestID string) (io.ReadCloser, int, error) {
-	baseURL := credentials.BaseURL
-	if baseURL == "" {
-		baseURL = defaultOpenAIBaseURL
-	}
-
-	url := baseURL + "/v1/chat/completions"
+	baseURL := resolveBaseURL(credentials)
+	chatPath := resolveChatPath(credentials)
+	url := baseURL + chatPath
 
 	req, err := http.NewRequest("POST", url, bytes.NewReader(body))
 	if err != nil {

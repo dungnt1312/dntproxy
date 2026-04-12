@@ -1,6 +1,9 @@
 package http
 
 import (
+	"fmt"
+	"log"
+
 	"github.com/dungnt/dntproxy/internal/port"
 	"github.com/gin-gonic/gin"
 )
@@ -19,6 +22,9 @@ func RegisterAPIRoutes(r *gin.Engine, store port.CredentialStore, providers port
 	api := r.Group("/api")
 	api.Use(apiKeyMiddleware(store))
 	{
+		// Debug endpoint
+		api.GET("/debug/accounts/:provider", apiDebugAccounts(store))
+
 		// Connections
 		api.GET("/connections", apiListConnections(store))
 		api.POST("/connections/import", apiImportConnection(store))
@@ -88,4 +94,27 @@ func RegisterAPIRoutes(r *gin.Engine, store port.CredentialStore, providers port
 func apiGetUsage(store port.CredentialStore) gin.HandlerFunc {
 	handler := NewUsageHandler(store)
 	return handler.GetUsage
+}
+
+// apiDebugAccounts dumps raw account selection state for debugging.
+func apiDebugAccounts(store port.CredentialStore) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		provider := c.Param("provider")
+		connections, err := store.GetActiveConnections(provider)
+		if err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+		log.Printf("[DEBUG] GetActiveConnections(%s) -> %d connections", provider, len(connections))
+		for i, conn := range connections {
+			log.Printf("[DEBUG]   [%d] id=%s name=%s isActive=%v supportedModels=%v rateLimitedUntil=%s modelLocks=%v",
+				i, conn.ID, conn.Name, conn.IsActive, conn.SupportedModels, conn.RateLimitedUntil, conn.ModelLocks)
+		}
+		c.JSON(200, gin.H{
+			"provider":    provider,
+			"count":       len(connections),
+			"connections": connections,
+			"error":       fmt.Sprintf("%v", err),
+		})
+	}
 }

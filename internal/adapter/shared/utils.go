@@ -130,6 +130,7 @@ func ConnectionToCredentials(conn *domain.ProviderConnection) *domain.Credential
 	creds := &domain.Credentials{
 		ConnectionID:         conn.ID,
 		ConnectionName:       conn.Name,
+		Provider:             conn.Provider,
 		AccessToken:          conn.AccessToken,
 		RefreshToken:         conn.RefreshToken,
 		APIKey:               conn.APIKey,

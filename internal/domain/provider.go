@@ -56,6 +56,7 @@ func (c *ProviderConnection) SupportsModel(model string) bool {
 type Credentials struct {
 	ConnectionID         string
 	ConnectionName       string
+	Provider             string
 	AccessToken          string
 	RefreshToken         string
 	APIKey               string

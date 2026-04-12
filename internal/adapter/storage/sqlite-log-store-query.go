@@ -109,7 +109,7 @@ func buildLogWhere(query domain.LogQuery) (string, []interface{}) {
 		args = append(args, query.Level)
 	}
 	if query.Search != "" {
-		clauses = append(clauses, "(message LIKE ? OR error LIKE ? OR model LIKE ? OR request_id LIKE ? OR metadata_json LIKE ?)")
+		clauses = append(clauses, "(message LIKE ? ESCAPE '\\' OR error LIKE ? ESCAPE '\\' OR model LIKE ? ESCAPE '\\' OR request_id LIKE ? ESCAPE '\\' OR metadata_json LIKE ? ESCAPE '\\')")
 		escaped := escapeLike(query.Search)
 		search := "%" + escaped + "%"
 		args = append(args, search, search, search, search, search)

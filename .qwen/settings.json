@@ -15,7 +15,14 @@
       "Bash(dir *)",
       "Bash(hash *)",
       "Bash(go *)",
-      "Bash(git commit *)"
+      "Bash(git commit *)",
+      "Bash(type *)",
+      "Bash(curl *)",
+      "Bash(echo.)",
+      "Bash(sleep *)",
+      "Bash(python3 *)",
+      "Bash(taskkill *)",
+      "Bash(./dntproxy.exe *)"
     ]
   },
   "$version": 3

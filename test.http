@@ -1,0 +1,17 @@
+﻿# dntproxy - HTTP Requests Collection
+@baseUrl = http://localhost:20128
+@apiKey = your-api-key-here
+
+### Health Check
+GET {{baseUrl}}/health
+
+### Chat - Streaming
+POST {{baseUrl}}/v1/chat/completions
+Content-Type: application/json
+Authorization: Bearer {{apiKey}}
+
+{
+  "model": "haiku-tribal",
+  "messages": [{"role": "user", "content": "Hello"}],
+  "stream": true
+}

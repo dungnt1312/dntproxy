@@ -69,12 +69,48 @@ func apiLogStream(c *gin.Context) {
 		return true
 	}
 
+	// Send initial batch immediately.
 	if !sendLogs() {
 		return
 	}
 
+	// Debounce: when multiple log entries arrive in rapid succession (a single
+	// chat request produces 4-6 entries), wait a short window before querying
+	// SQLite so the client receives one consolidated update instead of many.
+	const debounceDelay = 150 * time.Millisecond
+	var debounceTimer *time.Timer
+	debounceCh := make(chan struct{}, 1)
+
+	drainAndDebounce := func() {
+		// Drain any extra signals already queued in the channel.
+		for {
+			select {
+			case <-ch:
+			default:
+				goto drained
+			}
+		}
+	drained:
+		// Reset or start the debounce timer.
+		if debounceTimer == nil {
+			debounceTimer = time.AfterFunc(debounceDelay, func() {
+				select {
+				case debounceCh <- struct{}{}:
+				default:
+				}
+			})
+		} else {
+			debounceTimer.Reset(debounceDelay)
+		}
+	}
+
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
+	defer func() {
+		if debounceTimer != nil {
+			debounceTimer.Stop()
+		}
+	}()
 
 	clientGone := c.Request.Context().Done()
 	for {
@@ -82,6 +118,8 @@ func apiLogStream(c *gin.Context) {
 		case <-clientGone:
 			return
 		case <-ch:
+			drainAndDebounce()
+		case <-debounceCh:
 			if !sendLogs() {
 				return
 			}

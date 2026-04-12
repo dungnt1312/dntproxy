@@ -23,6 +23,8 @@ func apiListModels(store port.CredentialStore) gin.HandlerFunc {
 
 		if cfg != nil {
 			seen := make(map[string]bool)
+			// Track which connections each model is available on
+			modelConnections := make(map[string][]gin.H)
 
 			// Build from active connections' SupportedModels
 			for _, conn := range cfg.ProviderConnections {
@@ -33,12 +35,19 @@ func apiListModels(store port.CredentialStore) gin.HandlerFunc {
 					continue
 				}
 
+				connInfo := gin.H{
+					"id":       conn.ID,
+					"name":     conn.Name,
+					"provider": conn.Provider,
+				}
+
 				if len(conn.SupportedModels) == 0 {
 					// No restriction — add all registry models for this provider
 					if cfg.ModelRegistry != nil {
 						for key, m := range cfg.ModelRegistry.Models {
 							if m.Provider == conn.Provider && m.IsActive && !seen[key] {
 								seen[key] = true
+								modelConnections[key] = []gin.H{connInfo}
 								allModels = append(allModels, gin.H{
 									"id":              key,
 									"name":            m.Name,
@@ -49,16 +58,15 @@ func apiListModels(store port.CredentialStore) gin.HandlerFunc {
 									"outputPrice":     m.OutputPrice,
 									"capabilities":    m.Capabilities,
 								})
+							} else if m.Provider == conn.Provider && m.IsActive && seen[key] {
+								// Model already seen, just add connection info
+								modelConnections[key] = append(modelConnections[key], connInfo)
 							}
 						}
 					}
 				} else {
 					for _, modelID := range conn.SupportedModels {
 						key := conn.Provider + "/" + modelID
-						if seen[key] {
-							continue
-						}
-						seen[key] = true
 						entry := gin.H{
 							"id":       key,
 							"name":     modelID,
@@ -75,7 +83,15 @@ func apiListModels(store port.CredentialStore) gin.HandlerFunc {
 								entry["capabilities"] = m.Capabilities
 							}
 						}
-						allModels = append(allModels, entry)
+
+						if !seen[key] {
+							seen[key] = true
+							modelConnections[key] = []gin.H{connInfo}
+							allModels = append(allModels, entry)
+						} else {
+							// Model already seen, just add connection info
+							modelConnections[key] = append(modelConnections[key], connInfo)
+						}
 					}
 				}
 			}
@@ -101,6 +117,15 @@ func apiListModels(store port.CredentialStore) gin.HandlerFunc {
 							"outputPrice":     m.OutputPrice,
 							"capabilities":    m.Capabilities,
 						})
+					}
+				}
+			}
+
+			// Add connection info to each model
+			for i, model := range allModels {
+				if modelID, ok := model["id"].(string); ok {
+					if conns, exists := modelConnections[modelID]; exists {
+						allModels[i]["connections"] = conns
 					}
 				}
 			}

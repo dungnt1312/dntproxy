@@ -84,18 +84,17 @@ func (l *Logger) AddEntry(entry domain.LogEntry) {
 		}
 	}
 
-	// Only maintain in-memory buffer when no persistent store exists.
-	if l.store == nil {
-		l.mu.Lock()
-		l.logs = append(l.logs, entry)
-		if len(l.logs) > l.maxSize {
-			l.logs = l.logs[len(l.logs)-l.maxSize:]
-		}
-		logsCopy := make([]domain.LogEntry, len(l.logs))
-		copy(logsCopy, l.logs)
-		l.mu.Unlock()
-		l.broadcast(logsCopy)
+	// Always maintain in-memory buffer for SSE broadcast.
+	l.mu.Lock()
+	l.logs = append(l.logs, entry)
+	if len(l.logs) > l.maxSize {
+		l.logs = l.logs[len(l.logs)-l.maxSize:]
 	}
+	logsCopy := make([]domain.LogEntry, len(l.logs))
+	copy(logsCopy, l.logs)
+	l.mu.Unlock()
+
+	l.broadcast(logsCopy)
 }
 
 func (l *Logger) AddUsage(provider, requestID, connectionID, connectionName, model string, inputTokens, outputTokens int, source string) {
@@ -148,11 +147,10 @@ func (l *Logger) Clear() {
 			log.Printf("[LOG] Failed to clear persisted logs: %s", err)
 		}
 	}
-	if l.store == nil {
-		l.mu.Lock()
-		l.logs = l.logs[:0]
-		l.mu.Unlock()
-	}
+	l.mu.Lock()
+	l.logs = l.logs[:0]
+	l.mu.Unlock()
+	l.broadcast(nil)
 }
 
 func (l *Logger) broadcast(logsCopy []domain.LogEntry) {

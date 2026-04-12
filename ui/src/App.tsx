@@ -22,6 +22,7 @@ import {
   Moon,
   Sun,
   Menu,
+  Globe,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 
@@ -53,6 +54,7 @@ import LogsScreen from "@/components/screens/logs-screen";
 import SettingsScreen from "@/components/screens/settings-screen";
 import ApiKeysScreen from "@/components/screens/api-keys-screen";
 import BackupScreen from "@/components/screens/backup-screen";
+import TunnelScreen from "@/components/screens/tunnel-screen";
 import AddConnectionPage from "@/components/pages/add-connection-page";
 
 interface NavItem {
@@ -84,6 +86,7 @@ const navItems: NavItem[] = [
   },
   { path: "/combos", label: "Combos", icon: Layers, group: "Management" },
   { path: "/api-keys", label: "API Keys", icon: Key, group: "Security" },
+  { path: "/tunnel", label: "Tunnel", icon: Globe, group: "Network" },
   { path: "/logs", label: "Logs", icon: ScrollText, group: "Monitoring" },
   { path: "/settings", label: "Settings", icon: SettingsIcon, group: "System" },
   {
@@ -345,6 +348,7 @@ export default function App() {
             <Route path="/logs" element={<LogsScreen />} />
             <Route path="/settings" element={<SettingsScreen />} />
             <Route path="/api-keys" element={<ApiKeysScreen />} />
+            <Route path="/tunnel" element={<TunnelScreen />} />
             <Route path="/backup" element={<BackupScreen />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

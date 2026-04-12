@@ -279,4 +279,9 @@ export const goApi: any = {
 
   // Usage
   getUsage: (connectionId: string) => goRequest(`/usage/${connectionId}`),
+
+  // Tunnel
+  enableTunnel: () => goRequest('/tunnel/enable', { method: 'POST' }),
+  disableTunnel: () => goRequest('/tunnel/disable', { method: 'POST' }),
+  getTunnelStatus: () => goRequest('/tunnel/status'),
 }

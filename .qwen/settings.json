@@ -27,7 +27,9 @@
       "Bash(netstat *)",
       "Bash(\"c:\\laragon\\bin\\nodejs\\node-v22.20.0-win-x64\\npx.cmd\" *)",
       "Bash(del *)",
-      "Bash(rm *)"
+      "Bash(rm *)",
+      "Bash(.\\dntproxy.exe *)",
+      "Bash(echo *)"
     ]
   },
   "$version": 3

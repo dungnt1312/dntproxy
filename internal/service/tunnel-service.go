@@ -69,26 +69,14 @@ func (s *TunnelService) onURLDetected(url string) {
 	}
 
 	// Update settings
-	shortID := tunnelState.ShortID
-	publicURL := s.buildPublicURL(shortID)
-
 	s.store.Update(func(cfg *domain.AppConfig) {
 		cfg.Settings.TunnelEnabled = true
 		cfg.Settings.TunnelURL = url
 		cfg.Settings.TunnelProvider = "cloudflare"
-		cfg.Settings.TunnelShortID = shortID
 		cfg.Settings.TunnelRunning = true
-		_ = publicURL
 	})
 
-	log.Printf("[tunnel] Public URL: %s", publicURL)
-}
-
-func (s *TunnelService) buildPublicURL(shortID string) string {
-	if shortID == "" {
-		return ""
-	}
-	return fmt.Sprintf("https://r%s.9router.com", shortID)
+	log.Printf("[tunnel] Tunnel started: %s", url)
 }
 
 // Enable starts a cloudflared quick tunnel.
@@ -191,18 +179,13 @@ func (s *TunnelService) Status() port.TunnelStatus {
 	ts, _ := s.state.LoadState()
 	running := s.cloudflared.IsRunning()
 
-	publicURL := ""
-	if ts.ShortID != "" {
-		publicURL = s.buildPublicURL(ts.ShortID)
-	}
-
 	return port.TunnelStatus{
 		Enabled:   settings.TunnelEnabled,
 		Running:   running,
 		Provider:  settings.TunnelProvider,
 		TunnelURL: ts.TunnelURL,
 		ShortID:   ts.ShortID,
-		PublicURL: publicURL,
+		PublicURL: ts.TunnelURL, // trycloudflare.com is already public
 	}
 }
 

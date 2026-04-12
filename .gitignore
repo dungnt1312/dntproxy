@@ -26,3 +26,4 @@ temp
 
 # Local worktrees / nested clones
 .worktrees/
+logs/

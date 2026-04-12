@@ -120,4 +120,9 @@ export const api = {
   },
   importBackup: (data: unknown, mode: string) =>
     request('/backup/import', { method: 'POST', body: JSON.stringify({ ...data as object, mode }) }),
+
+  // Tunnel
+  enableTunnel: () => request('/tunnel/enable', { method: 'POST' }),
+  disableTunnel: () => request('/tunnel/disable', { method: 'POST' }),
+  getTunnelStatus: () => request('/tunnel/status'),
 };

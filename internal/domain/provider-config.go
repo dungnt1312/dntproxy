@@ -1,5 +1,14 @@
 package domain
 
+// RequestFormat describes the API request/response format for a provider.
+type RequestFormat string
+
+const (
+	FormatOpenAIChat   RequestFormat = "openai-chat"     // POST /v1/chat/completions, SSE stream
+	FormatAnthropicMsg RequestFormat = "anthropic-msg"   // POST /v1/messages, SSE + event types
+	FormatAWSKiro      RequestFormat = "aws-eventstream" // AWS EventStream binary
+)
+
 // ProviderConfig defines all static configuration for a provider.
 // This is the single source of truth for provider-specific defaults.
 type ProviderConfig struct {
@@ -10,6 +19,9 @@ type ProviderConfig struct {
 	DefaultBaseURL string
 	ChatPath       string
 	DefaultModels  []string
+	// Format specifies the API protocol. Defaults to OpenAI-compatible.
+	// Set to "anthropic-msg" for Anthropic, "aws-eventstream" for Kiro.
+	Format RequestFormat
 	// OAuth config (only set for providers that support OAuth)
 	OAuth *OAuthConfig
 }
@@ -37,6 +49,7 @@ var ProviderConfigs = map[string]ProviderConfig{
 		AuthMethods:    []string{"oauth"},
 		DefaultBaseURL: "https://codewhisperer.us-east-1.amazonaws.com",
 		ChatPath:       "", // Uses AWS EventStream, not HTTP
+		Format:         FormatAWSKiro,
 		DefaultModels: []string{
 			"claude-opus-4.6",
 			"claude-opus-4.5",
@@ -56,6 +69,7 @@ var ProviderConfigs = map[string]ProviderConfig{
 		AuthMethods:    []string{"apikey", "oauth"},
 		DefaultBaseURL: "https://api.openai.com",
 		ChatPath:       "/v1/chat/completions",
+		Format:         FormatOpenAIChat,
 		DefaultModels: []string{
 			"gpt-5.4",
 			"gpt-5.3",
@@ -78,6 +92,7 @@ var ProviderConfigs = map[string]ProviderConfig{
 		AuthMethods:    []string{"apikey"},
 		DefaultBaseURL: "https://api.openai.com",
 		ChatPath:       "/v1/chat/completions",
+		Format:         FormatOpenAIChat,
 		DefaultModels:  []string{},
 	},
 
@@ -88,6 +103,7 @@ var ProviderConfigs = map[string]ProviderConfig{
 		AuthMethods:    []string{"apikey"},
 		DefaultBaseURL: "https://api.z.ai",
 		ChatPath:       "/api/coding/paas/v4/chat/completions",
+		Format:         FormatOpenAIChat,
 		DefaultModels: []string{
 			"glm-5.1",
 			"glm-5-turbo",
@@ -106,6 +122,7 @@ var ProviderConfigs = map[string]ProviderConfig{
 		AuthMethods:    []string{"apikey"},
 		DefaultBaseURL: "https://api.minimax.io",
 		ChatPath:       "/text/chatcompletion_v2",
+		Format:         FormatOpenAIChat,
 		DefaultModels: []string{
 			"MiniMax-M2.7",
 			"MiniMax-M2.7-highspeed",
@@ -122,6 +139,7 @@ var ProviderConfigs = map[string]ProviderConfig{
 		AuthMethods:    []string{"apikey", "oauth"},
 		DefaultBaseURL: "https://portal.qwen.ai",
 		ChatPath:       "/v1/chat/completions",
+		Format:         FormatOpenAIChat,
 		DefaultModels: []string{
 			"qwen3-coder",
 			"qwen3-coder-plus",
@@ -135,6 +153,27 @@ var ProviderConfigs = map[string]ProviderConfig{
 			Scopes:        "openid profile email model.completion",
 		},
 	},
+
+	// --- Example: Anthropic (non-OpenAI-compatible) ---
+	// To add Anthropic:
+	// 1. Create internal/adapter/anthropic/ executor with OpenAI ↔ Anthropic translation
+	// 2. Register: providers.RegisterExecutor("anthropic", anthropic.NewExecutor())
+	// 3. Uncomment below
+	//
+	// "anthropic": {
+	// 	ID:             "anthropic",
+	// 	Name:           "Anthropic (Claude API)",
+	// 	Icon:           "ANT",
+	// 	AuthMethods:    []string{"apikey"},
+	// 	DefaultBaseURL: "https://api.anthropic.com",
+	// 	ChatPath:       "/v1/messages",
+	// 	Format:         FormatAnthropicMsg,
+	// 	DefaultModels: []string{
+	// 		"claude-sonnet-4-20250514",
+	// 		"claude-opus-4-20250514",
+	// 		"claude-haiku-4-20250514",
+	// 	},
+	// },
 }
 
 // GetProviderConfig returns the config for a provider ID.
@@ -151,6 +190,7 @@ func GetProviderConfig(providerID string) ProviderConfig {
 		AuthMethods:    []string{"apikey"},
 		DefaultBaseURL: "https://api.openai.com",
 		ChatPath:       "/v1/chat/completions",
+		Format:         FormatOpenAIChat,
 		DefaultModels:  []string{},
 	}
 }

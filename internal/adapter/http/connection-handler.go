@@ -1,9 +1,12 @@
 package http
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -287,13 +290,150 @@ func apiTestConnection(store port.CredentialStore) gin.HandlerFunc {
 			return
 		}
 
-		c.JSON(200, gin.H{
-			"status":    "ok",
-			"hasToken":  conn.AccessToken != "",
-			"expiresAt": conn.ExpiresAt,
-			"email":     email,
-		})
+		// For API key providers (GLM, MiniMax, Qwen API key, etc.), send a test request
+		if conn.APIKey != "" {
+			testResult := testProviderAPI(conn)
+			if testResult.OK {
+				c.JSON(200, gin.H{
+					"status":    "ok",
+					"hasApiKey": true,
+					"response":  testResult.Response,
+				})
+			} else {
+				// Update connection error state
+				conn.LastError = testResult.Error
+				conn.LastErrorAt = time.Now().UTC().Format(time.RFC3339)
+				conn.TestStatus = "error"
+				store.Save(cfg)
+				c.JSON(200, gin.H{
+					"status":  "error",
+					"message": testResult.Error,
+				})
+			}
+			return
+		}
+
+		// For OAuth providers with access token, send a test request
+		if conn.AccessToken != "" {
+			testResult := testProviderAPI(conn)
+			if testResult.OK {
+				c.JSON(200, gin.H{
+					"status":    "ok",
+					"hasToken":  true,
+					"expiresAt": conn.ExpiresAt,
+					"email":     email,
+					"response":  testResult.Response,
+				})
+			} else {
+				conn.LastError = testResult.Error
+				conn.LastErrorAt = time.Now().UTC().Format(time.RFC3339)
+				conn.TestStatus = "error"
+				store.Save(cfg)
+				c.JSON(200, gin.H{
+					"status":  "error",
+					"message": testResult.Error,
+				})
+			}
+			return
+		}
 	}
+}
+
+// testProviderResult holds the result of a provider API test.
+type testProviderResult struct {
+	OK       bool
+	Response string
+	Error    string
+}
+
+// testProviderAPI sends a minimal test request to the provider's API.
+func testProviderAPI(conn *domain.ProviderConnection) testProviderResult {
+	cfg := domain.GetProviderConfig(conn.Provider)
+
+	// Kiro uses AWS EventStream, not HTTP chat completions
+	if cfg.Format == domain.FormatAWSKiro {
+		// For Kiro, just check that we have a valid token
+		if conn.AccessToken == "" {
+			return testProviderResult{OK: false, Error: "No access token available"}
+		}
+		return testProviderResult{OK: true, Response: "Token present (full test requires actual API call)"}
+	}
+
+	baseURL := conn.BaseURL
+	if baseURL == "" {
+		baseURL = cfg.DefaultBaseURL
+	}
+	baseURL = domain.StripVersionSuffix(baseURL)
+	chatPath := cfg.ChatPath
+	if chatPath == "" {
+		chatPath = "/v1/chat/completions"
+	}
+	url := baseURL + chatPath
+
+	// Use first supported model for test, fallback to a generic one
+	testModel := "test"
+	if len(conn.SupportedModels) > 0 {
+		testModel = conn.SupportedModels[0]
+	} else if len(cfg.DefaultModels) > 0 {
+		testModel = cfg.DefaultModels[0]
+	}
+
+	body := map[string]interface{}{
+		"model":      testModel,
+		"messages":   []map[string]string{{"role": "user", "content": "Hi"}},
+		"max_tokens": 1,
+		"stream":     false,
+	}
+	bodyBytes, _ := json.Marshal(body)
+
+	req, err := http.NewRequest("POST", url, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return testProviderResult{OK: false, Error: fmt.Sprintf("create request: %s", err)}
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "text/event-stream")
+
+	if conn.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+conn.APIKey)
+	} else if conn.AccessToken != "" {
+		req.Header.Set("Authorization", "Bearer "+conn.AccessToken)
+	}
+
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return testProviderResult{OK: false, Error: fmt.Sprintf("request failed: %s", err)}
+	}
+	defer resp.Body.Close()
+
+	// 200 means auth + connectivity OK
+	if resp.StatusCode == 200 {
+		return testProviderResult{OK: true, Response: fmt.Sprintf("HTTP 200 OK")}
+	}
+
+	// 400 with "test" model often means auth OK but model name wrong = success
+	if resp.StatusCode == 400 {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		bodyStr := string(respBody)
+		// If error mentions "model" but not "auth" or "key", auth is likely OK
+		if strings.Contains(strings.ToLower(bodyStr), "model") &&
+			!strings.Contains(strings.ToLower(bodyStr), "api key") &&
+			!strings.Contains(strings.ToLower(bodyStr), "authentication") &&
+			!strings.Contains(strings.ToLower(bodyStr), "unauthorized") {
+			return testProviderResult{OK: true, Response: fmt.Sprintf("Auth OK (model test not found)")}
+		}
+		return testProviderResult{OK: false, Error: fmt.Sprintf("HTTP 400: %s", bodyStr)}
+	}
+
+	// 401/403 = auth failure
+	if resp.StatusCode == 401 || resp.StatusCode == 403 {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return testProviderResult{OK: false, Error: fmt.Sprintf("HTTP %d: %s", resp.StatusCode, string(respBody))}
+	}
+
+	// Other status codes
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+	return testProviderResult{OK: false, Error: fmt.Sprintf("HTTP %d: %s", resp.StatusCode, string(respBody))}
 }
 
 // === Update Connection ===
@@ -659,6 +799,13 @@ func apiTestModel(store port.CredentialStore, providers port.ProviderRegistry) g
 			return
 		}
 
+		// Strip provider prefix from model if present (e.g., "glm/glm-4.6" -> "glm-4.6")
+		modelName := req.Model
+		if strings.Contains(modelName, "/") {
+			parts := strings.SplitN(modelName, "/", 2)
+			modelName = parts[1]
+		}
+
 		refreshSvc := auth.NewTokenRefreshService(store)
 		if refreshSvc.NeedsRefresh(conn) {
 			refreshed, err := refreshSvc.Refresh(conn)
@@ -677,7 +824,7 @@ func apiTestModel(store port.CredentialStore, providers port.ProviderRegistry) g
 		var testBody map[string]interface{}
 		if conn.Provider == "openai" && conn.AuthType == "oauth" {
 			testBody = map[string]interface{}{
-				"model": req.Model,
+				"model": modelName,
 				"messages": []map[string]string{
 					{"role": "user", "content": "Hi"},
 				},
@@ -685,7 +832,7 @@ func apiTestModel(store port.CredentialStore, providers port.ProviderRegistry) g
 			}
 		} else {
 			testBody = map[string]interface{}{
-				"model": req.Model,
+				"model": modelName,
 				"messages": []map[string]string{
 					{"role": "user", "content": "Hi"},
 				},
@@ -711,7 +858,7 @@ func apiTestModel(store port.CredentialStore, providers port.ProviderRegistry) g
 			}
 		}
 
-		stream, statusCode, execErr := executor.Execute(req.Model, bodyBytes, creds, uuid.New().String())
+		stream, statusCode, execErr := executor.Execute(modelName, bodyBytes, creds, uuid.New().String())
 		if stream != nil {
 			stream.Close()
 		}
@@ -736,7 +883,7 @@ func apiTestModel(store port.CredentialStore, providers port.ProviderRegistry) g
 
 		c.JSON(200, gin.H{
 			"status": "ok",
-			"model":  req.Model,
+			"model":  modelName,
 		})
 	}
 }

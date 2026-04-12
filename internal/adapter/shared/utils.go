@@ -13,14 +13,16 @@ import (
 
 // StreamingHTTPClient is a shared HTTP client configured for streaming responses.
 // It reuses TCP connections across requests and has no client-level timeout
-// (which would kill long-running streams). Time-to-first-byte is controlled
-// by ResponseHeaderTimeout.
+// (which would kill long-running streams). Timeouts are:
+//   - ResponseHeaderTimeout: 30s (time to first byte)
+//   - IdleConnTimeout: 90s (keep-alive connection reuse)
+//   - No overall Timeout (streaming can take minutes)
 var StreamingHTTPClient = &http.Client{
 	Transport: &http.Transport{
 		MaxIdleConns:          100,
 		MaxIdleConnsPerHost:   10,
 		IdleConnTimeout:       90 * time.Second,
-		ResponseHeaderTimeout: 30 * time.Second,
+		ResponseHeaderTimeout: 30 * time.Second, // Time to first byte
 		ForceAttemptHTTP2:     true,
 	},
 	// No Timeout — streaming responses can take minutes.

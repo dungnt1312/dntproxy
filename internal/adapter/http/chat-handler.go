@@ -2,9 +2,12 @@ package http
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"os"
+	"strconv"
 	"time"
 
 	"github.com/dungnt/dntproxy/internal/domain"
@@ -15,6 +18,15 @@ import (
 )
 
 const maxChatBodySize = 10 * 1024 * 1024
+
+// streamReadTimeout is the maximum time to wait between stream reads.
+// Configurable via DNTPROXY_STREAM_TIMEOUT_MS env var (default: 5 minutes).
+var streamReadTimeout = func() time.Duration {
+	if ms, err := strconv.Atoi(os.Getenv("DNTPROXY_STREAM_TIMEOUT_MS")); err == nil && ms > 0 {
+		return time.Duration(ms) * time.Millisecond
+	}
+	return 5 * time.Minute
+}()
 
 func chatHandler(chatService port.ChatService, store port.CredentialStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -64,7 +76,7 @@ func chatHandler(chatService port.ChatService, store port.CredentialStore) gin.H
 
 			buf := make([]byte, 4096)
 			for {
-				n, readErr := result.Stream.Read(buf)
+				n, readErr := readWithTimeout(result.Stream, buf, streamReadTimeout)
 				if n > 0 {
 					if _, writeErr := c.Writer.Write(buf[:n]); writeErr != nil {
 						break
@@ -99,4 +111,26 @@ func statusLevel(status int) string {
 		return "ERROR"
 	}
 	return "INFO"
+}
+
+// readWithTimeout reads from a stream with a timeout.
+// If no data is received within the timeout, it returns an error.
+func readWithTimeout(r io.Reader, buf []byte, timeout time.Duration) (int, error) {
+	type readResult struct {
+		n   int
+		err error
+	}
+
+	ch := make(chan readResult, 1)
+	go func() {
+		n, err := r.Read(buf)
+		ch <- readResult{n, err}
+	}()
+
+	select {
+	case res := <-ch:
+		return res.n, res.err
+	case <-time.After(timeout):
+		return 0, fmt.Errorf("stream read timeout after %v", timeout)
+	}
 }

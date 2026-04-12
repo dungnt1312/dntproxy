@@ -150,7 +150,10 @@ func (s *ChatService) handleSingleModel(body []byte, modelStr string, requestID 
 		return &port.ChatResult{StatusCode: http.StatusBadRequest, Error: "Invalid JSON body"}
 	}
 	bodyMap["model"] = model
-	updatedBody, _ := json.Marshal(bodyMap)
+	updatedBody, err := json.Marshal(bodyMap)
+	if err != nil {
+		return &port.ChatResult{StatusCode: http.StatusInternalServerError, Error: "Failed to serialize request body"}
+	}
 
 	excludeIDs := make(map[string]bool)
 

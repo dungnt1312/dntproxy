@@ -14,6 +14,7 @@ import (
 	httpAdapter "github.com/dungnt/dntproxy/internal/adapter/http"
 	"github.com/dungnt/dntproxy/internal/adapter/kiro"
 	openaiAdapter "github.com/dungnt/dntproxy/internal/adapter/openai"
+	"github.com/dungnt/dntproxy/internal/adapter/anthropic"
 	"github.com/dungnt/dntproxy/internal/adapter/provider"
 	"github.com/dungnt/dntproxy/internal/adapter/storage"
 	"github.com/dungnt/dntproxy/internal/logger"
@@ -69,6 +70,9 @@ func main() {
 	// Backup commands
 	rootCmd.AddCommand(buildBackupCmd())
 
+	// Tunnel commands
+	rootCmd.AddCommand(buildTunnelCmd())
+
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
@@ -116,11 +120,32 @@ func runServe(cmd *cobra.Command, args []string) error {
 	providers.RegisterExecutor("glm", openaiAdapter.NewExecutor())
 	providers.RegisterExecutor("minimax", openaiAdapter.NewExecutor())
 	providers.RegisterExecutor("qwen", openaiAdapter.NewExecutor())
+	providers.RegisterExecutor("anthropic", anthropic.NewExecutor())
+	providers.RegisterExecutor("gemini", openaiAdapter.NewExecutor())
 
-	router := httpAdapter.NewRouter(store, providers)
+	// Create tunnel manager (optional - can be nil)
+	tunnelService, err := service.NewTunnelService(store)
+	if err != nil {
+		log.Printf("[dntproxy] Tunnel service init failed: %v", err)
+		tunnelService = nil
+	}
+
+	router := httpAdapter.NewRouter(store, providers, tunnelService)
 
 	scheduler := service.NewTokenRefreshScheduler(store)
 	go scheduler.Start()
+
+	// Auto-restart tunnel if it was enabled
+	if tunnelService != nil && cfg.Settings.TunnelEnabled {
+		go func() {
+			if !tunnelService.IsRunning() {
+				log.Printf("[tunnel] Auto-restarting tunnel...")
+				if err := tunnelService.Enable(port); err != nil {
+					log.Printf("[tunnel] Auto-restart failed: %v", err)
+				}
+			}
+		}()
+	}
 
 	addr := fmt.Sprintf(":%d", port)
 	log.Printf("[dntproxy] v%s starting on http://localhost%s", version, addr)
@@ -153,6 +178,11 @@ func runServe(cmd *cobra.Command, args []string) error {
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("[dntproxy] Graceful shutdown error: %s", err)
+	}
+
+	// Stop tunnel
+	if tunnelService != nil {
+		tunnelService.Stop()
 	}
 
 	scheduler.Stop()

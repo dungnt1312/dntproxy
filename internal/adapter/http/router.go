@@ -13,7 +13,7 @@ import (
 )
 
 // NewRouter creates and configures the Gin router.
-func NewRouter(store port.CredentialStore, providers port.ProviderRegistry) *gin.Engine {
+func NewRouter(store port.CredentialStore, providers port.ProviderRegistry, tunnelMgr port.TunnelManager) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.Use(gin.Recovery())
@@ -35,6 +35,16 @@ func NewRouter(store port.CredentialStore, providers port.ProviderRegistry) *gin
 
 	// Auth flow endpoints (Builder ID, IDC, Social Login, Fetch Models)
 	RegisterAuthRoutes(r, store)
+
+	// Tunnel endpoints
+	if tunnelMgr != nil {
+		settings, _ := store.GetSettings()
+		listenPort := settings.Port
+		if listenPort == 0 {
+			listenPort = 20128
+		}
+		RegisterTunnelRoutes(r, tunnelMgr, listenPort)
+	}
 
 	// Health check
 	r.GET("/health", func(c *gin.Context) {

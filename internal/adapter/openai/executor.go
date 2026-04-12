@@ -16,8 +16,6 @@ import (
 	"github.com/dungnt/dntproxy/internal/logger"
 )
 
-const defaultOpenAIBaseURL = "https://api.openai.com"
-
 // Executor handles making requests to OpenAI or OpenAI-compatible APIs.
 // Since these APIs are already OpenAI-compatible, we just proxy the request
 // with the appropriate auth header — no request/response translation needed.

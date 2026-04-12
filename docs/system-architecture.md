@@ -10,25 +10,56 @@ cmd/                     [User Edge] Entrypoint / CLI parsing
       ├── adapter/            [Infrastructure] External libraries, framework specific APIs (Gin, file IO)
       │    ├── http/          (Gin server / HTTP Listeners)
       │    ├── kiro/          (Kiro API Translator / AWS EventStream parser)
-      │    └── storage/       (On-disk persistence adapter)
+      │    ├── openai/        (OpenAI executor + Codex translator)
+      │    ├── auth/          (OAuth flows: Builder ID, IDC, Social, Import)
+      │    ├── tunnel/        (Cloudflared download, lifecycle, state)
+      │    ├── custom/        (NoOp adapters for providers without APIs)
+      │    ├── shared/        (HTTP client, body sanitization, utilities)
+      │    └── storage/       (On-disk JSON + SQLite persistence)
       │
       ├── port/               [Interfaces] Interfaces connecting Adapters and Services
       │
       ├── service/            [Use Cases] Coordination of entities to achieve outcomes
       │    ├── chat-service.go
-      │    └── model-resolver.go
+      │    ├── model-resolver.go
+      │    ├── account-selector.go
+      │    ├── combo-handler.go
+      │    ├── token-refresh-scheduler.go
+      │    └── tunnel-service.go
+      │
+      ├── logger/             [Telemetry] Structured logging (ring buffer + SQLite)
       │
       └── domain/             [Entities] Pure Data schemas and core rules
+           ├── provider-config.go   (Provider definitions + auth methods)
+           ├── model-definition.go  (Model registry with pricing)
+           └── ...
 ```
+
+## Supported Providers
+The system supports 7 providers with an extensible architecture:
+
+| Provider | ID | Auth | Protocol |
+|----------|-----|------|----------|
+| Kiro (AWS CodeWhisperer) | `kiro` | OAuth | aws-eventstream |
+| OpenAI | `openai` | API Key, OAuth | openai-chat |
+| OpenAI Compatible | `openai-compatible` | API Key | openai-chat |
+| GLM (Zhipu AI) | `glm` | API Key | openai-chat |
+| MiniMax | `minimax` | API Key | openai-chat |
+| Qwen (Alibaba) | `qwen` | API Key, OAuth | openai-chat |
+| Anthropic | `anthropic` | API Key | anthropic-msg (TODO) |
 
 ## Request Flow
 The core lifecycle of an incoming chat completion request:
 1. **Frontend Proxy**: Request hits the OpenAI-compatible HTTP router exposed by the Gin adapter inside `/v1/chat/completions`.
-2. **Model Resolver**: Identifies if the requested model is a single direct model (`kr/claude`), an `alias` (short-name mapping), or a `combo` (model rotation strategy).
-3. **Account Strategy**: `account-selector.go` locates valid Kiro accounts associated with the model. It references priority ranks and tests for existing active cooldowns.
-4. **Execution Translation**: Adapter layer morphs the OpenAI JSON into Kiro AWS structure.
-5. **Event Streaming**: `adapter/kiro` makes the upstream connection. AWS replies using a binary EventStream protocol. The adapter decodes this binary stream framing by framing.
-6. **Delivery**: Binary frames are parsed, mapped back into standard OpenAI SSE lines (`data: {...}`), and piped over the HTTP connection to the client via `Flush()`.
+2. **Model Resolver**: Identifies if the requested model is a direct provider model (`kr/claude`, `oai/gpt-4`, `glm/glm-5`), an `alias` (short-name mapping), or a `combo` (model rotation strategy).
+3. **Account Strategy**: `account-selector.go` locates valid provider accounts associated with the model. It references priority ranks and tests for existing active cooldowns.
+4. **Token Refresh**: If credentials need refresh, auto-refresh is triggered before request execution.
+5. **Execution Translation**: Adapter layer morphs the OpenAI JSON into provider-specific structure (EventStream for Kiro, standard Chat API for others).
+6. **Event Streaming**: 
+   - **Kiro**: AWS EventStream binary protocol, decoded frame-by-frame.
+   - **Other providers**: Standard SSE or streaming JSON.
+7. **Delivery**: Provider responses are parsed, mapped back into standard OpenAI SSE lines (`data: {...}`), and piped over the HTTP connection to the client via `Flush()`.
+8. **Logging**: Request metadata, usage tokens, and estimated cost are persisted to SQLite.
 
 ### Detailed Flow Diagram
 ```
@@ -144,6 +175,19 @@ The core lifecycle of an incoming chat completion request:
 │  │  5. TranslateResponse()                                                 │  │
 │  │     Kiro events → OpenAI chat.completion chunks                        │  │
 │  └─────────────────────────────────────────────────────────────────────────┘  │
+│                                                                              │
+│  ┌─────────────────────────────────────────────────────────────────────────┐  │
+│  │ OpenAIExecutor / GLM / MiniMax / Qwen (Standard Chat API)              │  │
+│  │                                                                          │  │
+│  │  1. TranslateRequest()                                                   │  │
+│  │     OpenAI JSON → Provider-specific format (if needed)                 │  │
+│  │                                                                          │  │
+│  │  2. DoRequest()                                                          │  │
+│  │     HTTP POST to provider endpoint with API key / OAuth token          │  │
+│  │                                                                          │  │
+│  │  3. ParseStream()                                                       │  │
+│  │     SSE / streaming JSON → OpenAI chat.completion chunks              │  │
+│  └─────────────────────────────────────────────────────────────────────────┘  │
 └──────────────────────────────────────────────────────────────────────────────┘
                                       │
                                       ▼
@@ -201,3 +245,60 @@ FALLBACK strategy:     ROUND-ROBIN strategy:
 
 ## Storage
 A serverless `db.json` document store is paired with `gofrs/flock` for guaranteed sequential application read/writes across multi-process access, providing database-level safety with zero infra requirements.
+
+## Cloudflare Tunnel
+The tunnel subsystem enables exposing the local proxy via a public URL:
+
+### Architecture
+```
+┌──────────────┐     ┌───────────────┐     ┌──────────────────┐
+│   Client     │────►│ Cloudflare    │────►│ cloudflared      │
+│   Request    │     │ Edge Network  │     │ (local process)  │
+└──────────────┘     └───────────────┘     └────────┬─────────┘
+                                                    │
+                                             ┌──────▼──────────┐
+                                             │ dntproxy        │
+                                             │ localhost:port  │
+                                             └─────────────────┘
+```
+
+### Key Components
+- **`adapter/tunnel/cloudflared.go`**: Downloads cloudflared v2026.3.0 from GitHub, manages process lifecycle
+- **`adapter/tunnel/state.go`**: Persistent state (`~/.dntproxy/tunnel/state.json`), PID tracking
+- **`service/tunnel-service.go`**: Business logic (enable/disable/status, auto-restart on boot)
+- **`adapter/http/tunnel-handler.go`**: REST API endpoints (`/api/tunnel/enable`, `/api/tunnel/disable`, `/api/tunnel/status`)
+- **CLI**: `dntproxy tunnel enable|disable|status`
+
+### Cross-Platform Support
+- Auto-downloads appropriate binary for Windows, macOS, Linux (amd64/arm64)
+- Extracts from `.tgz` archives on Unix, `.zip` on Windows
+- Process kill: `taskkill` on Windows, `os.FindProcess` on Unix
+
+## Logging System
+Structured request logging with persistence and live streaming:
+
+### Architecture
+```
+┌─────────────────┐     ┌───────────────┐     ┌─────────────────┐
+│   Request       │────►│ Logger        │────►│ Ring Buffer     │
+│   Metadata      │     │ (in-memory)   │     │ (1000 entries)  │
+└─────────────────┘     └───────┬───────┘     └────────┬────────┘
+                                │                      │
+                         ┌──────▼───────┐      ┌──────▼──────────┐
+                         │ SQLite DB    │      │ SSE Subscribers │
+                         │ (logs.db)    │      │ (live stream)   │
+                         └──────────────┘      └─────────────────┘
+```
+
+### Key Components
+- **`logger/logger.go`**: In-memory ring buffer, SSE subscriber broadcast
+- **`adapter/storage/sqlite-log-store.go`**: SQLite persistence, 30-day auto-retention
+- **`port/log-store.go`**: `LogStore` interface (List, Summary, ConnectionSummaries, Prices)
+
+### Features
+- **Usage Tracking**: Input/output/total tokens per request
+- **Cost Estimation**: Configurable model pricing profiles
+- **Connection Filtering**: Filter logs by provider connection
+- **Raw Body Logging**: Via `DNTPROXY_LOG_RAW_BODIES` env var (dev mode)
+- **Body Sanitization**: Redacts sensitive fields (API keys, tokens, auth headers)
+- **30-Day Retention**: Automatic cleanup of old logs

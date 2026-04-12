@@ -35,6 +35,8 @@ func RegisterAPIRoutes(r *gin.Engine, store port.CredentialStore, providers port
 		api.POST("/connections/add-glm", apiAddGLMConnection(store))
 		api.POST("/connections/add-minimax", apiAddMiniMaxConnection(store))
 		api.POST("/connections/add-qwen", apiAddQwenConnection(store))
+		api.POST("/connections/add-anthropic", apiAddConnection(store, "anthropic"))
+		api.POST("/connections/add-gemini", apiAddConnection(store, "gemini"))
 		api.POST("/connections/detect-kiro", apiDetectKiroToken(store))
 		api.DELETE("/connections/:id", apiDeleteConnection(store))
 		api.POST("/connections/:id/test", apiTestConnection(store))

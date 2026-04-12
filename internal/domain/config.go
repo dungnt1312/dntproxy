@@ -17,6 +17,12 @@ type Settings struct {
 	ComboStrategies       map[string]string `json:"comboStrategies,omitempty"`
 	RequireAPIKey         bool              `json:"requireApiKey"`
 	Port                  int               `json:"port,omitempty"`
+	// Tunnel settings
+	TunnelEnabled  bool   `json:"tunnelEnabled,omitempty"`
+	TunnelURL      string `json:"tunnelUrl,omitempty"`
+	TunnelProvider string `json:"tunnelProvider,omitempty"` // "cloudflare"
+	TunnelShortID  string `json:"tunnelShortId,omitempty"`
+	TunnelRunning  bool   `json:"tunnelRunning,omitempty"`
 }
 
 // APIKey represents a generated API key.

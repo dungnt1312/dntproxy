@@ -72,6 +72,8 @@ var ProviderConfigs = map[string]ProviderConfig{
 		Format:         FormatOpenAIChat,
 		DefaultModels: []string{
 			"gpt-5.4",
+			"gpt-5.4-mini",
+			"gpt-5.4-nano",
 			"gpt-5.3",
 			"gpt-5.3-codex",
 			"gpt-5.1-mini",
@@ -154,26 +156,36 @@ var ProviderConfigs = map[string]ProviderConfig{
 		},
 	},
 
-	// --- Example: Anthropic (non-OpenAI-compatible) ---
-	// To add Anthropic:
-	// 1. Create internal/adapter/anthropic/ executor with OpenAI ↔ Anthropic translation
-	// 2. Register: providers.RegisterExecutor("anthropic", anthropic.NewExecutor())
-	// 3. Uncomment below
-	//
-	// "anthropic": {
-	// 	ID:             "anthropic",
-	// 	Name:           "Anthropic (Claude API)",
-	// 	Icon:           "ANT",
-	// 	AuthMethods:    []string{"apikey"},
-	// 	DefaultBaseURL: "https://api.anthropic.com",
-	// 	ChatPath:       "/v1/messages",
-	// 	Format:         FormatAnthropicMsg,
-	// 	DefaultModels: []string{
-	// 		"claude-sonnet-4-20250514",
-	// 		"claude-opus-4-20250514",
-	// 		"claude-haiku-4-20250514",
-	// 	},
-	// },
+	// Anthropic (Claude API)
+	"anthropic": {
+		ID:             "anthropic",
+		Name:           "Anthropic (Claude API)",
+		Icon:           "ANT",
+		AuthMethods:    []string{"apikey"},
+		DefaultBaseURL: "https://api.anthropic.com",
+		ChatPath:       "/v1/messages",
+		Format:         FormatAnthropicMsg,
+		DefaultModels: []string{
+			"claude-sonnet-4-20250514",
+			"claude-opus-4-20250514",
+			"claude-haiku-4-20250514",
+		},
+	},
+
+	"gemini": {
+		ID:             "gemini",
+		Name:           "Google Gemini",
+		Icon:           "gem",
+		AuthMethods:    []string{"apikey"},
+		DefaultBaseURL: "https://generativelanguage.googleapis.com",
+		ChatPath:       "/v1beta/openai/chat/completions",
+		Format:         FormatOpenAIChat,
+		DefaultModels: []string{
+			"gemini-2.5-flash",
+			"gemini-2.5-pro",
+			"gemini-2.0-flash",
+		},
+	},
 }
 
 // GetProviderConfig returns the config for a provider ID.

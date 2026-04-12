@@ -326,36 +326,24 @@ func (r *ModelRegistry) GetModel(key string) *ModelDefinition {
 	return r.Models[key]
 }
 
-// DefaultKiroModels returns the default model IDs for Kiro connections.
+// Deprecated: Use GetProviderConfig("kiro").DefaultModels instead.
 func DefaultKiroModels() []string {
-	return defaultModelsByProvider("kiro")
+	return GetProviderConfig("kiro").DefaultModels
 }
 
-// DefaultGLMModels returns the default model IDs for GLM connections.
+// Deprecated: Use GetProviderConfig("glm").DefaultModels instead.
 func DefaultGLMModels() []string {
-	return defaultModelsByProvider("glm")
+	return GetProviderConfig("glm").DefaultModels
 }
 
-// DefaultMiniMaxModels returns the default model IDs for MiniMax connections.
+// Deprecated: Use GetProviderConfig("minimax").DefaultModels instead.
 func DefaultMiniMaxModels() []string {
-	return defaultModelsByProvider("minimax")
+	return GetProviderConfig("minimax").DefaultModels
 }
 
-// DefaultQwenModels returns the default model IDs for Qwen connections.
+// Deprecated: Use GetProviderConfig("qwen").DefaultModels instead.
 func DefaultQwenModels() []string {
-	return defaultModelsByProvider("qwen")
-}
-
-// defaultModelsByProvider extracts active model IDs for a given provider.
-func defaultModelsByProvider(provider string) []string {
-	registry := DefaultModelRegistry()
-	var models []string
-	for _, m := range registry.Models {
-		if m.Provider == provider && m.IsActive {
-			models = append(models, m.ID)
-		}
-	}
-	return models
+	return GetProviderConfig("qwen").DefaultModels
 }
 
 // GetModelsByProvider returns all models for a given provider.

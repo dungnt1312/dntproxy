@@ -264,7 +264,7 @@ func authPoll(store port.CredentialStore) gin.HandlerFunc {
 			ExpiresIn:       expiresIn,
 			Email:           email,
 			TestStatus:      "active",
-			SupportedModels: domain.DefaultKiroModels(),
+			SupportedModels: domain.GetProviderConfig("kiro").DefaultModels,
 			ProviderSpecificData: map[string]interface{}{
 				"authMethod":   session.AuthMethod,
 				"provider":     providerLabel,
@@ -417,7 +417,7 @@ func authExchangeSocial(store port.CredentialStore) gin.HandlerFunc {
 			ExpiresIn:       expiresIn,
 			Email:           email,
 			TestStatus:      "active",
-			SupportedModels: domain.DefaultKiroModels(),
+			SupportedModels: domain.GetProviderConfig("kiro").DefaultModels,
 			ProviderSpecificData: map[string]interface{}{
 				"profileArn": tokens.ProfileArn,
 				"authMethod": session.Provider,
@@ -970,7 +970,7 @@ func authQwenPoll(store port.CredentialStore) gin.HandlerFunc {
 			ExpiresIn:       expiresIn,
 			Email:           email,
 			TestStatus:      "active",
-			SupportedModels: domain.DefaultQwenModels(),
+			SupportedModels: domain.GetProviderConfig("qwen").DefaultModels,
 			ProviderSpecificData: map[string]interface{}{
 				"authMethod": "qwen-oauth",
 				"provider":   "Qwen (Alibaba)",

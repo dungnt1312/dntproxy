@@ -163,7 +163,7 @@ func apiImportConnection(store port.CredentialStore) gin.HandlerFunc {
 			ExpiresIn:       expiresIn,
 			Email:           email,
 			TestStatus:      "active",
-			SupportedModels: domain.DefaultKiroModels(),
+			SupportedModels: domain.GetProviderConfig("kiro").DefaultModels,
 			ProviderSpecificData: map[string]interface{}{
 				"profileArn": result.ProfileArn,
 				"authMethod": result.AuthMethod,

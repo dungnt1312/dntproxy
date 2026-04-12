@@ -1,0 +1,190 @@
+package domain
+
+// ProviderConfig defines all static configuration for a provider.
+// This is the single source of truth for provider-specific defaults.
+type ProviderConfig struct {
+	ID             string
+	Name           string
+	Icon           string
+	AuthMethods    []string
+	DefaultBaseURL string
+	ChatPath       string
+	DefaultModels  []string
+	// OAuth config (only set for providers that support OAuth)
+	OAuth *OAuthConfig
+}
+
+// OAuthConfig holds OAuth/OIDC endpoints and client info for a provider.
+type OAuthConfig struct {
+	ClientID     string
+	AuthorizeURL string
+	TokenURL     string
+	Scopes       string
+	CallbackPort int
+	// Device code flow (set for providers using device authorization grant)
+	DeviceCodeURL string
+	// Social login variants
+	SocialAuthorizeURL func(provider, codeChallenge, state string) string
+}
+
+// Registry of all known providers.
+// To add a new provider: add one entry here, register executor in main.go.
+var ProviderConfigs = map[string]ProviderConfig{
+	"kiro": {
+		ID:             "kiro",
+		Name:           "Kiro (AWS CodeWhisperer)",
+		Icon:           "kr",
+		AuthMethods:    []string{"oauth"},
+		DefaultBaseURL: "https://codewhisperer.us-east-1.amazonaws.com",
+		ChatPath:       "", // Uses AWS EventStream, not HTTP
+		DefaultModels: []string{
+			"claude-opus-4.6",
+			"claude-opus-4.5",
+			"claude-sonnet-4.5",
+			"claude-haiku-4.5",
+			"deepseek-3.2",
+			"deepseek-3.1",
+			"qwen3-coder-next",
+		},
+		// Kiro OAuth is handled via AWS Cognito — no static OAuthConfig here
+	},
+
+	"openai": {
+		ID:             "openai",
+		Name:           "OpenAI",
+		Icon:           "oai",
+		AuthMethods:    []string{"apikey", "oauth"},
+		DefaultBaseURL: "https://api.openai.com",
+		ChatPath:       "/v1/chat/completions",
+		DefaultModels: []string{
+			"gpt-5.4",
+			"gpt-5.3",
+			"gpt-5.3-codex",
+			"gpt-5.1-mini",
+		},
+		OAuth: &OAuthConfig{
+			ClientID:     "app_EMoamEEZ73f0CkXaXp7hrann",
+			AuthorizeURL: "https://auth.openai.com/oauth/authorize",
+			TokenURL:     "https://auth.openai.com/oauth/token",
+			Scopes:       "openid profile email offline_access",
+			CallbackPort: 1455,
+		},
+	},
+
+	"openai-compatible": {
+		ID:             "openai-compatible",
+		Name:           "OpenAI Compatible",
+		Icon:           "api",
+		AuthMethods:    []string{"apikey"},
+		DefaultBaseURL: "https://api.openai.com",
+		ChatPath:       "/v1/chat/completions",
+		DefaultModels:  []string{},
+	},
+
+	"glm": {
+		ID:             "glm",
+		Name:           "GLM (Zhipu AI)",
+		Icon:           "glm",
+		AuthMethods:    []string{"apikey"},
+		DefaultBaseURL: "https://api.z.ai",
+		ChatPath:       "/api/coding/paas/v4/chat/completions",
+		DefaultModels: []string{
+			"glm-5.1",
+			"glm-5-turbo",
+			"glm-5V-turbo",
+			"glm-5",
+			"glm-4.7",
+			"glm-4.7-flash",
+			"glm-4.6",
+		},
+	},
+
+	"minimax": {
+		ID:             "minimax",
+		Name:           "MiniMax",
+		Icon:           "mm",
+		AuthMethods:    []string{"apikey"},
+		DefaultBaseURL: "https://api.minimax.io",
+		ChatPath:       "/text/chatcompletion_v2",
+		DefaultModels: []string{
+			"MiniMax-M2.7",
+			"MiniMax-M2.7-highspeed",
+			"MiniMax-M2.5",
+			"MiniMax-M2.1",
+			"MiniMax-M2",
+		},
+	},
+
+	"qwen": {
+		ID:             "qwen",
+		Name:           "Qwen (Alibaba)",
+		Icon:           "qw",
+		AuthMethods:    []string{"apikey", "oauth"},
+		DefaultBaseURL: "https://portal.qwen.ai",
+		ChatPath:       "/v1/chat/completions",
+		DefaultModels: []string{
+			"qwen3-coder",
+			"qwen3-coder-plus",
+			"qwen-plus",
+			"qwen-turbo",
+		},
+		OAuth: &OAuthConfig{
+			ClientID:      "f0304373b74a44d2b584a3fb70ca9e56",
+			DeviceCodeURL: "https://chat.qwen.ai/api/v1/oauth2/device/code",
+			TokenURL:      "https://chat.qwen.ai/api/v1/oauth2/token",
+			Scopes:        "openid profile email model.completion",
+		},
+	},
+}
+
+// GetProviderConfig returns the config for a provider ID.
+// Falls back to openai-compatible if not found.
+func GetProviderConfig(providerID string) ProviderConfig {
+	if cfg, ok := ProviderConfigs[providerID]; ok {
+		return cfg
+	}
+	// Fallback: treat as OpenAI-compatible
+	return ProviderConfig{
+		ID:             providerID,
+		Name:           providerID,
+		Icon:           "api",
+		AuthMethods:    []string{"apikey"},
+		DefaultBaseURL: "https://api.openai.com",
+		ChatPath:       "/v1/chat/completions",
+		DefaultModels:  []string{},
+	}
+}
+
+// HasProvider checks if a provider is registered.
+func HasProvider(providerID string) bool {
+	_, ok := ProviderConfigs[providerID]
+	return ok
+}
+
+// ListProviders returns all registered provider IDs sorted by name.
+func ListProviders() []string {
+	result := make([]string, 0, len(ProviderConfigs))
+	for id := range ProviderConfigs {
+		result = append(result, id)
+	}
+	// Simple sort by name
+	for i := 0; i < len(result); i++ {
+		for j := i + 1; j < len(result); j++ {
+			if ProviderConfigs[result[j]].Name < ProviderConfigs[result[i]].Name {
+				result[i], result[j] = result[j], result[i]
+			}
+		}
+	}
+	return result
+}
+
+// StripVersionSuffix removes trailing /v1, /v2, /v3, /v4 from a base URL.
+// This prevents double version paths when the chat path already includes version.
+func StripVersionSuffix(baseURL string) string {
+	for _, suffix := range []string{"/v1", "/v2", "/v3", "/v4"} {
+		if len(baseURL) >= len(suffix) && baseURL[len(baseURL)-len(suffix):] == suffix {
+			return baseURL[:len(baseURL)-len(suffix)]
+		}
+	}
+	return baseURL
+}

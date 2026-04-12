@@ -16,57 +16,7 @@ import (
 	"github.com/dungnt/dntproxy/internal/logger"
 )
 
-const (
-	defaultOpenAIBaseURL  = "https://api.openai.com"
-	defaultGLMBaseURL     = "https://api.z.ai/api/coding/paas/v4"
-	defaultMiniMaxBaseURL = "https://api.minimax.io"
-	defaultQwenBaseURL    = "https://portal.qwen.ai"
-)
-
-// resolveBaseURL returns the appropriate base URL for a provider.
-// Uses credentials.BaseURL if set, otherwise falls back to provider default.
-// If the base URL ends with /v1 (or similar version), we strip it since
-// resolveChatPath will add the correct path.
-func resolveBaseURL(credentials *domain.Credentials) string {
-	baseURL := credentials.BaseURL
-	if baseURL == "" {
-		switch credentials.Provider {
-		case "glm":
-			baseURL = defaultGLMBaseURL
-		case "minimax":
-			baseURL = defaultMiniMaxBaseURL
-		case "qwen":
-			baseURL = defaultQwenBaseURL
-		default:
-			baseURL = defaultOpenAIBaseURL
-		}
-	}
-	// If user-set base URL already ends with /v1, /v2, /v4 etc, strip it
-	// because resolveChatPath will add the correct path.
-	for _, suffix := range []string{"/v1", "/v2", "/v3", "/v4"} {
-		if strings.HasSuffix(baseURL, suffix) {
-			baseURL = strings.TrimSuffix(baseURL, suffix)
-			break
-		}
-	}
-	return baseURL
-}
-
-// resolveChatPath returns the correct API path for chat completions.
-// Different providers use different endpoint paths:
-//   - OpenAI/Qwen: /v1/chat/completions (standard OpenAI-compatible)
-//   - GLM: /chat/completions (base URL already includes /v4)
-//   - MiniMax: /v1/text/chatcompletion_v2 (their own path)
-func resolveChatPath(credentials *domain.Credentials) string {
-	switch credentials.Provider {
-	case "glm":
-		return "/chat/completions"
-	case "minimax":
-		return "/text/chatcompletion_v2"
-	default:
-		return "/v1/chat/completions"
-	}
-}
+const defaultOpenAIBaseURL = "https://api.openai.com"
 
 // Executor handles making requests to OpenAI or OpenAI-compatible APIs.
 // Since these APIs are already OpenAI-compatible, we just proxy the request
@@ -76,6 +26,31 @@ type Executor struct{}
 // NewExecutor creates a new OpenAI executor.
 func NewExecutor() *Executor {
 	return &Executor{}
+}
+
+// resolveBaseURL returns the appropriate base URL for a provider.
+// Uses credentials.BaseURL if set, otherwise falls back to provider config.
+// Strips version suffix to avoid double version in the final URL.
+func resolveBaseURL(credentials *domain.Credentials) string {
+	if credentials.BaseURL != "" {
+		return domain.StripVersionSuffix(credentials.BaseURL)
+	}
+
+	cfg := domain.GetProviderConfig(credentials.Provider)
+	return domain.StripVersionSuffix(cfg.DefaultBaseURL)
+}
+
+// resolveChatPath returns the correct API path for chat completions.
+// Delegates to the provider config registry.
+func resolveChatPath(credentials *domain.Credentials) string {
+	cfg := domain.GetProviderConfig(credentials.Provider)
+	return cfg.ChatPath
+}
+
+// providerLogTag returns the log tag for a provider.
+func providerLogTag(credentials *domain.Credentials) string {
+	cfg := domain.GetProviderConfig(credentials.Provider)
+	return cfg.Icon
 }
 
 // isCodexOAuth returns true if this credential is an OpenAI OAuth token
@@ -130,13 +105,15 @@ func (e *Executor) executeStandard(model string, body []byte, credentials *domai
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
 
-	log.Printf("[OPENAI] --> %s | conn=%s | model=%s | body_size=%d", url, credentials.ConnectionName, model, len(body))
+	logTag := strings.ToUpper(providerLogTag(credentials))
+
+	log.Printf("[%s] --> %s | conn=%s | model=%s | body_size=%d", logTag, url, credentials.ConnectionName, model, len(body))
 	if apiKey != "" {
-		log.Printf("[OPENAI]     Authorization: Bearer %s", shared.MaskedToken(apiKey))
+		log.Printf("[%s]     Authorization: Bearer %s", logTag, shared.MaskedToken(apiKey))
 	}
 	appLogger := logger.Get()
 	appLogger.AddEntry(domain.LogEntry{
-		Provider:       "OPENAI",
+		Provider:       logTag,
 		Direction:      "outbound",
 		Method:         "POST",
 		Path:           url,
@@ -161,12 +138,12 @@ func (e *Executor) executeStandard(model string, body []byte, credentials *domai
 	duration := time.Since(start)
 
 	if err != nil {
-		errMsg := fmt.Sprintf("openai request failed: %s", err)
-		log.Printf("[OPENAI] <-- %s | conn=%s | model=%s | status=502 | duration=%s | error=%s",
-			url, credentials.ConnectionName, model, duration, err)
+		errMsg := fmt.Sprintf("%s request failed: %s", logTag, err)
+		log.Printf("[%s] <-- %s | conn=%s | model=%s | status=502 | duration=%s | error=%s",
+			logTag, url, credentials.ConnectionName, model, duration, err)
 		appLogger.AddEntry(domain.LogEntry{
 			Level:          "ERROR",
-			Provider:       "OPENAI",
+			Provider:       logTag,
 			Direction:      "response",
 			Path:           url,
 			StatusCode:     502,
@@ -178,7 +155,7 @@ func (e *Executor) executeStandard(model string, body []byte, credentials *domai
 			Message:        "OpenAI-compatible request failed",
 			Error:          errMsg,
 		})
-		return nil, 502, fmt.Errorf("openai request failed: %w", err)
+		return nil, 502, fmt.Errorf("%s request failed: %w", strings.ToLower(logTag), err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -189,13 +166,13 @@ func (e *Executor) executeStandard(model string, body []byte, credentials *domai
 		if err == nil {
 			respBodyStr = string(bodyBytes)
 		}
-		log.Printf("[OPENAI] <-- %s | conn=%s | model=%s | status=%d | duration=%s | error body_size=%d",
-			url, credentials.ConnectionName, model, resp.StatusCode, duration, len(bodyBytes))
-		log.Printf("[OPENAI] ERROR body: %s", respBodyStr)
+		log.Printf("[%s] <-- %s | conn=%s | model=%s | status=%d | duration=%s | error body_size=%d",
+			logTag, url, credentials.ConnectionName, model, resp.StatusCode, duration, len(bodyBytes))
+		log.Printf("[%s] ERROR body: %s", logTag, respBodyStr)
 
 		appLogger.AddEntry(domain.LogEntry{
 			Level:          "ERROR",
-			Provider:       "OPENAI",
+			Provider:       logTag,
 			Direction:      "response",
 			Path:           url,
 			StatusCode:     resp.StatusCode,
@@ -214,15 +191,15 @@ func (e *Executor) executeStandard(model string, body []byte, credentials *domai
 				return shared.SanitizeBody(bodyBytes)
 			}(), 8192),
 		})
-		return nil, resp.StatusCode, fmt.Errorf("openai returned %d: %s", resp.StatusCode, respBodyStr)
+		return nil, resp.StatusCode, fmt.Errorf("%s returned %d: %s", strings.ToLower(logTag), resp.StatusCode, respBodyStr)
 	}
 
-	log.Printf("[OPENAI] <-- %s | conn=%s | model=%s | status=%d | duration=%s | stream_started=true",
-		url, credentials.ConnectionName, model, resp.StatusCode, duration)
+	log.Printf("[%s] <-- %s | conn=%s | model=%s | status=%d | duration=%s | stream_started=true",
+		logTag, url, credentials.ConnectionName, model, resp.StatusCode, duration)
 
 	appLogger.AddEntry(domain.LogEntry{
 		Level:          "INFO",
-		Provider:       "OPENAI",
+		Provider:       logTag,
 		Direction:      "response",
 		Path:           url,
 		StatusCode:     resp.StatusCode,
@@ -239,7 +216,7 @@ func (e *Executor) executeStandard(model string, body []byte, credentials *domai
 		ReadCloser: resp.Body,
 		onClose: func(bodyBytes []byte) {
 			if usage := extractUsage(bodyBytes); usage != nil {
-				appLogger.AddUsage("OPENAI", requestID, credentials.ConnectionID, credentials.ConnectionName,
+				appLogger.AddUsage(logTag, requestID, credentials.ConnectionID, credentials.ConnectionName,
 					model, usage.PromptTokens, usage.CompletionTokens, "sse_usage")
 			}
 			if preview, truncated := extractResponsePreview(bodyBytes); preview != "" {
@@ -249,7 +226,7 @@ func (e *Executor) executeStandard(model string, body []byte, credentials *domai
 					"source":          "sse",
 				})
 				appLogger.AddEntry(domain.LogEntry{
-					Provider:       "OPENAI",
+					Provider:       logTag,
 					Direction:      "payload",
 					ConnectionID:   credentials.ConnectionID,
 					ConnectionName: credentials.ConnectionName,

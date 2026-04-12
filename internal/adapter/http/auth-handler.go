@@ -469,7 +469,15 @@ func apiFetchConnectionModels(store port.CredentialStore) gin.HandlerFunc {
 		}
 
 		if conn.Provider != "openai" && conn.Provider != "openai-compatible" {
-			c.JSON(400, gin.H{"error": "Model fetching is only supported for OpenAI and OpenAI-compatible providers"})
+			// Fallback: return default models from provider config
+			cfg := domain.GetProviderConfig(conn.Provider)
+			c.JSON(200, gin.H{
+				"provider": conn.Provider,
+				"name":     conn.Name,
+				"models":   cfg.DefaultModels,
+				"source":   "provider-config",
+				"note":     fmt.Sprintf("Live fetching not supported for %s, returning defaults", cfg.Name),
+			})
 			return
 		}
 
@@ -834,7 +842,7 @@ type qwenSession struct {
 	DeviceCode   string
 	CodeVerifier string
 	Interval     int
-	CreatedAt  time.Time
+	CreatedAt    time.Time
 }
 
 func cleanupQwenSessions() {
@@ -868,7 +876,7 @@ func authQwenStart() gin.HandlerFunc {
 			DeviceCode:   deviceAuth.DeviceCode,
 			CodeVerifier: codeVerifier,
 			Interval:     deviceAuth.Interval,
-			CreatedAt:  time.Now(),
+			CreatedAt:    time.Now(),
 		}
 		qwenSessionsMu.Unlock()
 

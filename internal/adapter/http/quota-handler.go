@@ -58,7 +58,20 @@ func apiCheckQuota(store port.CredentialStore) gin.HandlerFunc {
 		}
 
 		// For OpenAI API Key / OpenAI-compatible: call /v1/models and read rate-limit headers
-		handleOpenAIAPIKeyQuota(c, conn, store, result)
+		if conn.Provider == "openai" || conn.Provider == "openai-compatible" {
+			handleOpenAIAPIKeyQuota(c, conn, store, result)
+			return
+		}
+
+		// For providers without quota check support (GLM, MiniMax, Qwen, etc.)
+		providerCfg := domain.GetProviderConfig(conn.Provider)
+		c.JSON(200, gin.H{
+			"provider": conn.Provider,
+			"name":     conn.Name,
+			"hasData":  false,
+			"message":  fmt.Sprintf("Quota check not supported for %s", providerCfg.Name),
+			"buckets":  []interface{}{},
+		})
 	}
 }
 

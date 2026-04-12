@@ -73,8 +73,6 @@ func (s *AccountSelector) SelectCredentials(provider string, excludeIDs map[stri
 		return nil, fmt.Errorf("get connections: %w", err)
 	}
 
-	log.Printf("[ACCT-SEL] SelectCredentials: provider=%s, model=%s, found=%d connections", provider, model, len(connections))
-
 	if len(connections) == 0 {
 		return nil, &AccountSelectionError{
 			Kind:     SelectionErrNoActiveCredentials,
@@ -89,12 +87,8 @@ func (s *AccountSelector) SelectCredentials(provider string, excludeIDs map[stri
 	nonExcludedCount := 0
 
 	for _, conn := range connections {
-		log.Printf("[ACCT-SEL] Checking connection: id=%s, name=%s, provider=%s, isActive=%v, supportedModels=%v, rateLimitedUntil=%s, modelLocks=%v",
-			conn.ID, conn.Name, conn.Provider, conn.IsActive, conn.SupportedModels, conn.RateLimitedUntil, conn.ModelLocks)
-
 		// Skip excluded connections
 		if excludeIDs != nil && excludeIDs[conn.ID] {
-			log.Printf("[ACCT-SEL]   -> excluded")
 			continue
 		}
 		nonExcludedCount++
@@ -105,29 +99,35 @@ func (s *AccountSelector) SelectCredentials(provider string, excludeIDs map[stri
 		// Their stored supportedModels list contains ChatGPT slugs (e.g. "gpt-4o", "o4-mini")
 		// that don't match standard API IDs, so skipping this check here is correct.
 		isOpenAIOAuth := conn.Provider == "openai" && conn.AuthType == "oauth"
-		supportsModel := conn.SupportsModel(model)
-		log.Printf("[ACCT-SEL]   -> isOpenAIOAuth=%v, supportsModel=%v", isOpenAIOAuth, supportsModel)
-		if !isOpenAIOAuth && !supportsModel {
-			log.Printf("[ACCT-SEL]   -> SKIP: does not support model")
+		if !isOpenAIOAuth && !conn.SupportsModel(model) {
 			continue
 		}
 		supportedCount++
 
 		// Skip rate-limited connections
 		if domain.IsAccountUnavailable(conn.RateLimitedUntil) {
-			log.Printf("[ACCT-SEL]   -> SKIP: rate limited until %s", conn.RateLimitedUntil)
 			rateLimitedSupportedCount++
 			continue
 		}
 
 		// Skip model-locked connections
 		if domain.IsModelLockActive(conn.ModelLocks, model) {
-			log.Printf("[ACCT-SEL]   -> SKIP: model locked")
 			lockedSupportedCount++
 			continue
 		}
 
-		log.Printf("[ACCT-SEL]   -> SELECTED")
+		// Auto-refresh token if expiring soon
+		if s.tokenRefresh.NeedsRefresh(&conn) {
+			log.Printf("[AUTH] Token expiring soon for %s, refreshing...", conn.Name)
+			refreshed, err := s.tokenRefresh.CheckAndRefresh(&conn)
+			if err != nil {
+				log.Printf("[AUTH] Token refresh failed for %s: %s", conn.Name, err)
+				// Still try with current token
+			} else {
+				conn = *refreshed
+			}
+		}
+
 		return shared.ConnectionToCredentials(&conn), nil
 	}
 

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/dungnt/dntproxy/internal/domain"
 	"github.com/dungnt/dntproxy/internal/port"
 	"github.com/gin-gonic/gin"
 )
@@ -23,6 +24,7 @@ func RegisterAPIRoutes(r *gin.Engine, store port.CredentialStore, providers port
 	api.Use(apiKeyMiddleware(store))
 	{
 		// Debug endpoint
+		api.GET("/debug/providers", apiDebugProviders(store))
 		api.GET("/debug/accounts/:provider", apiDebugAccounts(store))
 
 		// Connections
@@ -94,6 +96,29 @@ func RegisterAPIRoutes(r *gin.Engine, store port.CredentialStore, providers port
 func apiGetUsage(store port.CredentialStore) gin.HandlerFunc {
 	handler := NewUsageHandler(store)
 	return handler.GetUsage
+}
+
+// apiDebugProviders dumps all registered provider configs and active connections.
+func apiDebugProviders(store port.CredentialStore) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		providers := domain.ListProviders()
+		result := make([]gin.H, 0, len(providers))
+		for _, id := range providers {
+			cfg := domain.GetProviderConfig(id)
+			conns, _ := store.GetActiveConnections(id)
+			result = append(result, gin.H{
+				"id":             cfg.ID,
+				"name":           cfg.Name,
+				"icon":           cfg.Icon,
+				"authMethods":    cfg.AuthMethods,
+				"defaultBaseURL": cfg.DefaultBaseURL,
+				"chatPath":       cfg.ChatPath,
+				"defaultModels":  len(cfg.DefaultModels),
+				"activeConns":    len(conns),
+			})
+		}
+		c.JSON(200, gin.H{"providers": result})
+	}
 }
 
 // apiDebugAccounts dumps raw account selection state for debugging.

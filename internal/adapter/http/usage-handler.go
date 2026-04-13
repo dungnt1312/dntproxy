@@ -2,6 +2,7 @@ package http
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -20,14 +21,14 @@ import (
 
 // QuotaBucket is one named quota slot (e.g. "session", "requests", "free trial").
 type QuotaBucket struct {
-	Key       string  `json:"key"`
-	Label     string  `json:"label"`
-	Used      int     `json:"used"`
-	Total     int     `json:"total"`
-	Remaining int     `json:"remaining"`
-	Pct       int     `json:"pct"` // 0-100, percent USED
-	ResetAt   string  `json:"resetAt,omitempty"`
-	Unlimited bool    `json:"unlimited"`
+	Key       string `json:"key"`
+	Label     string `json:"label"`
+	Used      int    `json:"used"`
+	Total     int    `json:"total"`
+	Remaining int    `json:"remaining"`
+	Pct       int    `json:"pct"` // 0-100, percent USED
+	ResetAt   string `json:"resetAt,omitempty"`
+	Unlimited bool   `json:"unlimited"`
 }
 
 // UsageResponse is the single, canonical response shape for GET /api/usage/:id.
@@ -92,11 +93,12 @@ func (h *UsageHandler) GetUsage(c *gin.Context) {
 		return
 	}
 
-	// Non-OAuth connections have no usage API.
-	if conn.AuthType != "oauth" {
+	// Non-OAuth connections without API key have no usage API.
+	// API key connections (MiniMax, GLM, etc.) can still have quota endpoints.
+	if conn.AuthType != "oauth" && conn.APIKey == "" {
 		c.JSON(http.StatusOK, UsageResponse{
 			Provider: conn.Provider,
-			Message:  "Usage not available for API key connections",
+			Message:  "Usage not available for this connection",
 			Quotas:   []QuotaBucket{},
 		})
 		return
@@ -139,6 +141,8 @@ func (h *UsageHandler) fetchUsage(conn *domain.ProviderConnection) (*UsageRespon
 		return fetchOpenAIUsage(conn)
 	case "kiro":
 		return fetchKiroUsage(conn)
+	case "minimax":
+		return fetchMiniMaxUsage(conn)
 	default:
 		return &UsageResponse{
 			Provider: conn.Provider,
@@ -306,6 +310,164 @@ func parseKiroUsageBody(body []byte, resp *UsageResponse) {
 			resp.addBucket("tokens", "Tokens", int(used), int(total), resetAt, false)
 		}
 	}
+}
+
+// ─── MiniMax ────────────────────────────────────────────────────────────────
+
+// fetchMiniMaxUsage calls MiniMax's coding_plan/remains API.
+// Uses GET method with browser-like headers to bypass Cloudflare.
+func fetchMiniMaxUsage(conn *domain.ProviderConnection) (*UsageResponse, error) {
+	apiKey := conn.APIKey
+	if apiKey == "" {
+		return &UsageResponse{
+			Provider: "minimax",
+			Message:  "No API key configured",
+			Quotas:   []QuotaBucket{},
+		}, nil
+	}
+
+	// Use GET method with browser-like headers (matches test.go)
+	quotaURL := "https://api.minimax.io/v1/api/openplatform/coding_plan/remains"
+
+	req, err := http.NewRequest("GET", quotaURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("minimax quota request: %w", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("Accept", "*/*")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+	req.Header.Set("Accept-Encoding", "identity")
+	req.Header.Set("Connection", "keep-alive")
+	req.Header.Set("Sec-Fetch-Dest", "empty")
+	req.Header.Set("Sec-Fetch-Mode", "cors")
+	req.Header.Set("Sec-Fetch-Site", "none")
+
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("[MiniMax Quota] Request error: %v", err)
+		return &UsageResponse{
+			Provider: "minimax",
+			Message:  "Quota API unavailable. Chat may still work.",
+			Quotas:   []QuotaBucket{},
+		}, nil
+	}
+	defer resp.Body.Close()
+
+	// Handle gzip encoding
+	var bodyReader io.Reader = resp.Body
+	if resp.Header.Get("Content-Encoding") == "gzip" {
+		gr, err := gzip.NewReader(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("minimax gzip parse: %w", err)
+		}
+		defer gr.Close()
+		bodyReader = gr
+	}
+
+	bodyBytes, _ := io.ReadAll(bodyReader)
+
+	result := &UsageResponse{
+		Provider: "minimax",
+		Quotas:   []QuotaBucket{},
+	}
+
+	// Check if response is HTML (Cloudflare block)
+	if len(bodyBytes) > 0 && bodyBytes[0] == '<' {
+		log.Printf("[MiniMax Quota] Received HTML response (Cloudflare block)")
+		result.Message = "Quota API blocked by Cloudflare. Chat may still work."
+		return result, nil
+	}
+
+	// Parse response
+	var data map[string]interface{}
+	if err := json.Unmarshal(bodyBytes, &data); err != nil {
+		log.Printf("[MiniMax Quota] JSON parse error: %v", err)
+		return result, nil
+	}
+
+	// Check for error code
+	if code, ok := data["code"].(float64); ok && code != 0 {
+		msg, _ := data["msg"].(string)
+		result.Message = fmt.Sprintf("API error (code %d): %s", int(code), msg)
+		return result, nil
+	}
+
+	// Parse model_remains array (per-model quotas)
+	modelRemains, ok := data["model_remains"].([]interface{})
+	if !ok {
+		result.Message = "No model_remains found in response"
+		return result, nil
+	}
+
+	// Extract quota per model
+	for _, item := range modelRemains {
+		mObj, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		modelName, _ := mObj["model_name"].(string)
+		if modelName == "" {
+			continue
+		}
+
+		// Interval quota
+		// current_interval_usage_count = remaining count, not used count
+		intervalTotal, _ := mObj["current_interval_total_count"].(float64)
+		intervalRemaining, _ := mObj["current_interval_usage_count"].(float64)
+		intervalUsed := intervalTotal - intervalRemaining
+
+		// Weekly quota
+		weeklyTotal, _ := mObj["current_weekly_total_count"].(float64)
+		weeklyRemaining, _ := mObj["current_weekly_usage_count"].(float64)
+		weeklyUsed := weeklyTotal - weeklyRemaining
+
+		// Only show MiniMax-M* model
+		if modelName == "MiniMax-M*" {
+			if intervalTotal > 0 {
+				intervalResetAt := ""
+				if endTime, ok := mObj["end_time"].(float64); ok && endTime > 0 {
+					intervalResetAt = time.UnixMilli(int64(endTime)).UTC().Format(time.RFC3339)
+				}
+				result.addBucket(
+					"minimax-m*-interval",
+					"MiniMax-M* (Interval)",
+					int(intervalUsed),
+					int(intervalTotal),
+					intervalResetAt,
+					false,
+				)
+			}
+			if weeklyTotal > 0 {
+				weeklyResetAt := ""
+				if weeklyEnd, ok := mObj["weekly_end_time"].(float64); ok && weeklyEnd > 0 {
+					weeklyResetAt = time.UnixMilli(int64(weeklyEnd)).UTC().Format(time.RFC3339)
+				}
+				result.addBucket(
+					"minimax-m*-weekly",
+					"MiniMax-M* (Weekly)",
+					int(weeklyUsed),
+					int(weeklyTotal),
+					weeklyResetAt,
+					false,
+				)
+			}
+		}
+	}
+
+	// Fallback message
+	if len(result.Quotas) == 0 {
+		if totalRemains, ok := data["total_remains"].(float64); ok {
+			result.Message = fmt.Sprintf("Total remains: %.0f", totalRemains)
+		} else {
+			result.Message = "No quota data found"
+		}
+	}
+
+	return result, nil
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────

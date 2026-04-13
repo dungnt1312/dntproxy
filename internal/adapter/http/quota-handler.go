@@ -2,6 +2,7 @@ package http
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -63,7 +64,13 @@ func apiCheckQuota(store port.CredentialStore) gin.HandlerFunc {
 			return
 		}
 
-		// For providers without quota check support (GLM, MiniMax, Qwen, etc.)
+		// For MiniMax: call /v1/api/openplatform/coding_plan/remains
+		if conn.Provider == "minimax" {
+			handleMiniMaxQuota(c, conn, result)
+			return
+		}
+
+		// For providers without quota check support (GLM, Qwen, etc.)
 		providerCfg := domain.GetProviderConfig(conn.Provider)
 		c.JSON(200, gin.H{
 			"provider": conn.Provider,
@@ -403,6 +410,183 @@ func handleOpenAIAPIKeyQuota(c *gin.Context, conn *domain.ProviderConnection, st
 		result["note"] = "No rate-limit headers returned by upstream"
 	}
 
+	c.JSON(200, result)
+}
+
+// === MiniMax Quota Check ===
+
+// miniMaxQuotaResponse represents the response from MiniMax coding_plan/remains API.
+type miniMaxQuotaResponse struct {
+	Code         int    `json:"code"`
+	Msg          string `json:"msg"`
+	Data         any    `json:"data"`
+	BaseResp     any    `json:"base_resp"`
+	TotalRemains int    `json:"total_remains"`
+	Used         int    `json:"used"`
+	Limit        int    `json:"limit"`
+	Remains      int    `json:"remains"`
+	ResetTime    int64  `json:"reset_time"`
+	PlanType     string `json:"plan_type"`
+}
+
+func handleMiniMaxQuota(c *gin.Context, conn *domain.ProviderConnection, result gin.H) {
+	apiKey := conn.APIKey
+	if apiKey == "" {
+		c.JSON(400, gin.H{"error": "No API key configured for MiniMax"})
+		return
+	}
+
+	// Use GET method with browser-like headers (matches test.go)
+	quotaURL := "https://api.minimax.io/v1/api/openplatform/coding_plan/remains"
+
+	req, err := http.NewRequest("GET", quotaURL, nil)
+	if err != nil {
+		c.JSON(500, gin.H{"error": "Failed to create request: " + err.Error()})
+		return
+	}
+
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("Accept", "*/*")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+	req.Header.Set("Accept-Encoding", "identity")
+	req.Header.Set("Connection", "keep-alive")
+	req.Header.Set("Sec-Fetch-Dest", "empty")
+	req.Header.Set("Sec-Fetch-Mode", "cors")
+	req.Header.Set("Sec-Fetch-Site", "none")
+
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		result["quotaSupported"] = false
+		result["message"] = "Quota API unavailable. Chat may still work."
+		result["buckets"] = []interface{}{}
+		c.JSON(200, result)
+		return
+	}
+	defer resp.Body.Close()
+
+	// Handle gzip
+	var bodyReader io.Reader = resp.Body
+	if resp.Header.Get("Content-Encoding") == "gzip" {
+		gr, gzipErr := gzip.NewReader(resp.Body)
+		if gzipErr == nil {
+			defer gr.Close()
+			bodyReader = gr
+		}
+	}
+
+	bodyBytes, _ := io.ReadAll(bodyReader)
+
+	// Check if response is HTML (Cloudflare block)
+	if len(bodyBytes) > 0 && bodyBytes[0] == '<' {
+		result["quotaSupported"] = false
+		result["message"] = "Quota API blocked by Cloudflare. Chat may still work."
+		result["buckets"] = []interface{}{}
+		c.JSON(200, result)
+		return
+	}
+
+	// Parse response
+	var data map[string]interface{}
+	if err := json.Unmarshal(bodyBytes, &data); err != nil {
+		result["quotaSupported"] = false
+		result["message"] = "Unable to parse quota response"
+		c.JSON(200, result)
+		return
+	}
+
+	// Check for error code
+	if code, ok := data["code"].(float64); ok && code != 0 {
+		msg, _ := data["msg"].(string)
+		result["quotaSupported"] = false
+		result["message"] = fmt.Sprintf("API error: %s", msg)
+		c.JSON(200, result)
+		return
+	}
+
+	// Parse model_remains array
+	modelRemains, ok := data["model_remains"].([]interface{})
+	if !ok {
+		result["quotaSupported"] = false
+		result["message"] = "No model_remains in response"
+		c.JSON(200, result)
+		return
+	}
+
+	// Build buckets
+	buckets := []map[string]interface{}{}
+	for _, item := range modelRemains {
+		mObj, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		modelName, _ := mObj["model_name"].(string)
+		if modelName == "" {
+			continue
+		}
+
+		// Interval
+		// current_interval_usage_count = remaining count, not used count
+		intervalTotal, _ := mObj["current_interval_total_count"].(float64)
+		intervalRemaining, _ := mObj["current_interval_usage_count"].(float64)
+		intervalUsed := intervalTotal - intervalRemaining
+
+		// Weekly
+		weeklyTotal, _ := mObj["current_weekly_total_count"].(float64)
+		weeklyRemaining, _ := mObj["current_weekly_usage_count"].(float64)
+		weeklyUsed := weeklyTotal - weeklyRemaining
+
+		// Only show MiniMax-M* model
+		if modelName == "MiniMax-M*" {
+			if intervalTotal > 0 {
+				resetAt := ""
+				if endTime, ok := mObj["end_time"].(float64); ok && endTime > 0 {
+					resetAt = time.UnixMilli(int64(endTime)).UTC().Format(time.RFC3339)
+				}
+				pctUsed := 0
+				if intervalTotal > 0 {
+					pctUsed = int(intervalUsed * 100 / intervalTotal)
+					if pctUsed > 100 {
+						pctUsed = 100
+					}
+				}
+				buckets = append(buckets, map[string]interface{}{
+					"name":      "MiniMax-M* (Interval)",
+					"used":      int(intervalUsed),
+					"limit":     int(intervalTotal),
+					"remaining": int(intervalRemaining),
+					"pctUsed":   pctUsed,
+					"resetsAt":  resetAt,
+				})
+			}
+			if weeklyTotal > 0 {
+				resetAt := ""
+				if weeklyEnd, ok := mObj["weekly_end_time"].(float64); ok && weeklyEnd > 0 {
+					resetAt = time.UnixMilli(int64(weeklyEnd)).UTC().Format(time.RFC3339)
+				}
+				pctUsed := 0
+				if weeklyTotal > 0 {
+					pctUsed = int(weeklyUsed * 100 / weeklyTotal)
+					if pctUsed > 100 {
+						pctUsed = 100
+					}
+				}
+				buckets = append(buckets, map[string]interface{}{
+					"name":      "MiniMax-M* (Weekly)",
+					"used":      int(weeklyUsed),
+					"limit":     int(weeklyTotal),
+					"remaining": int(weeklyRemaining),
+					"pctUsed":   pctUsed,
+					"resetsAt":  resetAt,
+				})
+			}
+		}
+	}
+
+	result["quotaSupported"] = true
+	result["buckets"] = buckets
 	c.JSON(200, result)
 }
 

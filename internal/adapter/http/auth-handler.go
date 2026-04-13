@@ -576,7 +576,7 @@ func apiFetchConnectionModels(store port.CredentialStore) gin.HandlerFunc {
 }
 
 // === OpenAI OAuth (PKCE, Authorization Code Flow) ===
-// Mirrors the Codex CLI / 9router CODEX_CONFIG implementation.
+// Mirrors the Codex CLI CODEX_CONFIG implementation.
 // client_id: app_EMoamEEZ73f0CkXaXp7hrann
 // auth URL:  https://auth.openai.com/oauth/authorize
 // token URL: https://auth.openai.com/oauth/token

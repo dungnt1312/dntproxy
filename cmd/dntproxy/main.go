@@ -11,10 +11,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/dungnt/dntproxy/internal/adapter/anthropic"
 	httpAdapter "github.com/dungnt/dntproxy/internal/adapter/http"
 	"github.com/dungnt/dntproxy/internal/adapter/kiro"
 	openaiAdapter "github.com/dungnt/dntproxy/internal/adapter/openai"
-	"github.com/dungnt/dntproxy/internal/adapter/anthropic"
 	"github.com/dungnt/dntproxy/internal/adapter/provider"
 	"github.com/dungnt/dntproxy/internal/adapter/storage"
 	"github.com/dungnt/dntproxy/internal/logger"
@@ -29,13 +29,13 @@ var dbFlag string
 func main() {
 	rootCmd := &cobra.Command{
 		Use:   "dntproxy",
-		Short: "AI proxy router with Kiro provider support",
-		Long:  "dntproxy - Go port of 9Router. Routes OpenAI-compatible requests to Kiro (AWS CodeWhisperer) with multi-account fallback.",
+		Short: "AI proxy router with multi-provider support",
+		Long:  "dntproxy - OpenAI-compatible proxy router. Routes requests to Kiro, OpenAI, GLM, MiniMax, Qwen, Anthropic with multi-account fallback.",
 		RunE:  runServe,
 	}
 
 	rootCmd.PersistentFlags().StringVar(&dbFlag, "db", "", "Path to database file (default: ~/.dntproxy/db.json)")
-	rootCmd.Flags().IntP("port", "p", 0, "Port to listen on (default: from config or 20128)")
+	rootCmd.Flags().IntP("port", "p", 0, "Port to listen on (default: from config or 20199)")
 
 	// Serve
 	serveCmd := &cobra.Command{
@@ -100,7 +100,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	port := 20128
+	port := 20199
 	if cfg.Settings.Port > 0 {
 		port = cfg.Settings.Port
 	}

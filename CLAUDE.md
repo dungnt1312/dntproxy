@@ -38,7 +38,7 @@ internal/service/              → Business logic orchestration
 
 ```bash
 go build -o dntproxy ./cmd/dntproxy/
-./dntproxy                     # Start on default port 20128
+./dntproxy                     # Start on default port 20199
 ./dntproxy --port 8080         # Custom port
 ./dntproxy serve --db /path/to/db.json
 ```
@@ -101,7 +101,7 @@ OpenAI request → model resolve → combo expand → account select →
   "settings": {
     "comboStrategy": "fallback",
     "requireApiKey": false,
-    "port": 20128
+    "port": 20199
   }
 }
 ```

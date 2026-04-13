@@ -6,7 +6,7 @@ import (
 )
 
 // ValidateAndImportToken validates a refresh token and returns credentials.
-// Mirrors 9router's validateImportToken logic exactly:
+// Flow:
 // 1. If clientId+clientSecret provided → SSO OIDC directly (throw on fail)
 // 2. No clientId/clientSecret → register new client → try SSO OIDC
 // 3. If SSO fails → silently fallback to social auth endpoint (works for IDC tokens too)
@@ -53,10 +53,10 @@ func ValidateAndImportToken(refreshToken string, clientID, clientSecret, region,
 			result.Region = region
 			return result, nil
 		}
-		// SSO failed — silently fall through to social auth (mirrors 9router behavior)
+		// SSO failed — silently fall through to social auth
 	}
 
-	// Social auth fallback — works for IDC tokens too per 9router
+	// Social auth fallback — works for IDC tokens too
 	result, err := RefreshTokenSocial(refreshToken)
 	if err != nil {
 		return nil, fmt.Errorf("token validation failed: %w", err)

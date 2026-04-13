@@ -1,7 +1,7 @@
 package openai
 
 // codexDefaultInstructions is the default system instructions injected for Codex models
-// when no instructions are provided. Matches 9router's CODEX_DEFAULT_INSTRUCTIONS.
+// when no instructions are provided.
 const codexDefaultInstructions = `You are Codex, based on GPT-5. You are running as a coding agent in the Codex CLI on a user's computer.
 
 ## General

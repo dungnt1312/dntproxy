@@ -275,6 +275,10 @@ func apiTestConnection(store port.CredentialStore) gin.HandlerFunc {
 				}
 			}
 			if probeResult.valid {
+				conn.TestStatus = "active"
+				conn.LastError = ""
+				conn.LastErrorAt = ""
+				store.Save(cfg)
 				c.JSON(200, gin.H{
 					"status":    "ok",
 					"hasToken":  true,
@@ -294,6 +298,10 @@ func apiTestConnection(store port.CredentialStore) gin.HandlerFunc {
 		if conn.APIKey != "" {
 			testResult := testProviderAPI(conn)
 			if testResult.OK {
+				conn.TestStatus = "active"
+				conn.LastError = ""
+				conn.LastErrorAt = ""
+				store.Save(cfg)
 				c.JSON(200, gin.H{
 					"status":    "ok",
 					"hasApiKey": true,
@@ -317,6 +325,10 @@ func apiTestConnection(store port.CredentialStore) gin.HandlerFunc {
 		if conn.AccessToken != "" {
 			testResult := testProviderAPI(conn)
 			if testResult.OK {
+				conn.TestStatus = "active"
+				conn.LastError = ""
+				conn.LastErrorAt = ""
+				store.Save(cfg)
 				c.JSON(200, gin.H{
 					"status":    "ok",
 					"hasToken":  true,
@@ -447,6 +459,8 @@ func apiUpdateConnection(store port.CredentialStore) gin.HandlerFunc {
 			Priority        *int     `json:"priority,omitempty"`
 			SupportedModels []string `json:"supportedModels,omitempty"`
 			SetModels       bool     `json:"setModels,omitempty"`
+			APIKey          *string  `json:"apiKey,omitempty"`
+			BaseURL         *string  `json:"baseUrl,omitempty"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(400, gin.H{"error": "Invalid request"})
@@ -470,6 +484,12 @@ func apiUpdateConnection(store port.CredentialStore) gin.HandlerFunc {
 					}
 					if req.SetModels {
 						conn.SupportedModels = req.SupportedModels
+					}
+					if req.APIKey != nil {
+						conn.APIKey = *req.APIKey
+					}
+					if req.BaseURL != nil {
+						conn.BaseURL = *req.BaseURL
 					}
 					conn.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 					break

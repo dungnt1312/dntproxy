@@ -123,7 +123,7 @@ var ProviderConfigs = map[string]ProviderConfig{
 		Icon:           "mm",
 		AuthMethods:    []string{"apikey"},
 		DefaultBaseURL: "https://api.minimax.io",
-		ChatPath:       "/text/chatcompletion_v2",
+		ChatPath:       "/v1/chat/completions",
 		Format:         FormatOpenAIChat,
 		DefaultModels: []string{
 			"MiniMax-M2.7",

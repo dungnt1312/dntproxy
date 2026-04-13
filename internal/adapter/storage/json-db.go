@@ -6,7 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"sync"
+	"time"
 
 	"github.com/dungnt/dntproxy/internal/domain"
 	"github.com/gofrs/flock"
@@ -18,6 +20,12 @@ type JsonDB struct {
 	mu       sync.Mutex
 	fileLock *flock.Flock
 	cache    *domain.AppConfig
+
+	// Config cache to reduce disk I/O (TTL-based, invalidated on Save)
+	configCacheMu   sync.RWMutex
+	cachedConfig    *domain.AppConfig
+	cachedConfigAt  time.Time
+	configCacheTTL  time.Duration
 }
 
 // NewJsonDB creates a new JsonDB, ensuring the directory and file exist.
@@ -43,6 +51,7 @@ func NewJsonDB(path string) (*JsonDB, error) {
 	return &JsonDB{
 		filePath: path,
 		fileLock: flock.New(path + ".lock"),
+		configCacheTTL: 2 * time.Second,
 	}, nil
 }
 
@@ -62,17 +71,34 @@ func defaultDBPath() string {
 	return filepath.Join(home, ".dntproxy", "db.json")
 }
 
-// Load reads the config from disk.
+// Load reads the config from disk (with TTL-based cache).
 func (db *JsonDB) Load() (*domain.AppConfig, error) {
-	db.mu.Lock()
-	defer db.mu.Unlock()
-
-	if err := db.fileLock.Lock(); err != nil {
-		return nil, fmt.Errorf("acquire file lock: %w", err)
+	// Fast path: return from cache if valid
+	db.configCacheMu.RLock()
+	if db.cachedConfig != nil && time.Since(db.cachedConfigAt) < db.configCacheTTL {
+		cfg := db.cachedConfig
+		db.configCacheMu.RUnlock()
+		return cfg, nil
 	}
-	defer db.fileLock.Unlock()
+	db.configCacheMu.RUnlock()
 
-	return db.readFromDisk()
+	// Slow path: acquire file lock and read from disk
+	db.configCacheMu.Lock()
+	defer db.configCacheMu.Unlock()
+
+	// Double-check after acquiring write lock
+	if db.cachedConfig != nil && time.Since(db.cachedConfigAt) < db.configCacheTTL {
+		return db.cachedConfig, nil
+	}
+
+	cfg, err := db.readFromDisk()
+	if err != nil {
+		return nil, err
+	}
+
+	db.cachedConfig = cfg
+	db.cachedConfigAt = time.Now()
+	return cfg, nil
 }
 
 func (db *JsonDB) readFromDisk() (*domain.AppConfig, error) {
@@ -90,7 +116,7 @@ func (db *JsonDB) readFromDisk() (*domain.AppConfig, error) {
 	return &cfg, nil
 }
 
-// Save writes the config to disk atomically.
+// Save writes the config to disk atomically (invalidates cache).
 func (db *JsonDB) Save(cfg *domain.AppConfig) error {
 	db.mu.Lock()
 	defer db.mu.Unlock()
@@ -100,7 +126,17 @@ func (db *JsonDB) Save(cfg *domain.AppConfig) error {
 	}
 	defer db.fileLock.Unlock()
 
-	return db.writeToDisk(cfg)
+	if err := db.writeToDisk(cfg); err != nil {
+		return err
+	}
+
+	// Update cache with new config
+	db.configCacheMu.Lock()
+	db.cachedConfig = cfg
+	db.cachedConfigAt = time.Now()
+	db.configCacheMu.Unlock()
+
+	return nil
 }
 
 func (db *JsonDB) writeToDisk(cfg *domain.AppConfig) error {
@@ -136,13 +172,9 @@ func (db *JsonDB) GetActiveConnections(provider string) ([]domain.ProviderConnec
 	}
 
 	// Sort by priority (lower = higher priority)
-	for i := 0; i < len(result); i++ {
-		for j := i + 1; j < len(result); j++ {
-			if result[j].Priority < result[i].Priority {
-				result[i], result[j] = result[j], result[i]
-			}
-		}
-	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[j].Priority > result[i].Priority
+	})
 
 	return result, nil
 }
@@ -179,7 +211,17 @@ func (db *JsonDB) Update(fn func(cfg *domain.AppConfig)) error {
 
 	fn(cfg)
 
-	return db.writeToDisk(cfg)
+	if err := db.writeToDisk(cfg); err != nil {
+		return err
+	}
+
+	// Update cache with new config
+	db.configCacheMu.Lock()
+	db.cachedConfig = cfg
+	db.cachedConfigAt = time.Now()
+	db.configCacheMu.Unlock()
+
+	return nil
 }
 
 // UpdateConnection persists changes to a connection (atomic).

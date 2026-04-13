@@ -5,7 +5,7 @@ import {
 } from 'lucide-react'
 import { api } from '../../api'
 import type { ImportMode, DeviceCodeState, SocialLoginState } from './helpers'
-import { AwsLogo, OpenAILogo, GLMLogo, MiniMaxLogo, QwenLogo, CustomLogo } from './helpers'
+import { ProviderLogoIcon } from './helpers'
 import {
   Dialog,
   DialogContent,
@@ -244,12 +244,12 @@ export default function AddConnectionModal({ onSuccess, onClose }: AddConnection
   ) : null
 
   const providerTabs = [
-    { id: 'kiro', name: 'AWS / Kiro', icon: <AwsLogo size={14} /> },
-    { id: 'openai', name: 'OpenAI', icon: <OpenAILogo size={14} /> },
-    { id: 'qwen', name: 'Qwen', icon: <QwenLogo size={14} /> },
-    { id: 'glm', name: 'GLM', icon: <GLMLogo size={14} /> },
-    { id: 'minimax', name: 'MiniMax', icon: <MiniMaxLogo size={14} /> },
-    { id: 'openai-compatible', name: 'Custom', icon: <CustomLogo size={14} /> },
+    { id: 'kiro', name: 'AWS / Kiro', icon: <ProviderLogoIcon provider="kiro" size={14} /> },
+    { id: 'openai', name: 'OpenAI', icon: <ProviderLogoIcon provider="openai" size={14} /> },
+    { id: 'qwen', name: 'Qwen', icon: <ProviderLogoIcon provider="qwen" size={14} /> },
+    { id: 'glm', name: 'GLM', icon: <ProviderLogoIcon provider="glm" size={14} /> },
+    { id: 'minimax', name: 'MiniMax', icon: <ProviderLogoIcon provider="minimax" size={14} /> },
+    { id: 'openai-compatible', name: 'Custom', icon: <ProviderLogoIcon provider="openai-compatible" size={14} /> },
   ]
 
   const kiroModes = [

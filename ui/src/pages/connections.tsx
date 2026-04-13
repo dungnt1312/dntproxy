@@ -108,7 +108,7 @@ export default function Connections() {
                     id: p,
                     label: meta.label,
                     items: groups[p],
-                    icon: <ProviderLogoIcon provider={p} size={16} />,
+                    icon: <ProviderLogoIcon provider={p} size={24} className="rounded" />,
                     color: meta.color,
                 });
             }
@@ -122,7 +122,7 @@ export default function Connections() {
                     id: k,
                     label,
                     items: groups[k],
-                    icon: <ProviderLogoIcon provider={k} size={16} />,
+                    icon: <ProviderLogoIcon provider={k} size={24} className="rounded" />,
                     color: '#6b7280',
                 });
             }
@@ -355,13 +355,7 @@ export default function Connections() {
                                         className="flex items-center gap-2 cursor-pointer select-none group/col flex-1"
                                         onClick={() => toggleGroup(group.id)}
                                     >
-                                        <div
-                                            className="w-7 h-7 rounded-lg flex items-center justify-center transition-transform group-hover/col:scale-105"
-                                            style={{
-                                                backgroundColor: `${group.color}15`,
-                                                border: `1px solid ${group.color}25`,
-                                            }}
-                                        >
+                                        <div className="shrink-0 rounded flex items-center justify-center transition-transform group-hover/col:scale-105 shadow-sm overflow-hidden bg-background">
                                             {group.icon}
                                         </div>
                                         <h3

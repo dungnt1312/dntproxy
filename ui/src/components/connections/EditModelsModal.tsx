@@ -70,13 +70,13 @@ export default function EditModelsModal({ conn, onSave, onClose }: EditModelsMod
     <Dialog open onOpenChange={open => { if (!open) onClose() }}>
       <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col">
         <DialogHeader>
-          <div className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-md bg-purple-500/10">
-              <Settings2 className="h-4 w-4 text-purple-500" />
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 border border-primary/20">
+              <Settings2 className="h-5 w-5 text-primary" />
             </div>
             <div>
-              <DialogTitle>Edit Models — {conn.name}</DialogTitle>
-              <DialogDescription>Select which models this connection can serve. Leave empty to allow all.</DialogDescription>
+              <DialogTitle className="text-lg">Edit Models — {conn.name}</DialogTitle>
+              <DialogDescription className="text-xs mt-1">Select which models this connection can serve. Leave empty to allow all.</DialogDescription>
             </div>
           </div>
         </DialogHeader>

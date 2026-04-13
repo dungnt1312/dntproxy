@@ -68,21 +68,21 @@ export default function ModelSelector({
     <div className="space-y-3">
       {/* Selected known model tags */}
       {selectedKnownModels.length > 0 && (
-        <div className="flex flex-wrap gap-2 p-3 bg-[var(--accent-glow)] rounded-xl border border-[var(--accent)]/20">
-          <span className="text-[10px] text-[var(--accent)] w-full mb-0.5 font-medium uppercase tracking-wide">Allowed models:</span>
+        <div className="flex flex-wrap gap-2 p-3 bg-muted/30 rounded-md border border-border">
+          <span className="text-[10px] text-muted-foreground w-full mb-0.5 font-bold uppercase tracking-wider">Allowed models:</span>
           {selectedKnownModels.map((modelId) => {
             return (
               <span
                 key={modelId}
-                className="inline-flex items-center gap-1 px-2 py-0.5 bg-[var(--accent)]/15 border border-[var(--accent)]/25 rounded-md text-[11px] font-mono"
+                className="inline-flex items-center gap-1 px-2 py-1 bg-background border border-border rounded-md text-[11px] font-mono text-foreground shadow-sm"
               >
-                <span className="text-[var(--text-muted)]">{modelId}</span>
+                <span>{modelId}</span>
                 <button
                   onClick={() => removeModel(modelId)}
                   aria-label={`Remove allowed model ${modelId}`}
-                  className="ml-0.5 hover:bg-[var(--accent)]/20 rounded-sm p-0.5 transition-colors cursor-pointer"
+                  className="ml-1 hover:bg-muted rounded-sm p-0.5 transition-colors cursor-pointer text-muted-foreground hover:text-foreground"
                 >
-                  <X size={10} className="text-[var(--accent)]" />
+                  <X size={12} />
                 </button>
               </span>
             )
@@ -92,21 +92,21 @@ export default function ModelSelector({
 
       {/* Custom models tags */}
       {customModels.length > 0 && (
-        <div className="flex flex-wrap gap-2 p-3 bg-[var(--purple-glow)] rounded-xl border border-[var(--purple)]/20">
-          <span className="text-[10px] text-[var(--purple)] w-full mb-0.5 font-medium uppercase tracking-wide">Custom models:</span>
+        <div className="flex flex-wrap gap-2 p-3 bg-muted/30 rounded-md border border-border">
+          <span className="text-[10px] text-muted-foreground w-full mb-0.5 font-bold uppercase tracking-wider">Custom models:</span>
           {customModels.map((modelId) => {
             return (
               <span
                 key={modelId}
-                className="inline-flex items-center gap-1 px-2 py-0.5 bg-[var(--purple)]/15 border border-[var(--purple)]/25 rounded-md text-[11px] font-mono"
+                className="inline-flex items-center gap-1 px-2 py-1 bg-background border border-border rounded-md text-[11px] font-mono text-foreground shadow-sm"
               >
-                <span className="text-[var(--text-muted)]">{modelId}</span>
+                <span>{modelId}</span>
                 <button
                   onClick={() => removeModel(modelId)}
                   aria-label={`Remove custom model ${modelId}`}
-                  className="ml-0.5 hover:bg-[var(--purple)]/20 rounded-sm p-0.5 transition-colors cursor-pointer"
+                  className="ml-1 hover:bg-muted rounded-sm p-0.5 transition-colors cursor-pointer text-muted-foreground hover:text-foreground"
                 >
-                  <X size={10} className="text-[var(--purple)]" />
+                  <X size={12} />
                 </button>
               </span>
             )
@@ -116,15 +116,15 @@ export default function ModelSelector({
 
       {/* Status indicator */}
       {isAllAllowed ? (
-        <div className="chip chip-success text-xs w-full justify-center py-2">
+        <div className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 rounded-md text-xs w-full px-3 py-2 flex items-center justify-center font-medium">
           All models allowed. Select models below to restrict.
         </div>
       ) : (
-        <div className="flex items-center justify-between text-xs text-[var(--text-muted)] glass-sm px-3 py-2">
+        <div className="flex items-center justify-between text-xs text-muted-foreground bg-muted/30 border border-border rounded-md px-3 py-2">
           <span>Restricted to {selected.length} selected model(s).</span>
           <button
             onClick={() => onChange([])}
-            className="text-[var(--accent)] hover:text-[var(--accent-hover)] transition-colors cursor-pointer font-medium"
+            className="text-foreground font-semibold hover:underline cursor-pointer transition-colors"
           >
             Clear restrictions
           </button>
@@ -133,53 +133,54 @@ export default function ModelSelector({
 
       {/* Search */}
       <div className="relative">
-        <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-dim)]" />
+        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
         <input
           type="text"
           value={searchQuery}
           onChange={e => setSearchQuery(e.target.value)}
           placeholder="Search models..."
-          className="glass-input w-full pl-9 text-xs"
+          className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 pl-9 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
         />
       </div>
 
       {/* Model list - checked = allowed */}
-      <div className="max-h-64 overflow-y-auto space-y-0.5 glass-sm p-1.5">
+      <div className="max-h-64 overflow-y-auto p-1 border border-border bg-background rounded-md shadow-sm">
         {filteredModels.length === 0 && (
-          <p className="text-xs text-[var(--text-dim)] py-4 text-center">No models found</p>
+          <p className="text-sm text-muted-foreground py-6 text-center">No models found</p>
         )}
-        {filteredModels.map((model) => {
-          const isSelected = isSelectedModel(model.id)
-          return (
-            <button
-              key={model.id}
-              onClick={() => toggleModel(model.id)}
-              className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left text-xs cursor-pointer transition-all ${
-                isSelected
-                  ? 'text-[var(--text)] bg-[var(--accent-glow)]'
-                  : 'text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-white/[0.03]'
-              }`}
-            >
-              <span
-                className={`w-4 h-4 border-2 rounded flex items-center justify-center transition-colors shrink-0 ${
+        <div className="space-y-0.5">
+          {filteredModels.map((model) => {
+            const isSelected = isSelectedModel(model.id)
+            return (
+              <button
+                key={model.id}
+                onClick={() => toggleModel(model.id)}
+                className={`w-full flex items-center gap-3 px-2 py-2 rounded-sm text-sm text-left cursor-pointer transition-colors ${
                   isSelected
-                    ? 'border-[var(--accent)] bg-[var(--accent)]'
-                    : 'border-[var(--border)]'
+                    ? 'bg-accent text-accent-foreground font-medium'
+                    : 'text-foreground hover:bg-muted'
                 }`}
               >
-                {isSelected && <Check size={10} className="text-white" />}
-              </span>
-              <span className="flex-1 font-mono truncate">{model.id}</span>
-              {isSelected && <span className="text-[10px] text-[var(--accent)] shrink-0">selected</span>}
-            </button>
-          )
-        })}
+                <div
+                  className={`w-4 h-4 rounded-sm border flex items-center justify-center shrink-0 ${
+                    isSelected
+                      ? 'bg-primary text-primary-foreground border-primary'
+                      : 'border-input bg-transparent'
+                  }`}
+                >
+                  {isSelected && <Check size={12} strokeWidth={3} />}
+                </div>
+                <span className="flex-1 font-mono truncate">{model.id}</span>
+              </button>
+            )
+          })}
+        </div>
       </div>
 
       {/* Add custom model */}
-      <div>
+      <div className="pt-2">
         {showCustomInput ? (
-          <div className="flex gap-2">
+          <div className="flex gap-2 items-center bg-muted/30 p-2 rounded-md border border-border">
             <input
               type="text"
               value={customInput}
@@ -189,13 +190,13 @@ export default function ModelSelector({
                 if (e.key === 'Escape') setShowCustomInput(false)
               }}
               placeholder={modelIdPrefix ? `${modelIdPrefix}/model-name` : 'provider/model-name'}
-              className="glass-input flex-1 text-xs font-mono"
+              className="flex h-8 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none flex-1 font-mono"
               autoFocus
             />
             <button
               onClick={addCustomModel}
               disabled={!customInput.trim()}
-              className="btn-primary text-xs py-2"
+              className="inline-flex items-center justify-center rounded-md text-xs font-semibold focus-visible:outline-none bg-primary text-primary-foreground hover:bg-primary/90 h-8 px-3"
             >
               Add
             </button>
@@ -204,7 +205,7 @@ export default function ModelSelector({
                 setShowCustomInput(false)
                 setCustomInput('')
               }}
-              className="btn-ghost text-xs py-2"
+              className="inline-flex items-center justify-center rounded-md text-xs font-medium hover:bg-muted hover:text-foreground text-muted-foreground h-8 px-3"
             >
               Cancel
             </button>
@@ -212,9 +213,9 @@ export default function ModelSelector({
         ) : (
           <button
             onClick={() => setShowCustomInput(true)}
-            className="flex items-center gap-1.5 text-xs text-[var(--purple)] hover:text-[var(--purple)] font-medium transition-colors cursor-pointer"
+            className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground font-medium transition-colors cursor-pointer ml-1"
           >
-            <Plus size={13} />
+            <Plus size={14} />
             Add custom model
           </button>
         )}

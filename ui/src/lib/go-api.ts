@@ -254,8 +254,8 @@ export const goApi: any = {
     return goRequest(url)
   },
 
-  importBackup: (data: unknown, mode: string) =>
-    goRequest('/backup/import', { method: 'POST', body: JSON.stringify({ ...(data as object), mode }) }),
+  importBackup: (data: unknown, mode: string, sections?: string[]) =>
+    goRequest('/backup/import', { method: 'POST', body: JSON.stringify({ ...(data as object), mode, sections: sections || [] }) }),
 
   // Auth flows
   startBuilderID: () => goRequest('/auth/kiro/start-builderid', { method: 'POST' }),

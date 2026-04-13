@@ -2,6 +2,7 @@ package service
 
 import (
 	"strings"
+	"time"
 
 	"github.com/dungnt/dntproxy/internal/domain"
 	"github.com/dungnt/dntproxy/internal/port"
@@ -9,12 +10,16 @@ import (
 
 // ModelResolver handles model string parsing, alias resolution, and combo expansion.
 type ModelResolver struct {
-	store port.CredentialStore
+	store      port.CredentialStore
+	modelCache *ModelCache
 }
 
 // NewModelResolver creates a new ModelResolver.
 func NewModelResolver(store port.CredentialStore) *ModelResolver {
-	return &ModelResolver{store: store}
+	return &ModelResolver{
+		store:      store,
+		modelCache: NewModelCache(10 * time.Minute),
+	}
 }
 
 // Resolve parses a model string and returns provider + model.

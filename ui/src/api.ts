@@ -118,8 +118,8 @@ export const api = {
       return r.json()
     })
   },
-  importBackup: (data: unknown, mode: string) =>
-    request('/backup/import', { method: 'POST', body: JSON.stringify({ ...data as object, mode }) }),
+  importBackup: (data: unknown, mode: string, sections?: string[]) =>
+    request('/backup/import', { method: 'POST', body: JSON.stringify({ ...data as object, mode, sections: sections || [] }) }),
 
   // Tunnel
   enableTunnel: () => request('/tunnel/enable', { method: 'POST' }),

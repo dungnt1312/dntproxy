@@ -52,20 +52,13 @@ func (s *SQLiteLogStore) Close() error {
 	return s.db.Close()
 }
 
-// Insert stores a log entry and calculates estimated cost when usage exists.
+// Insert stores a log entry. Wait for AsyncWriter to pre-calculate cost.
 func (s *SQLiteLogStore) Insert(ctx context.Context, entry *domain.LogEntry) error {
-	price, err := s.PriceFor(ctx, entry.Provider, entry.Model)
-	if err == nil && price != nil && entry.TotalTokens > 0 {
-		entry.CostInput = float64(entry.InputTokens) / 1_000_000 * price.InputPer1M
-		entry.CostOutput = float64(entry.OutputTokens) / 1_000_000 * price.OutputPer1M
-		entry.CostTotal = entry.CostInput + entry.CostOutput
-		entry.Currency = price.Currency
-	}
 	if entry.Currency == "" {
 		entry.Currency = "USD"
 	}
 
-	_, err = s.db.ExecContext(ctx, `INSERT INTO request_logs
+	_, err := s.db.ExecContext(ctx, `INSERT INTO request_logs
 		(id, timestamp_ms, timestamp, level, provider, direction, method, path, status_code, duration_ms,
 		 connection_id, connection_name, model, request_id, message, error, body_size, input_tokens,
 		 output_tokens, total_tokens, usage_source, cost_input, cost_output, cost_total, currency, metadata_json,
@@ -79,6 +72,49 @@ func (s *SQLiteLogStore) Insert(ctx context.Context, entry *domain.LogEntry) err
 		entry.RequestBody, entry.ResponseBody)
 	if err != nil {
 		return fmt.Errorf("insert log: %w", err)
+	}
+	return nil
+}
+
+// BatchInsert stores multiple log entries efficiently in a single transaction.
+func (s *SQLiteLogStore) BatchInsert(ctx context.Context, entries []*domain.LogEntry) error {
+	if len(entries) == 0 {
+		return nil
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.PrepareContext(ctx, `INSERT INTO request_logs
+		(id, timestamp_ms, timestamp, level, provider, direction, method, path, status_code, duration_ms,
+		 connection_id, connection_name, model, request_id, message, error, body_size, input_tokens,
+		 output_tokens, total_tokens, usage_source, cost_input, cost_output, cost_total, currency, metadata_json,
+		 request_body, response_body)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		return fmt.Errorf("prepare stmt: %w", err)
+	}
+	defer stmt.Close()
+
+	for _, entry := range entries {
+		// Prices are pre-calculated by AsyncWriter to avoid deadlocks.
+		_, err = stmt.ExecContext(ctx,
+			entry.ID, entry.TimestampMs, entry.Timestamp, entry.Level, entry.Provider, entry.Direction,
+			entry.Method, entry.Path, entry.StatusCode, entry.DurationMs, entry.ConnectionID,
+			entry.ConnectionName, entry.Model, entry.RequestID, entry.Message, entry.Error,
+			entry.BodySize, entry.InputTokens, entry.OutputTokens, entry.TotalTokens, entry.UsageSource,
+			entry.CostInput, entry.CostOutput, entry.CostTotal, entry.Currency, entry.MetadataJSON,
+			entry.RequestBody, entry.ResponseBody)
+		if err != nil {
+			return fmt.Errorf("exec batch insert: %w", err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit tx: %w", err)
 	}
 	return nil
 }

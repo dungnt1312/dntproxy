@@ -32,7 +32,7 @@ interface SettingsData {
 }
 
 const DEFAULT_SETTINGS: SettingsData = {
-  id: "",
+  id: '',
   serverPort: 20199,
   apiKeyAuthEnabled: true,
   defaultRoutingStrategy: "fallback",
@@ -174,12 +174,7 @@ export default function SettingsScreen() {
                 min={1}
                 max={65535}
                 value={settings.serverPort}
-                onChange={(e) =>
-                  updateField(
-                    "serverPort",
-                    parseInt(e.target.value, 10) || 20199,
-                  )
-                }
+                onChange={(e) => updateField('serverPort', parseInt(e.target.value, 10) || 20199)}
                 className="max-w-xs"
               />
               <p className="text-xs text-muted-foreground">

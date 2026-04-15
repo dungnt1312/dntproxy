@@ -866,8 +866,25 @@ export default function LogsScreen() {
 
     es.onmessage = (event) => {
       try {
-        const streamLogs = JSON.parse(event.data);
-        setLogs(Array.isArray(streamLogs) ? streamLogs : []);
+        const payload = JSON.parse(event.data);
+        if (Array.isArray(payload)) {
+          // Legacy generic fallback
+          setLogs(payload);
+        } else if (payload.type === "init") {
+          setLogs(payload.logs || []);
+        } else if (payload.type === "delta" && payload.log) {
+          setLogs((prev) => {
+            const newLog = payload.log;
+            const existsIndex = prev.findIndex((l) => l.id === newLog.id);
+            if (existsIndex >= 0) {
+              const next = [...prev];
+              next[existsIndex] = newLog;
+              return next;
+            }
+            // prepend new logs since list is descending chronologically
+            return [newLog, ...prev].slice(0, 500); // optional cap
+          });
+        }
       } catch {
         // ignore parse errors
       }

@@ -7,6 +7,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/dungnt/dntproxy/internal/logger"
 )
 
 // ComboHandler manages combo fallback and round-robin strategies.
@@ -43,18 +45,24 @@ func (ch *ComboHandler) HandleCombo(
 	var earliestRetry string
 
 	for i, modelStr := range rotated {
-		log.Printf("[COMBO] Trying model %d/%d: %s", i+1, len(rotated), modelStr)
+		if logger.IsDevMode() {
+			log.Printf("[COMBO] Trying model %d/%d: %s", i+1, len(rotated), modelStr)
+		}
 
 		result, err := handleSingle(modelStr)
 		if err != nil {
 			lastError = err.Error()
 			lastStatus = 500
-			log.Printf("[COMBO] Model %s threw error, trying next: %s", modelStr, err.Error())
+			if logger.IsDevMode() {
+				log.Printf("[COMBO] Model %s threw error, trying next: %s", modelStr, err.Error())
+			}
 			continue
 		}
 
 		if result.OK {
-			log.Printf("[COMBO] Model %s succeeded", modelStr)
+			if logger.IsDevMode() {
+				log.Printf("[COMBO] Model %s succeeded", modelStr)
+			}
 			// Only advance rotation on success
 			ch.advanceRotation(comboName, strategy)
 			return result, nil
@@ -67,18 +75,24 @@ func (ch *ComboHandler) HandleCombo(
 		}
 
 		if !shouldComboFallback(result.StatusCode) {
-			log.Printf("[COMBO] Model %s failed (no fallback), status=%d", modelStr, result.StatusCode)
+			if logger.IsDevMode() {
+				log.Printf("[COMBO] Model %s failed (no fallback), status=%d", modelStr, result.StatusCode)
+			}
 			return result, nil
 		}
 
 		if isTransientStatus(result.StatusCode) {
-			log.Printf("[COMBO] Model %s transient %d, waiting 2s", modelStr, result.StatusCode)
+			if logger.IsDevMode() {
+				log.Printf("[COMBO] Model %s transient %d, waiting 2s", modelStr, result.StatusCode)
+			}
 			time.Sleep(2 * time.Second)
 		}
 
 		lastError = result.Error
 		lastStatus = result.StatusCode
-		log.Printf("[COMBO] Model %s failed (%d), trying next", modelStr, result.StatusCode)
+		if logger.IsDevMode() {
+			log.Printf("[COMBO] Model %s failed (%d), trying next", modelStr, result.StatusCode)
+		}
 	}
 
 	if lastStatus == 0 {

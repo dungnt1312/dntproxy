@@ -3,17 +3,15 @@ package openai
 import (
 	"bufio"
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/dungnt/dntproxy/internal/adapter/shared"
 	"github.com/dungnt/dntproxy/internal/domain"
-	"github.com/dungnt/dntproxy/internal/logger"
+	"github.com/dungnt/dntproxy/internal/port"
 )
 
 // Executor handles making requests to OpenAI or OpenAI-compatible APIs.
@@ -45,12 +43,6 @@ func resolveChatPath(credentials *domain.Credentials) string {
 	return cfg.ChatPath
 }
 
-// providerLogTag returns the log tag for a provider.
-func providerLogTag(credentials *domain.Credentials) string {
-	cfg := domain.GetProviderConfig(credentials.Provider)
-	return cfg.Icon
-}
-
 // isCodexOAuth returns true if this credential is an OpenAI OAuth token
 // (from auth.openai.com) which needs to use the Codex Responses API.
 func isCodexOAuth(credentials *domain.Credentials) bool {
@@ -73,15 +65,15 @@ func isCodexOAuth(credentials *domain.Credentials) bool {
 }
 
 // Execute sends a request to OpenAI (or compatible) API and returns a streaming reader.
-func (e *Executor) Execute(model string, body []byte, credentials *domain.Credentials, requestID string) (io.ReadCloser, int, error) {
+func (e *Executor) Execute(model string, body []byte, credentials *domain.Credentials, reqlog port.RequestLogger) (io.ReadCloser, int, error) {
 	if isCodexOAuth(credentials) {
-		return e.executeCodexResponses(model, body, credentials, requestID)
+		return e.executeCodexResponses(model, body, credentials, reqlog)
 	}
-	return e.executeStandard(model, body, credentials, requestID)
+	return e.executeStandard(model, body, credentials, reqlog)
 }
 
 // executeStandard handles standard OpenAI API key requests (api.openai.com/v1/chat/completions).
-func (e *Executor) executeStandard(model string, body []byte, credentials *domain.Credentials, requestID string) (io.ReadCloser, int, error) {
+func (e *Executor) executeStandard(model string, body []byte, credentials *domain.Credentials, reqlog port.RequestLogger) (io.ReadCloser, int, error) {
 	baseURL := resolveBaseURL(credentials)
 	chatPath := resolveChatPath(credentials)
 	url := baseURL + chatPath
@@ -102,32 +94,8 @@ func (e *Executor) executeStandard(model string, body []byte, credentials *domai
 	if apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
-
-	logTag := strings.ToUpper(providerLogTag(credentials))
-
-	log.Printf("[%s] --> %s | conn=%s | model=%s | body_size=%d", logTag, url, credentials.ConnectionName, model, len(body))
-	if apiKey != "" {
-		log.Printf("[%s]     Authorization: Bearer %s", logTag, shared.MaskedToken(apiKey))
-	}
-	appLogger := logger.Get()
-	appLogger.AddEntry(domain.LogEntry{
-		Provider:       logTag,
-		Direction:      "outbound",
-		Method:         "POST",
-		Path:           url,
-		ConnectionID:   credentials.ConnectionID,
-		ConnectionName: credentials.ConnectionName,
-		Model:          model,
-		RequestID:      requestID,
-		Message:        "OpenAI-compatible request sent",
-		BodySize:       len(body),
-		RequestBody: shared.TruncateBody(func() []byte {
-			if shared.ShouldLogRawBodies() {
-				return body
-			}
-			return shared.SanitizeBody(body)
-		}(), 8192),
-	})
+	
+	reqlog.SetBodies(string(shared.TruncateBody(shared.SanitizeBody(body), 8192)), "")
 
 	start := time.Now()
 
@@ -136,103 +104,37 @@ func (e *Executor) executeStandard(model string, body []byte, credentials *domai
 	duration := time.Since(start)
 
 	if err != nil {
-		errMsg := fmt.Sprintf("%s request failed: %s", logTag, err)
-		log.Printf("[%s] <-- %s | conn=%s | model=%s | status=502 | duration=%s | error=%s",
-			logTag, url, credentials.ConnectionName, model, duration, err)
-		appLogger.AddEntry(domain.LogEntry{
-			Level:          "ERROR",
-			Provider:       logTag,
-			Direction:      "response",
-			Path:           url,
-			StatusCode:     502,
-			DurationMs:     duration.Milliseconds(),
-			ConnectionID:   credentials.ConnectionID,
-			ConnectionName: credentials.ConnectionName,
-			Model:          model,
-			RequestID:      requestID,
-			Message:        "OpenAI-compatible request failed",
-			Error:          errMsg,
-		})
-		return nil, 502, fmt.Errorf("%s request failed: %w", strings.ToLower(logTag), err)
+		reqlog.Upstream(url, "POST", 502, duration, err)
+		return nil, 502, fmt.Errorf("openai request failed: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 1*1024*1024))
+		bodyBytes, errRead := io.ReadAll(io.LimitReader(resp.Body, 1*1024*1024))
 		resp.Body.Close()
 
 		respBodyStr := "Unknown error"
-		if err == nil {
+		if errRead == nil {
 			respBodyStr = string(bodyBytes)
 		}
-		log.Printf("[%s] <-- %s | conn=%s | model=%s | status=%d | duration=%s | error body_size=%d",
-			logTag, url, credentials.ConnectionName, model, resp.StatusCode, duration, len(bodyBytes))
-		log.Printf("[%s] ERROR body: %s", logTag, respBodyStr)
-
-		appLogger.AddEntry(domain.LogEntry{
-			Level:          "ERROR",
-			Provider:       logTag,
-			Direction:      "response",
-			Path:           url,
-			StatusCode:     resp.StatusCode,
-			DurationMs:     duration.Milliseconds(),
-			ConnectionID:   credentials.ConnectionID,
-			ConnectionName: credentials.ConnectionName,
-			Model:          model,
-			RequestID:      requestID,
-			Message:        "OpenAI-compatible request failed",
-			BodySize:       len(bodyBytes),
-			Error:          respBodyStr,
-			ResponseBody: shared.TruncateBody(func() []byte {
-				if shared.ShouldLogRawBodies() {
-					return bodyBytes
-				}
-				return shared.SanitizeBody(bodyBytes)
-			}(), 8192),
-		})
-		return nil, resp.StatusCode, fmt.Errorf("%s returned %d: %s", strings.ToLower(logTag), resp.StatusCode, respBodyStr)
+		
+		reqlog.SetBodies("", string(shared.TruncateBody(shared.SanitizeBody(bodyBytes), 8192)))
+		errUpstream := fmt.Errorf("%s", respBodyStr)
+		reqlog.Upstream(url, "POST", resp.StatusCode, duration, errUpstream)
+		
+		return nil, resp.StatusCode, fmt.Errorf("returned %d: %s", resp.StatusCode, respBodyStr)
 	}
 
-	log.Printf("[%s] <-- %s | conn=%s | model=%s | status=%d | duration=%s | stream_started=true",
-		logTag, url, credentials.ConnectionName, model, resp.StatusCode, duration)
-
-	appLogger.AddEntry(domain.LogEntry{
-		Level:          "INFO",
-		Provider:       logTag,
-		Direction:      "response",
-		Path:           url,
-		StatusCode:     resp.StatusCode,
-		DurationMs:     duration.Milliseconds(),
-		ConnectionID:   credentials.ConnectionID,
-		ConnectionName: credentials.ConnectionName,
-		Model:          model,
-		RequestID:      requestID,
-		Message:        "OpenAI-compatible response stream started",
-	})
+	reqlog.Upstream(url, "POST", resp.StatusCode, duration, nil)
 
 	// Sniff stream to extract usage and preview at the end
 	sniffer := &openaiStreamSniffer{
 		ReadCloser: resp.Body,
 		onClose: func(bodyBytes []byte) {
 			if usage := extractUsage(bodyBytes); usage != nil {
-				appLogger.AddUsage(logTag, requestID, credentials.ConnectionID, credentials.ConnectionName,
-					model, usage.PromptTokens, usage.CompletionTokens, "sse_usage")
+				reqlog.SetUsage(usage.PromptTokens, usage.CompletionTokens, "sse_usage")
 			}
-			if preview, truncated := extractResponsePreview(bodyBytes); preview != "" {
-				metadata, _ := json.Marshal(map[string]interface{}{
-					"responsePreview": preview,
-					"truncated":       truncated,
-					"source":          "sse",
-				})
-				appLogger.AddEntry(domain.LogEntry{
-					Provider:       logTag,
-					Direction:      "payload",
-					ConnectionID:   credentials.ConnectionID,
-					ConnectionName: credentials.ConnectionName,
-					Model:          model,
-					RequestID:      requestID,
-					Message:        "Response payload captured",
-					MetadataJSON:   string(metadata),
-				})
+			if preview, _ := extractResponsePreview(bodyBytes); preview != "" {
+				reqlog.SetBodies("", preview)
 			}
 		},
 	}
@@ -243,7 +145,7 @@ func (e *Executor) executeStandard(model string, body []byte, credentials *domai
 // executeCodexResponses handles OpenAI OAuth tokens via the Codex Responses API.
 // Translates: Chat Completions request → Codex Responses API request
 // And:        Codex Responses API SSE → Chat Completions SSE
-func (e *Executor) executeCodexResponses(model string, body []byte, credentials *domain.Credentials, requestID string) (io.ReadCloser, int, error) {
+func (e *Executor) executeCodexResponses(model string, body []byte, credentials *domain.Credentials, reqlog port.RequestLogger) (io.ReadCloser, int, error) {
 	// Translate request: Chat Completions → Codex Responses API
 	translatedBody, err := TranslateChatToCodexResponses(body)
 	if err != nil {
@@ -266,28 +168,7 @@ func (e *Executor) executeCodexResponses(model string, body []byte, credentials 
 	// Random session_id per request (matches real Codex CLI behavior)
 	req.Header.Set("session_id", fmt.Sprintf("%d-%s", time.Now().UnixMilli(), randomAlphaNum(9)))
 
-	log.Printf("[CODEX] --> %s | conn=%s | model=%s | body_size=%d", url, credentials.ConnectionName, model, len(translatedBody))
-	log.Printf("[CODEX]     Authorization: Bearer %s", shared.MaskedToken(credentials.AccessToken))
-
-	appLogger := logger.Get()
-	appLogger.AddEntry(domain.LogEntry{
-		Provider:       "CODEX",
-		Direction:      "outbound",
-		Method:         "POST",
-		Path:           url,
-		ConnectionID:   credentials.ConnectionID,
-		ConnectionName: credentials.ConnectionName,
-		Model:          model,
-		RequestID:      requestID,
-		Message:        "Codex Responses API request sent",
-		BodySize:       len(translatedBody),
-		RequestBody: shared.TruncateBody(func() []byte {
-			if shared.ShouldLogRawBodies() {
-				return translatedBody
-			}
-			return shared.SanitizeBody(translatedBody)
-		}(), 8192),
-	})
+	reqlog.SetBodies(string(shared.TruncateBody(shared.SanitizeBody(translatedBody), 8192)), "")
 
 	start := time.Now()
 
@@ -296,72 +177,26 @@ func (e *Executor) executeCodexResponses(model string, body []byte, credentials 
 	duration := time.Since(start)
 
 	if err != nil {
-		errMsg := fmt.Sprintf("codex request failed: %s", err)
-		log.Printf("[CODEX] <-- %s | conn=%s | model=%s | status=502 | duration=%s | error=%s",
-			url, credentials.ConnectionName, model, duration, err)
-		appLogger.AddEntry(domain.LogEntry{
-			Level:          "ERROR",
-			Provider:       "CODEX",
-			Direction:      "response",
-			Path:           url,
-			StatusCode:     502,
-			DurationMs:     duration.Milliseconds(),
-			ConnectionID:   credentials.ConnectionID,
-			ConnectionName: credentials.ConnectionName,
-			Model:          model,
-			RequestID:      requestID,
-			Message:        "Codex Responses API request failed",
-			Error:          errMsg,
-		})
+		reqlog.Upstream(url, "POST", 502, duration, err)
 		return nil, 502, fmt.Errorf("codex request failed: %w", err)
 	}
 
-	log.Printf("[CODEX] <-- %s | conn=%s | model=%s | status=%d | duration=%s",
-		url, credentials.ConnectionName, model, resp.StatusCode, duration)
-
 	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 1*1024*1024))
+		bodyBytes, errRead := io.ReadAll(io.LimitReader(resp.Body, 1*1024*1024))
 		resp.Body.Close()
-		respBodyStr := string(bodyBytes)
-		log.Printf("[CODEX] ERROR body: %s", respBodyStr)
-
-		appLogger.AddEntry(domain.LogEntry{
-			Level:          "ERROR",
-			Provider:       "CODEX",
-			Direction:      "response",
-			Path:           url,
-			StatusCode:     resp.StatusCode,
-			DurationMs:     duration.Milliseconds(),
-			ConnectionID:   credentials.ConnectionID,
-			ConnectionName: credentials.ConnectionName,
-			Model:          model,
-			RequestID:      requestID,
-			Message:        "Codex Responses API error",
-			Error:          respBodyStr,
-			ResponseBody: shared.TruncateBody(func() []byte {
-				if shared.ShouldLogRawBodies() {
-					return bodyBytes
-				}
-				return shared.SanitizeBody(bodyBytes)
-			}(), 8192),
-			BodySize: len(bodyBytes),
-		})
+		
+		respBodyStr := "Unknown error"
+		if errRead == nil {
+			respBodyStr = string(bodyBytes)
+		}
+		
+		reqlog.SetBodies("", string(shared.TruncateBody(shared.SanitizeBody(bodyBytes), 8192)))
+		errUpstream := fmt.Errorf("%s", respBodyStr)
+		reqlog.Upstream(url, "POST", resp.StatusCode, duration, errUpstream)
 		return nil, resp.StatusCode, fmt.Errorf("codex returned %d: %s", resp.StatusCode, respBodyStr)
 	}
 
-	appLogger.AddEntry(domain.LogEntry{
-		Level:          "INFO",
-		Provider:       "CODEX",
-		Direction:      "response",
-		Path:           url,
-		StatusCode:     resp.StatusCode,
-		DurationMs:     duration.Milliseconds(),
-		ConnectionID:   credentials.ConnectionID,
-		ConnectionName: credentials.ConnectionName,
-		Model:          model,
-		RequestID:      requestID,
-		Message:        "Codex Responses API streaming started",
-	})
+	reqlog.Upstream(url, "POST", resp.StatusCode, duration, nil)
 
 	// Create a pipe to transform the Codex SSE stream into Chat Completions SSE
 	pr, pw := io.Pipe()
@@ -373,6 +208,8 @@ func (e *Executor) executeCodexResponses(model string, body []byte, credentials 
 		// Increase scanner buffer for large SSE events
 		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 		currentEvent := ""
+
+		var completePayloadBuilder strings.Builder
 
 		for scanner.Scan() {
 			line := scanner.Text()
@@ -388,6 +225,7 @@ func (e *Executor) executeCodexResponses(model string, body []byte, credentials 
 					translated := TranslateCodexEvent(currentEvent, []byte(dataStr), state)
 					if translated != "" {
 						pw.Write([]byte(translated))
+						completePayloadBuilder.WriteString(translated)
 					}
 					currentEvent = ""
 				}
@@ -405,8 +243,16 @@ func (e *Executor) executeCodexResponses(model string, body []byte, credentials 
 			if state.ToolCallIndex > 0 {
 				finishReason = "tool_calls"
 			}
-			pw.Write([]byte(formatSSEChunk(state, map[string]interface{}{}, &finishReason)))
+			translated := formatSSEChunk(state, map[string]interface{}{}, &finishReason)
+			pw.Write([]byte(translated))
+			completePayloadBuilder.WriteString(translated)
 			pw.Write([]byte("data: [DONE]\n\n"))
+		}
+		
+		// Set usage metrics
+		reqlog.SetUsage(state.PromptTokens, state.CompletionTokens, "codex_metrics")
+		if preview, _ := extractResponsePreview([]byte(completePayloadBuilder.String())); preview != "" {
+			reqlog.SetBodies("", preview)
 		}
 	}()
 

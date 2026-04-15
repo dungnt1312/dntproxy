@@ -44,26 +44,9 @@ export default function SettingsPage() {
       <div className="space-y-4 max-w-lg">
         <div className="glass p-5 space-y-5">
           <div>
-            <label
-              className="block text-sm font-medium mb-1.5"
-              style={{ fontFamily: "var(--font-heading)" }}
-            >
-              Port
-            </label>
-            <input
-              type="number"
-              value={settings.port || 20199}
-              onChange={(e) =>
-                setSettings({
-                  ...settings,
-                  port: parseInt(e.target.value) || 20199,
-                })
-              }
-              className="glass-input w-full"
-            />
-            <p className="text-xs text-[var(--text-dim)] mt-1.5">
-              Requires restart to take effect.
-            </p>
+            <label className="block text-sm font-medium mb-1.5" style={{ fontFamily: 'var(--font-heading)' }}>Port</label>
+            <input type="number" value={settings.port || 20199} onChange={e => setSettings({ ...settings, port: parseInt(e.target.value) || 20199 })} className="glass-input w-full" />
+            <p className="text-xs text-[var(--text-dim)] mt-1.5">Requires restart to take effect.</p>
           </div>
 
           <div>
@@ -145,9 +128,7 @@ export default function SettingsPage() {
             Info
           </h3>
           <div className="text-xs text-[var(--text-muted)] space-y-1.5 font-mono glass-sm p-3">
-            <p>
-              API: http://localhost:{settings.port || 20199}/v1/chat/completions
-            </p>
+            <p>API: http://localhost:{settings.port || 20199}/v1/chat/completions</p>
             <p>Models: http://localhost:{settings.port || 20199}/v1/models</p>
           </div>
         </div>

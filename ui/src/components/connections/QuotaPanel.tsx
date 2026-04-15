@@ -20,6 +20,14 @@ export interface UsageData {
   limitReached?: boolean;
   message?: string;
   quotas?: QuotaBucket[];
+  overages?: {
+    used: number;
+    cap: number;
+    remaining: number;
+    status?: string;
+    charge?: number;
+    rate?: number;
+  };
   error?: string;
 }
 
@@ -175,6 +183,43 @@ export default function QuotaPanel({
             </div>
           </div>
         ))}
+
+        {data.overages && data.overages.used > 0 && (
+          <div className="space-y-1.5 pt-1 border-t border-muted-foreground/10">
+            <div className="flex items-end justify-between text-xs leading-none">
+              <div className="flex items-center gap-1.5">
+                <span className="text-muted-foreground/80 font-medium text-[11px]">Overages</span>
+                <Badge
+                  variant="outline"
+                  className="border-amber-500/30 bg-amber-500/10 text-amber-500 text-[9px] px-1 py-0 h-4"
+                >
+                  {data.overages.status || 'ENABLED'}
+                </Badge>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="font-mono text-[11px] text-amber-500 font-medium">
+                  {data.overages.used.toFixed(2)} <span className="text-muted-foreground/50 text-[10px]">/ {data.overages.cap.toFixed(0)}</span>
+                </span>
+                {data.overages.charge && data.overages.charge > 0 && (
+                  <span className="text-[10px] text-amber-500/70">
+                    ${data.overages.charge.toFixed(4)}
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="relative h-1.5 rounded-full bg-muted/60 overflow-hidden w-full">
+              <div
+                className="absolute inset-y-0 left-0 rounded-full transition-all duration-500 bg-amber-500"
+                style={{ width: `${Math.min(100, (data.overages.used / data.overages.cap) * 100)}%` }}
+              />
+            </div>
+            {data.overages.rate && data.overages.rate > 0 && (
+              <div className="text-[10px] text-muted-foreground/50">
+                Rate: ${data.overages.rate.toFixed(4)}/unit · Remaining: {data.overages.remaining.toFixed(2)}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

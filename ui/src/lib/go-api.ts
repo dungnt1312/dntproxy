@@ -116,7 +116,7 @@ function mapModel(go: any) {
 function mapSettings(go: any) {
   return {
     ...go,
-    id: "default",
+    id: 'default',
     serverPort: Number(go.port ?? 20199),
     apiKeyAuthEnabled: Boolean(go.requireApiKey),
     defaultRoutingStrategy: String(go.comboStrategy || "fallback"),

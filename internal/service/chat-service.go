@@ -4,10 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"strings"
+	"time"
 
+	"github.com/dungnt/dntproxy/internal/logger"
 	"github.com/dungnt/dntproxy/internal/port"
 )
 
@@ -79,15 +80,18 @@ func (s *ChatService) HandleChat(body []byte, modelStr string, requestID string)
 		comboName = modelStr // use model string as key for non-combo (for logging)
 	}
 
-	log.Printf("[CHAT] %q → %d models (strategy: %s, combo: %v)", modelStr, len(routing.Models), strategy, routing.IsCombo)
+	if logger.IsDevMode() {
+		logger.Get().Add("CHAT", "INFO", fmt.Sprintf("%q → %d models (strategy: %s, combo: %v)", modelStr, len(routing.Models), strategy, routing.IsCombo))
+	}
 
 	// Unified: every request goes through comboHandler.
 	// For single models, this is just a loop of 1.
 	result, err := s.comboHandler.HandleCombo(routing.Models, comboName, strategy, func(qualifiedModel string) (*ComboResult, error) {
 		return s.executeOnProvider(body, qualifiedModel, requestID, routing.AllowedConnectionIDs)
 	})
-	if err != nil {
-		log.Printf("[CHAT] All models exhausted: %s", err)
+
+	if err != nil && logger.IsDevMode() {
+		logger.Get().Add("CHAT", "ERROR", fmt.Sprintf("All models exhausted: %s", err))
 	}
 
 	if result != nil && result.OK && result.Stream != nil {
@@ -116,29 +120,38 @@ func (s *ChatService) HandleChat(body []byte, modelStr string, requestID string)
 // executeOnProvider handles a single "provider/model" string:
 // parse → get executor → weighted random connection → execute → retry on fail.
 func (s *ChatService) executeOnProvider(body []byte, qualifiedModel string, requestID string, allowedConnectionIDs []string) (*ComboResult, error) {
+	reqlog := logger.NewRequestLog(requestID)
+	reqlog.Begin("POST", "/v1/chat/completions", qualifiedModel, len(body))
+
 	// Parse "provider/model"
 	idx := strings.Index(qualifiedModel, "/")
 	if idx < 0 {
-		return &ComboResult{OK: false, StatusCode: http.StatusBadRequest, Error: fmt.Sprintf("invalid model format: %s", qualifiedModel)}, nil
+		msg := fmt.Sprintf("invalid model format: %s", qualifiedModel)
+		reqlog.End(http.StatusBadRequest, msg)
+		return &ComboResult{OK: false, StatusCode: http.StatusBadRequest, Error: msg}, nil
 	}
 	provider := qualifiedModel[:idx]
 	model := qualifiedModel[idx+1:]
 
-	log.Printf("[ROUTING] %s → %s/%s", qualifiedModel, provider, model)
+	reqlog.Route(provider, model)
 
 	executor := s.providers.GetExecutor(provider)
 	if executor == nil {
-		return &ComboResult{OK: false, StatusCode: http.StatusBadRequest, Error: fmt.Sprintf("Provider '%s' not supported", provider)}, nil
+		msg := fmt.Sprintf("Provider '%s' not supported", provider)
+		reqlog.End(http.StatusBadRequest, msg)
+		return &ComboResult{OK: false, StatusCode: http.StatusBadRequest, Error: msg}, nil
 	}
 
 	// Inject model into body
 	var bodyMap map[string]interface{}
 	if err := json.Unmarshal(body, &bodyMap); err != nil {
+		reqlog.End(http.StatusBadRequest, "Invalid JSON body")
 		return &ComboResult{OK: false, StatusCode: http.StatusBadRequest, Error: "Invalid JSON body"}, nil
 	}
 	bodyMap["model"] = model
 	updatedBody, err := json.Marshal(bodyMap)
 	if err != nil {
+		reqlog.End(http.StatusInternalServerError, "Failed to serialize request body")
 		return &ComboResult{OK: false, StatusCode: http.StatusInternalServerError, Error: "Failed to serialize request body"}, nil
 	}
 
@@ -150,32 +163,47 @@ func (s *ChatService) executeOnProvider(body []byte, qualifiedModel string, requ
 		if err != nil {
 			// Map selection errors to appropriate combo results
 			if mapped := mapSelectionErrorToComboResult(err); mapped != nil {
+				reqlog.End(mapped.StatusCode, mapped.Error)
 				return mapped, nil
 			}
-			return &ComboResult{OK: false, StatusCode: http.StatusServiceUnavailable, Error: "All accounts unavailable"}, nil
+			msg := "All accounts unavailable"
+			reqlog.End(http.StatusServiceUnavailable, msg)
+			return &ComboResult{OK: false, StatusCode: http.StatusServiceUnavailable, Error: msg}, nil
 		}
 
-		log.Printf("[AUTH] Using %s account: %s", provider, creds.ConnectionName)
+		reqlog.SelectAccount(creds.ConnectionID, creds.ConnectionName)
 
-		stream, status, execErr := executor.Execute(model, updatedBody, creds, requestID)
+		start := time.Now()
+		stream, status, execErr := executor.Execute(model, updatedBody, creds, reqlog)
+		duration := time.Since(start)
+
 		if execErr == nil && status == http.StatusOK {
+			reqlog.Upstream("", "", status, duration, nil)
 			s.accountSelector.ClearError(creds.ConnectionID, model)
-			return &ComboResult{OK: true, Stream: stream, StatusCode: http.StatusOK}, nil
+
+			// Stream wrapper will finalize reqlog.End() when consumer closes stream
+			wrappedStream := reqlog.WrapStream(stream)
+			return &ComboResult{OK: true, Stream: wrappedStream, StatusCode: http.StatusOK}, nil
 		}
 
 		errMsg := ""
 		if execErr != nil {
 			errMsg = execErr.Error()
 		}
-		log.Printf("[AUTH] Account %s failed (%d): %s", creds.ConnectionName, status, errMsg)
+
+		reqlog.Upstream("", "", status, duration, execErr)
 
 		if !shouldFallbackToNextAccount(status, errMsg) {
 			statusCode, message := normalizeExecutorFailure(status, errMsg)
+			reqlog.End(statusCode, message)
 			return &ComboResult{OK: false, StatusCode: statusCode, Error: message}, nil
 		}
 
+		// Mark unavailable and retry...
 		if err := s.accountSelector.MarkUnavailable(creds.ConnectionID, status, errMsg, model); err != nil {
-			log.Printf("[AUTH] Failed marking account unavailable (%s): %s", creds.ConnectionName, err)
+			if logger.IsDevMode() {
+				logger.Get().AddError("PROXY", "Failed marking account unavailable: %s", err)
+			}
 		}
 		excludeIDs[creds.ConnectionID] = true
 	}

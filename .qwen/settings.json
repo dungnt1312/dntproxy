@@ -43,7 +43,8 @@
       "WebFetch(ameow.xyz)",
       "Bash(cat *)",
       "Bash(jq *)",
-      "Bash(move *)"
+      "Bash(move *)",
+      "Bash(pm2 *)"
     ]
   },
   "$version": 3

@@ -101,7 +101,7 @@ function mapSettings(go: any) {
   return {
     ...go,
     id: 'default',
-    serverPort: Number(go.port ?? 20128),
+    serverPort: Number(go.port ?? 20199),
     apiKeyAuthEnabled: Boolean(go.requireApiKey),
     defaultRoutingStrategy: String(go.comboStrategy || 'fallback'),
   }
@@ -197,7 +197,7 @@ export const goApi: any = {
 
   updateSettings: (data: Record<string, unknown>) => {
     const payload = {
-      port: data.serverPort ?? data.port ?? 20128,
+      port: data.serverPort ?? data.port ?? 20199,
       requireApiKey: data.apiKeyAuthEnabled ?? data.requireApiKey ?? false,
       comboStrategy: data.defaultRoutingStrategy ?? data.comboStrategy ?? 'fallback',
       stickyRoundRobinLimit: data.stickyRoundRobinLimit ?? 3,

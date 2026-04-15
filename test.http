@@ -1,5 +1,5 @@
 ﻿# dntproxy - HTTP Requests Collection
-@baseUrl = http://localhost:20128
+@baseUrl = http://localhost:20199
 @apiKey = your-api-key-here
 
 ### Health Check

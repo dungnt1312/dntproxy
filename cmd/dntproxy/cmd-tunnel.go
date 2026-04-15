@@ -51,7 +51,7 @@ func runTunnelEnable(cmd *cobra.Command, args []string) error {
 
 	port := cfg.Settings.Port
 	if port == 0 {
-		port = 20128
+		port = 20199
 	}
 
 	tunnelSvc, err := service.NewTunnelService(store)

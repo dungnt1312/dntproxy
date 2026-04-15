@@ -38,6 +38,17 @@ type UsageResponse struct {
 	LimitReached bool          `json:"limitReached"`
 	Message      string        `json:"message,omitempty"`
 	Quotas       []QuotaBucket `json:"quotas"`
+	Overages     *OverageInfo  `json:"overages,omitempty"`
+}
+
+// OverageInfo contains overage usage when user has exceeded their plan limits.
+type OverageInfo struct {
+	Used       float64 `json:"used"`
+	Cap        float64 `json:"cap"`
+	Remaining  float64 `json:"remaining"`
+	Status     string  `json:"status,omitempty"`
+	Charge     float64 `json:"charge,omitempty"`
+	Rate       float64 `json:"rate,omitempty"`
 }
 
 func (r *UsageResponse) addBucket(key, label string, used, total int, resetAt string, unlimited bool) {
@@ -115,6 +126,7 @@ func (h *UsageHandler) GetUsage(c *gin.Context) {
 	}
 
 	resp, err := h.fetchUsage(conn)
+	log.Printf("[USAGE] Fetched usage for %s: %+v (err=%v)", conn.Name, resp, err)
 	if err != nil {
 		// Try a forced refresh on auth errors.
 		if isAuthExpiredError(err) && conn.RefreshToken != "" {
@@ -257,6 +269,7 @@ func fetchKiroUsage(conn *domain.ProviderConnection) (*UsageResponse, error) {
 // parseKiroUsageBody fills UsageResponse from the CodeWhisperer GetUsageLimits JSON body
 // using the same field mapping as parseKiroQuotaResponse in quota-handler.go.
 func parseKiroUsageBody(body []byte, resp *UsageResponse) {
+	log.Printf("[Kiro Quota] Raw response: %s", string(body))
 	var data map[string]interface{}
 	if json.Unmarshal(body, &data) != nil {
 		return
@@ -288,6 +301,33 @@ func parseKiroUsageBody(body []byte, resp *UsageResponse) {
 		}
 		used, _ := b["currentUsageWithPrecision"].(float64)
 		total, _ := b["usageLimitWithPrecision"].(float64)
+
+		// Parse overage data from first bucket (CREDIT/AGENTIC_REQUEST)
+		if resp.Overages == nil {
+			overageUsed, _ := b["currentOveragesWithPrecision"].(float64)
+			overageCap, _ := b["overageCapWithPrecision"].(float64)
+			overageCharge, _ := b["overageCharges"].(float64)
+			overageRate, _ := b["overageRate"].(float64)
+
+			if overageUsed > 0 {
+				// Get overage status from overageConfiguration
+				status := ""
+				if overageCfg, ok := data["overageConfiguration"].(map[string]interface{}); ok {
+					if s, ok := overageCfg["overageStatus"].(string); ok {
+						status = s
+					}
+				}
+
+				resp.Overages = &OverageInfo{
+					Used:      overageUsed,
+					Cap:       overageCap,
+					Remaining: overageCap - overageUsed,
+					Status:    status,
+					Charge:    overageCharge,
+					Rate:      overageRate,
+				}
+			}
+		}
 
 		if strings.EqualFold(resType, "AGENTIC_REQUEST") || strings.EqualFold(resType, "CREDIT") {
 			resp.addBucket("requests", "Requests", int(used), int(total), resetAt, false)

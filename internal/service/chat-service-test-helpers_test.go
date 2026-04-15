@@ -178,7 +178,7 @@ func newFakeExecutor(responses map[string]fakeExecuteResponse) *fakeExecutor {
 	return &fakeExecutor{responses: responses, calls: make([]fakeExecuteCall, 0)}
 }
 
-func (e *fakeExecutor) Execute(model string, _ []byte, credentials *domain.Credentials, _ string) (io.ReadCloser, int, error) {
+func (e *fakeExecutor) Execute(model string, _ []byte, credentials *domain.Credentials, _ port.RequestLogger) (io.ReadCloser, int, error) {
 	e.calls = append(e.calls, fakeExecuteCall{ConnectionID: credentials.ConnectionID, Model: model})
 	key := credentials.ConnectionID + "|" + model
 	resp, ok := e.responses[key]

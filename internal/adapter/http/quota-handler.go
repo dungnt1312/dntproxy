@@ -228,6 +228,26 @@ func parseKiroQuotaResponse(body []byte, result gin.H) {
 					}
 				}
 
+				// Overage info
+				overageUsed, _ := b["currentOveragesWithPrecision"].(float64)
+				overageCap, _ := b["overageCapWithPrecision"].(float64)
+				overageCharge, _ := b["overageCharges"].(float64)
+				overageRate, _ := b["overageRate"].(float64)
+
+				if overageUsed > 0 {
+					result["overageUsed"] = overageUsed
+					result["overageCap"] = overageCap
+					result["overageRemaining"] = overageCap - overageUsed
+					result["overageCharge"] = overageCharge
+					result["overageRate"] = overageRate
+
+					if overageCfg, ok := data["overageConfiguration"].(map[string]interface{}); ok {
+						if status, ok := overageCfg["overageStatus"].(string); ok {
+							result["overageStatus"] = status
+						}
+					}
+				}
+
 				if oc, _ := b["overageCharges"].(float64); oc > 0 {
 					result["overageCharges"] = oc
 				}

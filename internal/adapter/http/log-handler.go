@@ -56,73 +56,44 @@ func apiLogStream(c *gin.Context) {
 	ch := appLogger.Subscribe()
 	defer appLogger.Unsubscribe(ch)
 
-	sendLogs := func() bool {
-		logs, err := appLogger.List(parseLogQuery(c))
-		if err != nil {
-			return false
-		}
-		data, _ := json.Marshal(logs)
+	query := parseLogQuery(c)
+
+	// Send initial batch immediately
+	logs, err := appLogger.List(query)
+	if err == nil {
+		data, _ := json.Marshal(map[string]interface{}{"type": "init", "logs": logs})
 		if _, err := c.Writer.Write([]byte("data: " + string(data) + "\n\n")); err != nil {
-			return false
+			return
 		}
 		c.Writer.Flush()
-		return true
-	}
-
-	// Send initial batch immediately.
-	if !sendLogs() {
-		return
-	}
-
-	// Debounce: when multiple log entries arrive in rapid succession (a single
-	// chat request produces 4-6 entries), wait a short window before querying
-	// SQLite so the client receives one consolidated update instead of many.
-	const debounceDelay = 150 * time.Millisecond
-	var debounceTimer *time.Timer
-	debounceCh := make(chan struct{}, 1)
-
-	drainAndDebounce := func() {
-		// Drain any extra signals already queued in the channel.
-		for {
-			select {
-			case <-ch:
-			default:
-				goto drained
-			}
-		}
-	drained:
-		// Reset or start the debounce timer.
-		if debounceTimer == nil {
-			debounceTimer = time.AfterFunc(debounceDelay, func() {
-				select {
-				case debounceCh <- struct{}{}:
-				default:
-				}
-			})
-		} else {
-			debounceTimer.Reset(debounceDelay)
-		}
 	}
 
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
-	defer func() {
-		if debounceTimer != nil {
-			debounceTimer.Stop()
-		}
-	}()
 
 	clientGone := c.Request.Context().Done()
 	for {
 		select {
 		case <-clientGone:
 			return
-		case <-ch:
-			drainAndDebounce()
-		case <-debounceCh:
-			if !sendLogs() {
+		case entry := <-ch:
+			// Filter the entry in-memory based on the current query
+			if query.ConnectionID != "" && query.ConnectionID != "all" && entry.ConnectionID != query.ConnectionID {
+				continue
+			}
+			if query.Provider != "" && query.Provider != "all" && entry.Provider != query.Provider {
+				continue
+			}
+			if query.Level != "" && query.Level != "all" && entry.Level != query.Level {
+				continue
+			}
+			// (We could do search and range filtering, but for deltas this is usually fine)
+
+			data, _ := json.Marshal(map[string]interface{}{"type": "delta", "log": entry})
+			if _, err := c.Writer.Write([]byte("data: " + string(data) + "\n\n")); err != nil {
 				return
 			}
+			c.Writer.Flush()
 		case <-ticker.C:
 			c.Writer.Write([]byte(": keepalive\n\n"))
 			c.Writer.Flush()

@@ -18,6 +18,7 @@ import (
 	openai "github.com/dungnt/dntproxy/internal/adapter/openai"
 	"github.com/dungnt/dntproxy/internal/adapter/shared"
 	"github.com/dungnt/dntproxy/internal/domain"
+	"github.com/dungnt/dntproxy/internal/logger"
 	"github.com/dungnt/dntproxy/internal/port"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -878,7 +879,8 @@ func apiTestModel(store port.CredentialStore, providers port.ProviderRegistry) g
 			}
 		}
 
-		stream, statusCode, execErr := executor.Execute(modelName, bodyBytes, creds, uuid.New().String())
+		reqlog := logger.NewRequestLog(uuid.New().String())
+		stream, statusCode, execErr := executor.Execute(modelName, bodyBytes, creds, reqlog)
 		if stream != nil {
 			stream.Close()
 		}

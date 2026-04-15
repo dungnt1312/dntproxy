@@ -6,14 +6,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/dungnt/dntproxy/internal/adapter/shared"
 	"github.com/dungnt/dntproxy/internal/domain"
-	"github.com/dungnt/dntproxy/internal/logger"
+	"github.com/dungnt/dntproxy/internal/port"
 )
 
 // Executor handles making requests to Anthropic Messages API.
@@ -113,7 +112,7 @@ type openaiToolFunction struct {
 }
 
 // Execute sends a request to Anthropic Messages API and returns a streaming reader.
-func (e *Executor) Execute(model string, body []byte, credentials *domain.Credentials, requestID string) (io.ReadCloser, int, error) {
+func (e *Executor) Execute(model string, body []byte, credentials *domain.Credentials, reqlog port.RequestLogger) (io.ReadCloser, int, error) {
 	// Parse OpenAI request
 	var openaiReq openaiChatRequest
 	if err := json.Unmarshal(body, &openaiReq); err != nil {
@@ -148,31 +147,7 @@ func (e *Executor) Execute(model string, body []byte, credentials *domain.Creden
 	req.Header.Set("x-api-key", credentials.APIKey)
 	req.Header.Set("anthropic-version", "2023-06-01")
 
-	logTag := "ANT"
-	log.Printf("[%s] --> %s | conn=%s | model=%s | body_size=%d", logTag, url, credentials.ConnectionName, model, len(anthropicBody))
-	if credentials.APIKey != "" {
-		log.Printf("[%s]     x-api-key: %s", logTag, shared.MaskedToken(credentials.APIKey))
-	}
-
-	appLogger := logger.Get()
-	appLogger.AddEntry(domain.LogEntry{
-		Provider:       logTag,
-		Direction:      "outbound",
-		Method:         "POST",
-		Path:           url,
-		ConnectionID:   credentials.ConnectionID,
-		ConnectionName: credentials.ConnectionName,
-		Model:          model,
-		RequestID:      requestID,
-		Message:        "Anthropic request sent",
-		BodySize:       len(anthropicBody),
-		RequestBody: shared.TruncateBody(func() []byte {
-			if shared.ShouldLogRawBodies() {
-				return anthropicBody
-			}
-			return shared.SanitizeBody(anthropicBody)
-		}(), 8192),
-	})
+	reqlog.SetBodies(string(shared.TruncateBody(shared.SanitizeBody(anthropicBody), 8192)), "")
 
 	start := time.Now()
 
@@ -181,78 +156,26 @@ func (e *Executor) Execute(model string, body []byte, credentials *domain.Creden
 	duration := time.Since(start)
 
 	if err != nil {
-		errMsg := fmt.Sprintf("Anthropic request failed: %s", err)
-		log.Printf("[%s] <-- %s | conn=%s | model=%s | status=502 | duration=%s | error=%s",
-			logTag, url, credentials.ConnectionName, model, duration, err)
-		appLogger.AddEntry(domain.LogEntry{
-			Level:          "ERROR",
-			Provider:       logTag,
-			Direction:      "response",
-			Path:           url,
-			StatusCode:     502,
-			DurationMs:     duration.Milliseconds(),
-			ConnectionID:   credentials.ConnectionID,
-			ConnectionName: credentials.ConnectionName,
-			Model:          model,
-			RequestID:      requestID,
-			Message:        "Anthropic request failed",
-			Error:          errMsg,
-		})
+		reqlog.Upstream(url, "POST", 502, duration, err)
 		return nil, 502, fmt.Errorf("anthropic request failed: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 1*1024*1024))
+		bodyBytes, errRead := io.ReadAll(io.LimitReader(resp.Body, 1*1024*1024))
 		resp.Body.Close()
 
 		respBodyStr := "Unknown error"
-		if err == nil {
+		if errRead == nil {
 			respBodyStr = string(bodyBytes)
 		}
-		log.Printf("[%s] <-- %s | conn=%s | model=%s | status=%d | duration=%s | error body_size=%d",
-			logTag, url, credentials.ConnectionName, model, resp.StatusCode, duration, len(bodyBytes))
-		log.Printf("[%s] ERROR body: %s", logTag, respBodyStr)
-
-		appLogger.AddEntry(domain.LogEntry{
-			Level:          "ERROR",
-			Provider:       logTag,
-			Direction:      "response",
-			Path:           url,
-			StatusCode:     resp.StatusCode,
-			DurationMs:     duration.Milliseconds(),
-			ConnectionID:   credentials.ConnectionID,
-			ConnectionName: credentials.ConnectionName,
-			Model:          model,
-			RequestID:      requestID,
-			Message:        "Anthropic request failed",
-			BodySize:       len(bodyBytes),
-			Error:          respBodyStr,
-			ResponseBody: shared.TruncateBody(func() []byte {
-				if shared.ShouldLogRawBodies() {
-					return bodyBytes
-				}
-				return shared.SanitizeBody(bodyBytes)
-			}(), 8192),
-		})
+		
+		reqlog.SetBodies("", string(shared.TruncateBody(shared.SanitizeBody(bodyBytes), 8192)))
+		errUpstream := fmt.Errorf("%s", respBodyStr)
+		reqlog.Upstream(url, "POST", resp.StatusCode, duration, errUpstream)
 		return nil, resp.StatusCode, fmt.Errorf("anthropic returned %d: %s", resp.StatusCode, respBodyStr)
 	}
 
-	log.Printf("[%s] <-- %s | conn=%s | model=%s | status=%d | duration=%s | stream_started=true",
-		logTag, url, credentials.ConnectionName, model, resp.StatusCode, duration)
-
-	appLogger.AddEntry(domain.LogEntry{
-		Level:          "INFO",
-		Provider:       logTag,
-		Direction:      "response",
-		Path:           url,
-		StatusCode:     resp.StatusCode,
-		DurationMs:     duration.Milliseconds(),
-		ConnectionID:   credentials.ConnectionID,
-		ConnectionName: credentials.ConnectionName,
-		Model:          model,
-		RequestID:      requestID,
-		Message:        "Anthropic response stream started",
-	})
+	reqlog.Upstream(url, "POST", resp.StatusCode, duration, nil)
 
 	// Create pipe to transform Anthropic SSE to OpenAI SSE
 	pr, pw := io.Pipe()
@@ -307,8 +230,7 @@ func (e *Executor) Execute(model string, body []byte, credentials *domain.Creden
 
 		// Log usage if available
 		if state.Usage.PromptTokens > 0 || state.Usage.CompletionTokens > 0 {
-			appLogger.AddUsage(logTag, requestID, credentials.ConnectionID, credentials.ConnectionName,
-				model, state.Usage.PromptTokens, state.Usage.CompletionTokens, "anthropic_usage")
+			reqlog.SetUsage(state.Usage.PromptTokens, state.Usage.CompletionTokens, "anthropic_usage")
 		}
 	}()
 

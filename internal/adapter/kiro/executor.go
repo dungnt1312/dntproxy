@@ -5,13 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"time"
 
 	"github.com/dungnt/dntproxy/internal/adapter/shared"
 	"github.com/dungnt/dntproxy/internal/domain"
-	"github.com/dungnt/dntproxy/internal/logger"
+	"github.com/dungnt/dntproxy/internal/port"
 	"github.com/google/uuid"
 )
 
@@ -29,7 +28,7 @@ func NewExecutor() *Executor {
 
 // Execute sends a translated request to Kiro and returns a streaming reader
 // that emits OpenAI-compatible SSE data.
-func (e *Executor) Execute(model string, body []byte, credentials *domain.Credentials, requestID string) (io.ReadCloser, int, error) {
+func (e *Executor) Execute(model string, body []byte, credentials *domain.Credentials, reqlog port.RequestLogger) (io.ReadCloser, int, error) {
 	// Parse the OpenAI request
 	var openaiReq OpenAIRequest
 	if err := json.Unmarshal(body, &openaiReq); err != nil {
@@ -66,30 +65,7 @@ func (e *Executor) Execute(model string, body []byte, credentials *domain.Creden
 		req.Header.Set("Authorization", "Bearer "+credentials.AccessToken)
 	}
 
-	appLogger := logger.Get()
-
-	log.Printf("[KIRO] --> %s %s | conn=%s | model=%s | req_id=%s",
-		req.Method, kiroBaseURL, credentials.ConnectionName, model, requestID)
-	log.Printf("[KIRO]     Authorization: Bearer %s | Content-Type: %s | body_size=%d",
-		shared.MaskedToken(credentials.AccessToken), req.Header.Get("Content-Type"), len(payloadBytes))
-	appLogger.AddEntry(domain.LogEntry{
-		Provider:       "KIRO",
-		Direction:      "outbound",
-		Method:         req.Method,
-		Path:           kiroBaseURL,
-		ConnectionID:   credentials.ConnectionID,
-		ConnectionName: credentials.ConnectionName,
-		Model:          model,
-		RequestID:      requestID,
-		Message:        "Kiro request sent",
-		BodySize:       len(payloadBytes),
-		RequestBody: shared.TruncateBody(func() []byte {
-			if shared.ShouldLogRawBodies() {
-				return payloadBytes
-			}
-			return shared.SanitizeBody(payloadBytes)
-		}(), 8192),
-	})
+	reqlog.SetBodies(string(shared.TruncateBody(shared.SanitizeBody(payloadBytes), 8192)), "")
 
 	start := time.Now()
 
@@ -98,79 +74,27 @@ func (e *Executor) Execute(model string, body []byte, credentials *domain.Creden
 	duration := time.Since(start)
 
 	if err != nil {
-		errMsg := fmt.Sprintf("kiro request failed: %s", err)
-		log.Printf("[KIRO] <-- %s | conn=%s | model=%s | status=502 | duration=%s | req_id=%s | error=%s",
-			kiroBaseURL, credentials.ConnectionName, model, duration, requestID, err)
-		appLogger.AddEntry(domain.LogEntry{
-			Level:          "ERROR",
-			Provider:       "KIRO",
-			Direction:      "response",
-			Path:           kiroBaseURL,
-			StatusCode:     502,
-			DurationMs:     duration.Milliseconds(),
-			ConnectionID:   credentials.ConnectionID,
-			ConnectionName: credentials.ConnectionName,
-			Model:          model,
-			RequestID:      requestID,
-			Message:        "Kiro request failed",
-			Error:          errMsg,
-		})
+		reqlog.Upstream(kiroBaseURL, "POST", 502, duration, err)
 		return nil, 502, fmt.Errorf("kiro request failed: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 1*1024*1024))
+		bodyBytes, errRead := io.ReadAll(io.LimitReader(resp.Body, 1*1024*1024))
 		resp.Body.Close()
 
 		respBodyStr := "Unknown error"
-		if err == nil {
+		if errRead == nil {
 			respBodyStr = string(bodyBytes)
 		}
+		
+		reqlog.SetBodies("", string(shared.TruncateBody(shared.SanitizeBody(bodyBytes), 8192)))
+		errUpstream := fmt.Errorf("%s", respBodyStr)
+		reqlog.Upstream(kiroBaseURL, "POST", resp.StatusCode, duration, errUpstream)
 
-		log.Printf("[KIRO] <-- %s | conn=%s | model=%s | status=%d | duration=%s | req_id=%s | error body_size=%d",
-			kiroBaseURL, credentials.ConnectionName, model, resp.StatusCode, duration, requestID, len(bodyBytes))
-		log.Printf("[KIRO] ERROR body: %s", respBodyStr)
-
-		appLogger.AddEntry(domain.LogEntry{
-			Level:          "ERROR",
-			Provider:       "KIRO",
-			Direction:      "response",
-			Path:           kiroBaseURL,
-			StatusCode:     resp.StatusCode,
-			DurationMs:     duration.Milliseconds(),
-			ConnectionID:   credentials.ConnectionID,
-			ConnectionName: credentials.ConnectionName,
-			Model:          model,
-			RequestID:      requestID,
-			Message:        "Kiro response error",
-			BodySize:       len(bodyBytes),
-			Error:          respBodyStr,
-			ResponseBody: shared.TruncateBody(func() []byte {
-				if shared.ShouldLogRawBodies() {
-					return bodyBytes
-				}
-				return shared.SanitizeBody(bodyBytes)
-			}(), 8192),
-		})
-		return nil, resp.StatusCode, fmt.Errorf("kiro returned %d: %s", resp.StatusCode, respBodyStr)
+		return nil, resp.StatusCode, fmt.Errorf("returned %d: %s", resp.StatusCode, respBodyStr)
 	}
 
-	log.Printf("[KIRO] <-- %s | conn=%s | model=%s | status=%d | duration=%s | req_id=%s | stream_started=true",
-		kiroBaseURL, credentials.ConnectionName, model, resp.StatusCode, duration, requestID)
-
-	appLogger.AddEntry(domain.LogEntry{
-		Level:          "INFO",
-		Provider:       "KIRO",
-		Direction:      "response",
-		Path:           kiroBaseURL,
-		StatusCode:     resp.StatusCode,
-		DurationMs:     duration.Milliseconds(),
-		ConnectionID:   credentials.ConnectionID,
-		ConnectionName: credentials.ConnectionName,
-		Model:          model,
-		RequestID:      requestID,
-		Message:        "Kiro response stream started",
-	})
+	reqlog.Upstream(kiroBaseURL, "POST", resp.StatusCode, duration, nil)
 
 	// Create a pipe to transform EventStream → SSE
 	pr, pw := io.Pipe()
@@ -181,26 +105,12 @@ func (e *Executor) Execute(model string, body []byte, credentials *domain.Creden
 
 		transformer := NewResponseTransformer(model)
 		transformer.SetUsageCallback(func(usage UsageReport) {
-			appLogger.AddUsage("KIRO", requestID, credentials.ConnectionID, credentials.ConnectionName,
-				model, usage.InputTokens, usage.OutputTokens, usage.Source)
+			reqlog.SetUsage(usage.InputTokens, usage.OutputTokens, usage.Source)
 		})
 		transformer.SetPayloadCallback(func(payload PayloadReport) {
-			metadata, _ := json.Marshal(map[string]interface{}{
-				"responsePreview": payload.ResponsePreview,
-				"truncated":       payload.Truncated,
-				"source":          payload.Source,
-			})
-			appLogger.AddEntry(domain.LogEntry{
-				Provider:       "KIRO",
-				Direction:      "payload",
-				ConnectionID:   credentials.ConnectionID,
-				ConnectionName: credentials.ConnectionName,
-				Model:          model,
-				RequestID:      requestID,
-				Message:        "Response payload captured",
-				MetadataJSON:   string(metadata),
-			})
+			reqlog.SetBodies("", payload.ResponsePreview)
 		})
+		
 		buf := make([]byte, 0, 64*1024)
 		readBuf := make([]byte, 32*1024)
 

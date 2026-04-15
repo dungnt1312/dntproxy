@@ -333,6 +333,8 @@ type CodexResponseState struct {
 	CurrentCallID    string
 	FinishReasonSent bool
 	Usage            *codexUsage
+	PromptTokens     int
+	CompletionTokens int
 }
 
 type codexUsage struct {
@@ -477,6 +479,9 @@ func TranslateCodexEvent(eventType string, data []byte, state *CodexResponseStat
 				"completion_tokens": completionTokens,
 				"total_tokens":      promptTokens + completionTokens,
 			}
+			
+			state.PromptTokens = promptTokens
+			state.CompletionTokens = completionTokens
 
 			// Add prompt_tokens_details if cache tokens exist
 			if u.CacheReadTokens > 0 || u.CacheCreationTokens > 0 {

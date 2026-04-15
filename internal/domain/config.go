@@ -45,7 +45,7 @@ func DefaultConfig() AppConfig {
 			StickyRoundRobinLimit: 3,
 			ComboStrategy:         "fallback",
 			RequireAPIKey:         false,
-			Port:                  20128,
+			Port:                  20199,
 		},
 		ModelRegistry: DefaultModelRegistry(),
 	}

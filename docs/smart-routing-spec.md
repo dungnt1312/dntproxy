@@ -94,7 +94,7 @@ Authorization: Bearer pk-abc123def456
 ### 3.3 Logic
 
 1. Extract API key từ `Authorization: Bearer <key>` header
-2. Hash key bằng bcrypt (hoặc SHA256 cho performance)
+2. Hash key bằng HMAC-SHA256 với fixed server secret (fast, constant-time; bcrypt ~100ms — incompatible với <0.1ms latency target)
 3. Lookup hash trong in-memory key map
 4. Kiểm tra `IsActive == true`
 5. Kiểm tra `ExpiresAt` (nếu có) chưa quá hạn
@@ -222,7 +222,8 @@ TPM enforcement chỉ thực hiện **post-flight** (sau khi nhận response t�
 - Token counting khác nhau giữa providers (tiktoken cho OpenAI, claude tokenizer cho Anthropic)
 - Proxy không bundle tokenizer libraries → character estimation quá inaccurate
 - Messages chứa images (vision) thì pixel-based token count, phức tạp
-- Best-effort enforcement ở post-flight là đủ tốt cho rate limiting use case
+
+**Lưu ý — Eventually Consistent:** Post-flight TPM là **soft enforcement** — concurrent requests đều pass check trước khi deduction xảy ra. Under high concurrency, burst consumption có thể vượt TPM limit trong 1 window. Acceptable cho current load levels; nếu cần strict enforcement sau này thì cần pre-flight estimate (YAGNI).
 
 ```
 // Post-flight (async, trong Step 9):
@@ -264,7 +265,7 @@ TokenBucket {
 | Process restart | Tất cả buckets reset → brief unlimited window (acceptable) |
 | `rpm=0, tpm=0` | Skip check entirely, unlimited |
 | Concurrent requests | Mutex per bucket, serialized access |
-| Stale buckets | Không eviction needed, memory很小 |
+| Stale buckets | Không eviction needed, memory footprint nhỏ |
 
 ---
 
@@ -285,7 +286,7 @@ Kiểm tra API key có đủ credit để xử lý request trước khi forward 
 ```
 // Character-based estimation (no tokenizer dependency):
 estimated_input_tokens = len(serialize(request.messages)) / 4  // ~4 chars per token
-estimated_output_tokens = request.max_tokens OR 4096 (default)
+estimated_output_tokens = min(request.max_tokens OR 4096, 4096)  // cap at 4096 — large max_tokens (e.g. 128000) gây false-reject dù balance thực sự đủ
 
 pricing = lookup_pricing(model)
 IF pricing exists:
@@ -298,15 +299,18 @@ ELSE:
 #### 6.2.2 Balance Check
 
 ```
-IF credit_limit > 0 AND credit_balance > credit_limit:
-  → Key đã vượt giới hạn, nhưng vẫn check balance
+// credit_balance = remaining USD balance (decreases on each deduct)
+// credit_limit   = 0 means unlimited (no cap); > 0 enables credit tracking
+
+IF credit_limit == 0:
+  → SKIP (unlimited)
 
 IF pricing == nil (unknown model):
   → SKIP pre-flight check
   → Proceed to execution
   → Actual cost calculated post-execution
 
-IF credit_balance < estimated_cost:
+IF credit_balance < estimated_cost - CREDIT_OVERDRAFT_TOLERANCE:
   → REJECT (insufficient credits)
 ```
 
@@ -459,7 +463,8 @@ IF model string exists trong combo map:
 | TTL expired (1h) | Remove entry, next request triggers Tier 2/3 |
 | Admin adds/removes connection | Invalidate all entries for affected provider |
 | Admin updates static registry | Invalidate affected entries |
-| Connection health change | NO invalidation (health check ở Step 6) |
+| Admin updates `connection.supported_models` | Invalidate all Tier 1 entries for that provider |
+| Connection health change | NO invalidation (health check ở Step 7) |
 
 ### 7.5 Tier 2: Static Registry
 
@@ -524,14 +529,18 @@ model_registry.patterns = [
 
 #### 7.6.1 Parallel Probe
 
+**Deduplication (singleflight):** Concurrent requests cùng resolve model chưa có trong cache → chỉ 1 discovery goroutine chạy, các request khác await cùng result. Tránh thundering herd dội provider. Dùng `singleflight.Group` keyed by normalized model_string.
+
 ```
-FOR each healthy connection (1 per provider):
-  GO probe(connection, model_string)
+result, _ = discoveryGroup.Do(model_string, func() {
+  FOR each healthy connection (1 per provider):
+    GO probe(connection, model_string)
 
-Wait all probes complete (max 5s timeout)
+  Wait all probes complete (max 5s timeout)
 
-Collect results:
-  providers = [provider_id for each probe that returned success]
+  return [provider_id for each probe that returned success]
+})
+providers = result
 ```
 
 #### 7.6.2 Probe Logic
@@ -590,7 +599,9 @@ IF found providers:
   → Return providers
 
 IF no providers found:
-  → Cache negative result into Tier 1 (TTL 1 min)
+  miss_count = increment(model_string + ":miss")  // in-memory counter, reset on cache hit
+  ttl = min(1min * 2^(miss_count-1), 15min)  // 1m → 2m → 4m → 8m → 15m (capped)
+  → Cache negative result vào Tier 1 (TTL = ttl)
   → Return 404 Model Not Found
 ```
 
@@ -744,7 +755,7 @@ IF connection.auth_type == "oauth":
                 (might fail at execution, will trigger fallback)
 ```
 
-**Token refresh là synchronous** trong selection flow vì cần valid token để execute. Nhưng không block lâu (<100ms thường).
+**Token refresh:** Background scheduler (`token-refresh-scheduler.go`) xử lý proactive refresh (5-min buffer trước expiry). Sync refresh trong selection flow chỉ là fallback nếu background scheduler missed (e.g. sau process restart). Sync refresh thường <100ms — không phải tiêu chuẩn latency thông thường nhưng acceptable cho edge case này.
 
 #### 9.2.7 Sort by Priority
 
@@ -848,9 +859,9 @@ RETURN last_error (wrapped: "all connections failed")
 
 | Condition | Cooldown | Backoff | Model Lock |
 |-----------|----------|---------|------------|
-| `401 Unauthorized` | 5 min | Level +1 | Yes |
-| `403 Forbidden` | 5 min | Level +1 | Yes |
-| `402 Payment Required` | 5 min | Level +1 | Yes |
+| `401 Unauthorized` | 5 min | Level +1 | No |
+| `403 Forbidden` | 5 min | Level +1 | No |
+| `402 Payment Required` | 5 min | Level +1 | No |
 | `429 Too Many Requests` | 1 min | Level +1 | Yes |
 | `500 Internal Server` | 2s | Level +1 | Yes |
 | `502 Bad Gateway` | 2s | Level +1 | Yes |
@@ -862,6 +873,8 @@ RETURN last_error (wrapped: "all connections failed")
 | Unknown status (default) | 2s | Level +1 | Yes |
 
 **Note:** Default behavior là fallback (fail-open), vì tốt hơn là thử connection khác thay vì reject.
+
+**Auth/Payment (401/402/403) không dùng Model Lock** vì đây là connection-level issue (token expired, quota exhausted), không phải model-specific. Model lock chỉ có nghĩa khi 1 connection không support model cụ thể (e.g. rate limit cho riêng model đó).
 
 #### 10.4.3 Rate Limit Keywords (trong error text)
 
@@ -1025,6 +1038,7 @@ Khi connection **fail mid-stream** (sau khi đã bắt đầu trả SSE response
 IF streaming started AND connection fails mid-stream:
   1. Emit error event:
      data: {"error":{"message":"Upstream connection lost","type":"stream_error","code":"connection_lost"}}
+     // Khi lỗi do server shutdown gracefully: dùng code "server_shutdown" để client phân biệt và auto-retry
   
   2. Emit done signal:
      data: [DONE]
@@ -1033,8 +1047,9 @@ IF streaming started AND connection fails mid-stream:
   
   4. Log as partial failure:
      - status = "partial_failure"
-     - tokens counted = actual tokens received before failure
-     - cost = based on actual tokens (not estimated)
+     - tokens counted = usage.total_tokens nếu provider đã gửi usage event (thường chunk cuối)
+                       ELSE character-estimate từ streamed content: len(streamed_text) / 4
+     - cost = based on actual tokens; nếu usage chưa arrive thì dùng estimate (log rõ là estimated)
   
   5. Mark connection unhealthy (same as execution loop failure)
   
@@ -1081,7 +1096,8 @@ ASYNC:
   key.updated_at = now
   config.mu.Unlock()
   
-  config.save()  // async write to JSON file
+  saveQueue <- saveRequest{}  // enqueue vào dedicated writer goroutine (serialized)
+  // ⚠️ config.save() KHÔNG được gọi ngoài mutex — concurrent deductions có thể override nhau khi write
 ```
 
 #### 11.2.3 Credit Transaction Log
@@ -1156,7 +1172,7 @@ Backpressure:
 Shutdown (SIGTERM/SIGINT):
   1. Stop accepting new requests (close listener)
   2. Wait for in-flight requests to complete (max 30s timeout)
-  3. After timeout: force-close remaining SSE streams with stream_error
+  3. After timeout: force-close remaining SSE streams với `stream_error` (code: `server_shutdown`)
   4. Drain log queue (max 5s)
   5. Final flush to SQLite
   6. Flush pending credit deductions to db.json
@@ -1227,6 +1243,7 @@ data: [DONE]
 | `upstream_error` | `provider_error` | 502 | Provider trả lỗi |
 | `combo_error` | `all_models_failed` | 502 | Tất cả combo models fail |
 | `stream_error` | `connection_lost` | — (in SSE) | Connection fail mid-stream |
+| `stream_error` | `server_shutdown` | — (in SSE) | Server shutdown gracefully, client nên auto-retry |
 
 ---
 

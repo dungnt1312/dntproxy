@@ -36,11 +36,23 @@ This roadmap captures the progress and next milestones for `dntproxy`.
 - [x] Cloudflare tunnel integration (auto-download, lifecycle management, CLI + API).
 - [x] Tunnel UI: enable/disable/status dashboard.
 
-## Phase 6: Polish & Production (🚧 In Progress)
+## Phase 6: Anthropic Integration (✅ Completed)
+- [x] Anthropic Messages API executor with bidirectional translation.
+- [x] Native `/v1/messages` endpoint support.
+- [x] Tool calling and system message handling.
+- [x] SSE streaming with proper event conversion.
+- [x] Stop reason mapping and content block handling.
+
+## Phase 7: Advanced Features (✅ Completed)
+- [x] **Quota Checking System**: Flexible bucket-based quota checking with provider-specific implementations (OpenAI, Kiro, MiniMax).
+- [x] **Model Fetching**: Dynamic model discovery with TTL caching and singleflight deduplication.
+- [x] **Model Cache**: 5-minute TTL cache to reduce API calls.
+- [x] **Enhanced Connections UI**: Collapsible provider groups, inline editing, quota panel, logs viewer, provider logos.
+
+## Phase 8: Polish & Production (🚧 In Progress)
 - [ ] **Graceful Shutdown**: Listen for SIGTERM / SIGINT and handle open persistent SSE connections gracefully.
 - [ ] **Cross-Platform Delivery**: Enhance build configuration (Makefiles, CI, Goreleaser).
 - [ ] **Dockerization**: Provide an official `Dockerfile` and `docker-compose.yml` pattern.
-- [ ] **Anthropic Adapter**: Implement full provider executor for Claude models.
 
 ## Future Considerations
 - [ ] Request rate limiting and throttling

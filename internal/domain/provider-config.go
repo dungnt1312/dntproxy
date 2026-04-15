@@ -166,9 +166,9 @@ var ProviderConfigs = map[string]ProviderConfig{
 		ChatPath:       "/v1/messages",
 		Format:         FormatAnthropicMsg,
 		DefaultModels: []string{
-			"claude-sonnet-4-20250514",
-			"claude-opus-4-20250514",
-			"claude-haiku-4-20250514",
+			"claude-sonnet",
+			"claude-opus",
+			"claude-haiku",
 		},
 	},
 

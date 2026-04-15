@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"sync"
 	"time"
 
@@ -22,10 +21,10 @@ type JsonDB struct {
 	cache    *domain.AppConfig
 
 	// Config cache to reduce disk I/O (TTL-based, invalidated on Save)
-	configCacheMu   sync.RWMutex
-	cachedConfig    *domain.AppConfig
-	cachedConfigAt  time.Time
-	configCacheTTL  time.Duration
+	configCacheMu  sync.RWMutex
+	cachedConfig   *domain.AppConfig
+	cachedConfigAt time.Time
+	configCacheTTL time.Duration
 }
 
 // NewJsonDB creates a new JsonDB, ensuring the directory and file exist.
@@ -49,8 +48,8 @@ func NewJsonDB(path string) (*JsonDB, error) {
 	}
 
 	return &JsonDB{
-		filePath: path,
-		fileLock: flock.New(path + ".lock"),
+		filePath:       path,
+		fileLock:       flock.New(path + ".lock"),
 		configCacheTTL: 2 * time.Second,
 	}, nil
 }
@@ -112,6 +111,14 @@ func (db *JsonDB) readFromDisk() (*domain.AppConfig, error) {
 		cfg = domain.DefaultConfig()
 	}
 
+	// Migrate: ensure all connections have a valid weight.
+	// Old configs may have Priority (now removed) or Weight=0.
+	for i := range cfg.ProviderConnections {
+		if cfg.ProviderConnections[i].Weight <= 0 {
+			cfg.ProviderConnections[i].Weight = 100
+		}
+	}
+
 	db.cache = &cfg
 	return &cfg, nil
 }
@@ -157,7 +164,8 @@ func (db *JsonDB) writeToDisk(cfg *domain.AppConfig) error {
 	return nil
 }
 
-// GetActiveConnections returns active connections for a provider, sorted by priority.
+// GetActiveConnections returns active connections for a provider.
+// No sorting: the AccountSelector uses weighted random selection.
 func (db *JsonDB) GetActiveConnections(provider string) ([]domain.ProviderConnection, error) {
 	cfg, err := db.Load()
 	if err != nil {
@@ -170,11 +178,6 @@ func (db *JsonDB) GetActiveConnections(provider string) ([]domain.ProviderConnec
 			result = append(result, c)
 		}
 	}
-
-	// Sort by priority (lower = higher priority)
-	sort.Slice(result, func(i, j int) bool {
-		return result[j].Priority > result[i].Priority
-	})
 
 	return result, nil
 }
@@ -311,4 +314,13 @@ func (db *JsonDB) GetModelRegistry() (*domain.ModelRegistry, error) {
 		cfg.ModelRegistry = domain.DefaultModelRegistry()
 	}
 	return cfg.ModelRegistry, nil
+}
+
+// GetConnectionIDsForCombo returns ConnectionIDs for a combo name (empty if combo not found or no restriction).
+func (db *JsonDB) GetConnectionIDsForCombo(comboName string) ([]string, error) {
+	combo, err := db.GetComboByName(comboName)
+	if err != nil || combo == nil {
+		return nil, err
+	}
+	return combo.ConnectionIDs, nil
 }

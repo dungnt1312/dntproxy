@@ -72,7 +72,7 @@ dntproxy serve
 Health check:
 
 ```bash
-curl http://127.0.0.1:20128/health
+curl http://127.0.0.1:20199/health
 ```
 
 ## Local Development

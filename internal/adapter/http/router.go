@@ -27,6 +27,7 @@ func NewRouter(store port.CredentialStore, providers port.ProviderRegistry, tunn
 	v1.Use(apiKeyMiddleware(store))
 	{
 		v1.POST("/chat/completions", chatHandler(chatService, store))
+		v1.POST("/messages", messagesHandler(chatService, store))
 		v1.GET("/models", modelsHandler(store))
 	}
 
@@ -41,7 +42,7 @@ func NewRouter(store port.CredentialStore, providers port.ProviderRegistry, tunn
 		settings, _ := store.GetSettings()
 		listenPort := settings.Port
 		if listenPort == 0 {
-			listenPort = 20128
+			listenPort = 20199
 		}
 		RegisterTunnelRoutes(r, tunnelMgr, listenPort)
 	}

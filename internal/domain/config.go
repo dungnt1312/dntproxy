@@ -8,15 +8,17 @@ type AppConfig struct {
 	APIKeys             []APIKey             `json:"apiKeys"`
 	Settings            Settings             `json:"settings"`
 	ModelRegistry       *ModelRegistry       `json:"modelRegistry,omitempty"`
+	Profiles            []Profile            `json:"profiles,omitempty"`
 }
 
 // Settings holds app-level settings.
 type Settings struct {
-	StickyRoundRobinLimit int               `json:"stickyRoundRobinLimit"`
 	ComboStrategy         string            `json:"comboStrategy"`
 	ComboStrategies       map[string]string `json:"comboStrategies,omitempty"`
 	RequireAPIKey         bool              `json:"requireApiKey"`
 	Port                  int               `json:"port,omitempty"`
+	// Profile settings
+	ActiveProfile string `json:"activeProfile,omitempty"`
 	// Tunnel settings
 	TunnelEnabled  bool   `json:"tunnelEnabled,omitempty"`
 	TunnelURL      string `json:"tunnelUrl,omitempty"`
@@ -42,10 +44,9 @@ func DefaultConfig() AppConfig {
 		ModelAliases:        AliasMap{},
 		APIKeys:             []APIKey{},
 		Settings: Settings{
-			StickyRoundRobinLimit: 3,
 			ComboStrategy:         "fallback",
 			RequireAPIKey:         false,
-			Port:                  20128,
+			Port:                  20199,
 		},
 		ModelRegistry: DefaultModelRegistry(),
 	}

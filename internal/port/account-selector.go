@@ -2,11 +2,13 @@ package port
 
 import "github.com/dungnt/dntproxy/internal/domain"
 
-// AccountSelector manages multi-account selection with fallback and cooldown.
+// AccountSelector manages multi-account selection with weighted random and cooldown.
 type AccountSelector interface {
 	// SelectCredentials returns the best available credentials for a provider,
-	// excluding connections in the excludeIDs set.
-	SelectCredentials(provider string, excludeIDs map[string]bool, model string) (*domain.Credentials, error)
+	// using weighted random selection among available connections.
+	// excludeIDs: connections to skip (already failed in this request).
+	// allowedConnectionIDs: optional restriction to specific connections (from combo config).
+	SelectCredentials(provider string, excludeIDs map[string]bool, model string, allowedConnectionIDs []string) (*domain.Credentials, error)
 
 	// MarkUnavailable marks a connection as unavailable with cooldown.
 	MarkUnavailable(connectionID string, status int, errorText string, model string) error

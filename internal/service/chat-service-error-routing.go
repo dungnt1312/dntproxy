@@ -47,6 +47,8 @@ func normalizeExecutorFailure(status int, errMsg string) (int, string) {
 	return status, message
 }
 
+// mapSelectionErrorToChatResult maps AccountSelectionError to a ChatResult for
+// legacy callers that return port.ChatResult directly.
 func mapSelectionErrorToChatResult(err error) *port.ChatResult {
 	var selErr *AccountSelectionError
 	if !errors.As(err, &selErr) {

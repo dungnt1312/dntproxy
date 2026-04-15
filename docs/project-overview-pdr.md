@@ -1,16 +1,18 @@
 # Project Overview & PDR (Product Development Requirements)
 
 ## Project Overview
-`dntproxy` is an open-source, high-performance Go application that serves as an OpenAI-compatible proxy, routing requests to multiple AI providers (Kiro, OpenAI, GLM, MiniMax, Qwen, Anthropic). It acts as a bridge, allowing developers to use any supported LLM using familiar OpenAI tooling and libraries. It includes a robust multi-account fallback system, combo model chains, Cloudflare tunneling, structured logging, and complete CLI/UI tooling to manage multiple provider keys seamlessly.
+`dntproxy` is an open-source, high-performance Go application that serves as an OpenAI-compatible proxy, routing requests to multiple AI providers (Kiro, OpenAI, OpenAI-Compatible, GLM, MiniMax, Qwen, Anthropic). It acts as a bridge, allowing developers to use any supported LLM using familiar OpenAI tooling and libraries. It includes a robust multi-account fallback system, combo model chains, Cloudflare tunneling, structured logging with usage tracking, quota checking, dynamic model fetching, and complete CLI/UI tooling to manage multiple provider keys seamlessly.
 
 ## Business Goals & Requirements
-- **Multi-Provider Proxy Capabilities**: Translate standard OpenAI-compatible `/v1/chat/completions` API calls into provider-specific protocols (AWS EventStream for Kiro, standard Chat API for others).
+- **Multi-Provider Proxy Capabilities**: Translate standard OpenAI-compatible `/v1/chat/completions` API calls into provider-specific protocols (AWS EventStream for Kiro, standard Chat API for OpenAI/GLM/MiniMax/Qwen, Anthropic Messages API for Claude models).
 - **Resilience**: Implement multi-account fallback to naturally switch keys dynamically when hit with rate limits or authorization errors.
 - **Model Flexibility**: Implement Combo Strategies (Fallback & Round-robin) to automatically rotate between models seamlessly across providers.
 - **Authentication Integration**: Provide integration for multiple auth methods (OAuth device flows, API keys, social login, manual token importing) directly via CLI and UI.
 - **Portability**: Support lightweight data storage utilizing a custom local SQLite/JSON DB storage (`db.json`) instead of requiring heavy database infrastructure. Complete cross-platform capabilities (Windows, Linux, macOS).
 - **Observability**: Structured request logging with 30-day retention, usage tracking, cost estimation, and live SSE streaming.
 - **Public Access**: One-command Cloudflare tunnel exposure for sharing local proxy publicly.
+- **Quota Management**: Real-time quota checking with provider-specific implementations and bucket-based results.
+- **Model Discovery**: Dynamic model fetching with TTL caching to reduce API calls.
 
 ## Target Audience
 - Developers trying to utilize multiple AI provider APIs seamlessly with standard desktop applications or agents using the OpenAI API spec.
@@ -20,12 +22,16 @@
 ## Key Features
 - Clean architecture with 4 layers (Domain, Port, Adapter, Service) + Logger.
 - OpenAI ↔ provider request/response structure translation (7 providers supported).
+- Anthropic Messages API bidirectional translation with tool calling support.
 - EventStream to SSE binary translation for seamless real-time responses (Kiro).
 - Complete CLI configuration tooling built with Cobra.
-- User Interface built with React to configure services (React/Vite).
-- Cloudflare tunnel integration for public URL exposure.
+- User Interface built with React to configure services (React/Vite/TypeScript).
+- Cloudflare tunnel integration for public URL exposure with auto-download and lifecycle management.
 - Structured SQLite logging with usage tracking and cost estimation.
 - Model registry with 30+ pre-configured models and pricing data.
+- Dynamic model fetching with TTL caching and singleflight deduplication.
+- Flexible quota checking system with provider-specific implementations.
+- Enhanced connections UI with collapsible groups, inline editing, quota panel, logs viewer, provider logos.
 
 ## Non-Functional Requirements
 - **Performance**: High throughput and low latency routing layer leveraging Go's concurrency.

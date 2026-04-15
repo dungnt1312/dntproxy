@@ -11,7 +11,7 @@ type CredentialStore interface {
 	// Update loads config, applies fn, and saves atomically (single lock).
 	Update(fn func(cfg *domain.AppConfig)) error
 
-	// GetActiveConnections returns active connections for a provider, sorted by priority.
+	// GetActiveConnections returns active connections for a provider.
 	GetActiveConnections(provider string) ([]domain.ProviderConnection, error)
 	// GetConnectionByID returns a single connection.
 	GetConnectionByID(id string) (*domain.ProviderConnection, error)
@@ -36,4 +36,7 @@ type CredentialStore interface {
 
 	// GetModelRegistry returns the model registry.
 	GetModelRegistry() (*domain.ModelRegistry, error)
+
+	// GetConnectionIDsForCombo returns ConnectionIDs for a combo name (empty if combo not found or no restriction).
+	GetConnectionIDsForCombo(comboName string) ([]string, error)
 }

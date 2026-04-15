@@ -39,7 +39,7 @@ func apiListConnections(store port.CredentialStore) gin.HandlerFunc {
 			Provider        string            `json:"provider"`
 			AuthType        string            `json:"authType"`
 			Name            string            `json:"name"`
-			Priority        int               `json:"priority"`
+			Weight          int               `json:"weight"`
 			IsActive        bool              `json:"isActive"`
 			Email           string            `json:"email,omitempty"`
 			ExpiresAt       string            `json:"expiresAt,omitempty"`
@@ -66,7 +66,7 @@ func apiListConnections(store port.CredentialStore) gin.HandlerFunc {
 				Provider:        conn.Provider,
 				AuthType:        conn.AuthType,
 				Name:            conn.Name,
-				Priority:        conn.Priority,
+				Weight:          conn.Weight,
 				IsActive:        conn.IsActive,
 				Email:           conn.Email,
 				ExpiresAt:       conn.ExpiresAt,
@@ -158,7 +158,7 @@ func apiImportConnection(store port.CredentialStore) gin.HandlerFunc {
 			Provider:        "kiro",
 			AuthType:        "oauth",
 			Name:            name,
-			Priority:        len(cfg.ProviderConnections) + 1,
+			Weight:          100,
 			IsActive:        true,
 			AccessToken:     result.AccessToken,
 			RefreshToken:    result.RefreshToken,
@@ -456,7 +456,7 @@ func apiUpdateConnection(store port.CredentialStore) gin.HandlerFunc {
 		var req struct {
 			Name            *string  `json:"name,omitempty"`
 			IsActive        *bool    `json:"isActive,omitempty"`
-			Priority        *int     `json:"priority,omitempty"`
+			Weight          *int     `json:"weight,omitempty"`
 			SupportedModels []string `json:"supportedModels,omitempty"`
 			SetModels       bool     `json:"setModels,omitempty"`
 			APIKey          *string  `json:"apiKey,omitempty"`
@@ -479,8 +479,8 @@ func apiUpdateConnection(store port.CredentialStore) gin.HandlerFunc {
 					if req.IsActive != nil {
 						conn.IsActive = *req.IsActive
 					}
-					if req.Priority != nil {
-						conn.Priority = *req.Priority
+					if req.Weight != nil {
+						conn.Weight = *req.Weight
 					}
 					if req.SetModels {
 						conn.SupportedModels = req.SupportedModels
@@ -598,7 +598,7 @@ func apiAddConnection(store port.CredentialStore, providerID string) gin.Handler
 			Provider:        providerID,
 			AuthType:        "apikey",
 			Name:            name,
-			Priority:        len(appCfg.ProviderConnections) + 1,
+			Weight:          100,
 			IsActive:        true,
 			APIKey:          req.APIKey,
 			BaseURL:         baseURL,
@@ -660,7 +660,7 @@ func apiAddCustomConnection(store port.CredentialStore) gin.HandlerFunc {
 			Provider:  "openai-compatible",
 			AuthType:  "apikey",
 			Name:      name,
-			Priority:  len(appCfg.ProviderConnections) + 1,
+			Weight:    100,
 			IsActive:  true,
 			APIKey:    req.APIKey,
 			BaseURL:   req.BaseURL,

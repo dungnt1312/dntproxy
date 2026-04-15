@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math/rand"
 	"time"
 
 	"github.com/dungnt/dntproxy/internal/adapter/auth"
@@ -12,7 +13,7 @@ import (
 	"github.com/dungnt/dntproxy/internal/port"
 )
 
-// AccountSelector manages multi-account selection with fallback and cooldown.
+// AccountSelector manages multi-account selection with weighted random and cooldown.
 type AccountSelector struct {
 	store        port.CredentialStore
 	tokenRefresh *auth.TokenRefreshService
@@ -26,6 +27,9 @@ const (
 	SelectionErrRateLimited         AccountSelectionErrorKind = "rate_limited"
 	SelectionErrModelLocked         AccountSelectionErrorKind = "model_locked"
 	SelectionErrUnavailable         AccountSelectionErrorKind = "unavailable"
+
+	// DefaultWeight is the weight assigned to connections with zero/unset weight.
+	DefaultWeight = 100
 )
 
 type AccountSelectionError struct {
@@ -65,9 +69,14 @@ func NewAccountSelector(store port.CredentialStore) *AccountSelector {
 	}
 }
 
-// SelectCredentials returns the best available credentials for a provider,
-// excluding connections in the excludeIDs set.
-func (s *AccountSelector) SelectCredentials(provider string, excludeIDs map[string]bool, model string) (*domain.Credentials, error) {
+// SelectCredentials returns a weighted-random available connection for a provider+model,
+// filtered by excludeIDs and optional allowedConnectionIDs restriction.
+func (s *AccountSelector) SelectCredentials(
+	provider string,
+	excludeIDs map[string]bool,
+	model string,
+	allowedConnectionIDs []string,
+) (*domain.Credentials, error) {
 	connections, err := s.store.GetActiveConnections(provider)
 	if err != nil {
 		return nil, fmt.Errorf("get connections: %w", err)
@@ -81,23 +90,37 @@ func (s *AccountSelector) SelectCredentials(provider string, excludeIDs map[stri
 		}
 	}
 
+	// Filter to only available connections
+	var available []domain.ProviderConnection
 	supportedCount := 0
 	rateLimitedSupportedCount := 0
 	lockedSupportedCount := 0
 	nonExcludedCount := 0
 
 	for _, conn := range connections {
-		// Skip excluded connections
+		// Skip excluded connections (already failed in this request)
 		if excludeIDs != nil && excludeIDs[conn.ID] {
 			continue
 		}
 		nonExcludedCount++
 
+		// Skip connections not in allowedConnectionIDs (combo restriction)
+		if len(allowedConnectionIDs) > 0 {
+			allowed := false
+			for _, id := range allowedConnectionIDs {
+				if conn.ID == id {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				continue
+			}
+		}
+
 		// Skip connections that don't support this model.
 		// Exception: OpenAI OAuth connections (ChatGPT tokens) use the Codex Responses API
 		// which accepts any ChatGPT model slug — the upstream validates the model.
-		// Their stored supportedModels list contains ChatGPT slugs (e.g. "gpt-4o", "o4-mini")
-		// that don't match standard API IDs, so skipping this check here is correct.
 		isOpenAIOAuth := conn.Provider == "openai" && conn.AuthType == "oauth"
 		if !isOpenAIOAuth && !conn.SupportsModel(model) {
 			continue
@@ -116,22 +139,39 @@ func (s *AccountSelector) SelectCredentials(provider string, excludeIDs map[stri
 			continue
 		}
 
-		// Auto-refresh token if expiring soon
-		if s.tokenRefresh.NeedsRefresh(&conn) {
-			log.Printf("[AUTH] Token expiring soon for %s, refreshing...", conn.Name)
-			refreshed, err := s.tokenRefresh.CheckAndRefresh(&conn)
-			if err != nil {
-				log.Printf("[AUTH] Token refresh failed for %s: %s", conn.Name, err)
-				// Still try with current token
-			} else {
-				conn = *refreshed
-			}
-		}
-
-		return shared.ConnectionToCredentials(&conn), nil
+		available = append(available, conn)
 	}
 
-	if nonExcludedCount == 0 {
+	if len(available) == 0 {
+		// Return appropriate error based on what filtered them out
+		if nonExcludedCount == 0 {
+			return nil, &AccountSelectionError{
+				Kind:     SelectionErrUnavailable,
+				Provider: provider,
+				Model:    model,
+			}
+		}
+		if supportedCount == 0 {
+			return nil, &AccountSelectionError{
+				Kind:     SelectionErrUnsupportedModel,
+				Provider: provider,
+				Model:    model,
+			}
+		}
+		if rateLimitedSupportedCount == supportedCount {
+			return nil, &AccountSelectionError{
+				Kind:     SelectionErrRateLimited,
+				Provider: provider,
+				Model:    model,
+			}
+		}
+		if lockedSupportedCount == supportedCount {
+			return nil, &AccountSelectionError{
+				Kind:     SelectionErrModelLocked,
+				Provider: provider,
+				Model:    model,
+			}
+		}
 		return nil, &AccountSelectionError{
 			Kind:     SelectionErrUnavailable,
 			Provider: provider,
@@ -139,35 +179,56 @@ func (s *AccountSelector) SelectCredentials(provider string, excludeIDs map[stri
 		}
 	}
 
-	if supportedCount == 0 {
-		return nil, &AccountSelectionError{
-			Kind:     SelectionErrUnsupportedModel,
-			Provider: provider,
-			Model:    model,
+	// Weighted random selection
+	selected := weightedRandomSelect(available)
+
+	// Auto-refresh token if expiring soon
+	if s.tokenRefresh.NeedsRefresh(selected) {
+		log.Printf("[AUTH] Token expiring soon for %s, refreshing...", selected.Name)
+		refreshed, err := s.tokenRefresh.CheckAndRefresh(selected)
+		if err != nil {
+			log.Printf("[AUTH] Token refresh failed for %s: %s", selected.Name, err)
+			// Still try with current token
+		} else {
+			selected = refreshed
 		}
 	}
 
-	if rateLimitedSupportedCount == supportedCount {
-		return nil, &AccountSelectionError{
-			Kind:     SelectionErrRateLimited,
-			Provider: provider,
-			Model:    model,
+	return shared.ConnectionToCredentials(selected), nil
+}
+
+// weightedRandomSelect picks a connection from the available list using weighted random.
+// Weight represents probability: higher weight = more likely to be selected.
+// Connections with weight <= 0 are treated as DefaultWeight (100).
+func weightedRandomSelect(available []domain.ProviderConnection) *domain.ProviderConnection {
+	if len(available) == 1 {
+		return &available[0]
+	}
+
+	totalWeight := 0
+	for _, conn := range available {
+		w := conn.Weight
+		if w <= 0 {
+			w = DefaultWeight
+		}
+		totalWeight += w
+	}
+
+	r := rand.Intn(totalWeight)
+	cumulative := 0
+	for i := range available {
+		w := available[i].Weight
+		if w <= 0 {
+			w = DefaultWeight
+		}
+		cumulative += w
+		if r < cumulative {
+			return &available[i]
 		}
 	}
 
-	if lockedSupportedCount == supportedCount {
-		return nil, &AccountSelectionError{
-			Kind:     SelectionErrModelLocked,
-			Provider: provider,
-			Model:    model,
-		}
-	}
-
-	return nil, &AccountSelectionError{
-		Kind:     SelectionErrUnavailable,
-		Provider: provider,
-		Model:    model,
-	}
+	// Fallback (should never reach here)
+	return &available[0]
 }
 
 // MarkUnavailable marks a connection as unavailable with cooldown.

@@ -57,17 +57,6 @@ func DefaultModelRegistry() *ModelRegistry {
 				Capabilities:    []string{"tools", "streaming"},
 				IsActive:        true,
 			},
-			"kiro/deepseek-3.1": {
-				ID:              "deepseek-3.1",
-				Name:            "DeepSeek 3.1",
-				Provider:        "kiro",
-				ContextWindow:   64000,
-				MaxOutputTokens: 8192,
-				InputPrice:      0.27,
-				OutputPrice:     1.1,
-				Capabilities:    []string{"tools", "streaming"},
-				IsActive:        true,
-			},
 			"kiro/qwen3-coder-next": {
 				ID:              "qwen3-coder-next",
 				Name:            "Qwen3 Coder Next",

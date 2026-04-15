@@ -279,7 +279,7 @@ func saveConnection(tokens *auth.TokenResult, authMethod, clientID, clientSecret
 		Provider:     "kiro",
 		AuthType:     "oauth",
 		Name:         name,
-		Priority:     len(cfg.ProviderConnections) + 1,
+		Weight:       100,
 		IsActive:     true,
 		AccessToken:  tokens.AccessToken,
 		RefreshToken: tokens.RefreshToken,
@@ -340,7 +340,7 @@ func runAuthList(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	fmt.Printf("%-36s  %-6s  %-20s  %-15s  %-8s\n", "ID", "PRI", "NAME", "METHOD", "STATUS")
+	fmt.Printf("%-36s  %-6s  %-20s  %-15s  %-8s\n", "ID", "WGT", "NAME", "METHOD", "STATUS")
 	fmt.Println(strings.Repeat("-", 100))
 
 	for _, c := range cfg.ProviderConnections {
@@ -362,7 +362,7 @@ func runAuthList(cmd *cobra.Command, args []string) error {
 			name = name[:17] + "..."
 		}
 
-		fmt.Printf("%-36s  %-6d  %-20s  %-15s  %-8s\n", c.ID, c.Priority, name, method, status)
+		fmt.Printf("%-36s  %-6d  %-20s  %-15s  %-8s\n", c.ID, c.Weight, name, method, status)
 	}
 
 	return nil
@@ -464,7 +464,7 @@ func saveOpenAIConnection(tokens *auth.OpenAITokenResponse) error {
 		Provider:     "openai",
 		AuthType:     "oauth",
 		Name:         name,
-		Priority:     len(cfg.ProviderConnections) + 1,
+		Weight:       100,
 		IsActive:     true,
 		AccessToken:  tokens.AccessToken,
 		RefreshToken: tokens.RefreshToken,

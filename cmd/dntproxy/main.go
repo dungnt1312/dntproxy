@@ -73,6 +73,9 @@ func main() {
 	// Tunnel commands
 	rootCmd.AddCommand(buildTunnelCmd())
 
+	// Profile commands
+	rootCmd.AddCommand(buildProfileCmd())
+
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
@@ -149,7 +152,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	addr := fmt.Sprintf(":%d", port)
 	log.Printf("[dntproxy] v%s starting on http://localhost%s", version, addr)
-	log.Printf("[dntproxy] OpenAI-compatible API: http://localhost%s/v1", addr)
+	log.Printf("[dntproxy] OpenAI-compatible API: http://localhost%s/v1/chat/completions", addr)
+	log.Printf("[dntproxy] Anthropic Messages API: http://localhost%s/v1/messages", addr)
 
 	srv := &http.Server{
 		Addr:    addr,

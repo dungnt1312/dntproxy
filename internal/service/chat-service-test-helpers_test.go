@@ -3,7 +3,6 @@ package service
 import (
 	"fmt"
 	"io"
-	"sort"
 	"strings"
 	"sync"
 
@@ -50,7 +49,6 @@ func (s *testCredentialStore) GetActiveConnections(provider string) ([]domain.Pr
 			result = append(result, c)
 		}
 	}
-	sort.Slice(result, func(i, j int) bool { return result[i].Priority < result[j].Priority })
 	return result, nil
 }
 
@@ -128,6 +126,14 @@ func (s *testCredentialStore) GetModelRegistry() (*domain.ModelRegistry, error) 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.cfg.ModelRegistry, nil
+}
+
+func (s *testCredentialStore) GetConnectionIDsForCombo(comboName string) ([]string, error) {
+	combo, err := s.GetComboByName(comboName)
+	if err != nil || combo == nil {
+		return nil, err
+	}
+	return combo.ConnectionIDs, nil
 }
 
 // === Test ProviderRegistry ===

@@ -91,6 +91,9 @@ func RegisterAPIRoutes(r *gin.Engine, store port.CredentialStore, providers port
 		// Backup
 		api.GET("/backup/export", apiExportBackup(store))
 		api.POST("/backup/import", apiImportBackup(store))
+
+		// Profiles
+		RegisterProfileRoutes(api, store)
 	}
 }
 

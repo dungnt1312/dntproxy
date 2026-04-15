@@ -1,36 +1,42 @@
-import { useEffect, useState, useCallback } from 'react'
-import { motion } from 'framer-motion'
-import { Settings, ShieldAlert, RotateCcw, Save, Loader2 } from 'lucide-react'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Button } from '@/components/ui/button'
-import { Switch } from '@/components/ui/switch'
-import { Alert, AlertDescription } from '@/components/ui/alert'
-import { Skeleton } from '@/components/ui/skeleton'
+import { useEffect, useState, useCallback } from "react";
+import { motion } from "framer-motion";
+import { Settings, ShieldAlert, RotateCcw, Save, Loader2 } from "lucide-react";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@/components/ui/select'
-import { toast } from 'sonner'
-import { goApi } from '@/lib/go-api'
+} from "@/components/ui/select";
+import { toast } from "sonner";
+import { goApi } from "@/lib/go-api";
 
 interface SettingsData {
-  id: string
-  serverPort: number
-  apiKeyAuthEnabled: boolean
-  defaultRoutingStrategy: string
+  id: string;
+  serverPort: number;
+  apiKeyAuthEnabled: boolean;
+  defaultRoutingStrategy: string;
 }
 
 const DEFAULT_SETTINGS: SettingsData = {
-  id: '',
-  serverPort: 20128,
+  id: "",
+  serverPort: 20199,
   apiKeyAuthEnabled: true,
-  defaultRoutingStrategy: 'fallback',
-}
+  defaultRoutingStrategy: "fallback",
+};
 
 const containerVariants = {
   hidden: { opacity: 0 },
@@ -38,77 +44,85 @@ const containerVariants = {
     opacity: 1,
     transition: { staggerChildren: 0.1 },
   },
-}
+};
 
 const itemVariants = {
   hidden: { opacity: 0, y: 20 },
   visible: { opacity: 1, y: 0, transition: { duration: 0.4 } },
-}
+};
 
 export default function SettingsScreen() {
-  const [settings, setSettings] = useState<SettingsData>(DEFAULT_SETTINGS)
-  const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
-  const [initialSettings, setInitialSettings] = useState<SettingsData>(DEFAULT_SETTINGS)
-  const [hasChanges, setHasChanges] = useState(false)
+  const [settings, setSettings] = useState<SettingsData>(DEFAULT_SETTINGS);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [initialSettings, setInitialSettings] =
+    useState<SettingsData>(DEFAULT_SETTINGS);
+  const [hasChanges, setHasChanges] = useState(false);
 
   const fetchSettings = useCallback(async () => {
     try {
-      setLoading(true)
-      const json = await goApi.getSettings()
-      setSettings(json)
-      setInitialSettings(json)
-      setHasChanges(false)
+      setLoading(true);
+      const json = await goApi.getSettings();
+      setSettings(json);
+      setInitialSettings(json);
+      setHasChanges(false);
     } catch {
-      toast.error('Failed to load settings')
+      toast.error("Failed to load settings");
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }, [])
+  }, []);
 
   useEffect(() => {
-    fetchSettings()
-  }, [fetchSettings])
+    fetchSettings();
+  }, [fetchSettings]);
 
-  const updateField = <K extends keyof SettingsData>(key: K, value: SettingsData[K]) => {
+  const updateField = <K extends keyof SettingsData>(
+    key: K,
+    value: SettingsData[K],
+  ) => {
     setSettings((prev) => {
-      const next = { ...prev, [key]: value }
-      setHasChanges(JSON.stringify(next) !== JSON.stringify(initialSettings))
-      return next
-    })
-  }
+      const next = { ...prev, [key]: value };
+      setHasChanges(JSON.stringify(next) !== JSON.stringify(initialSettings));
+      return next;
+    });
+  };
 
   const handleSave = async () => {
     try {
-      setSaving(true)
+      setSaving(true);
       const json = await goApi.updateSettings({
         serverPort: settings.serverPort,
         apiKeyAuthEnabled: settings.apiKeyAuthEnabled,
         defaultRoutingStrategy: settings.defaultRoutingStrategy,
-      })
-      setSettings(json)
-      setInitialSettings(json)
-      setHasChanges(false)
-      toast.success('Settings saved successfully')
+      });
+      setSettings(json);
+      setInitialSettings(json);
+      setHasChanges(false);
+      toast.success("Settings saved successfully");
     } catch {
-      toast.error('Failed to save settings')
+      toast.error("Failed to save settings");
     } finally {
-      setSaving(false)
+      setSaving(false);
     }
-  }
+  };
 
   const handleReset = () => {
-    setSettings(DEFAULT_SETTINGS)
-    setHasChanges(JSON.stringify(DEFAULT_SETTINGS) !== JSON.stringify(initialSettings))
-    toast.info('Settings reset to defaults (unsaved)')
-  }
+    setSettings(DEFAULT_SETTINGS);
+    setHasChanges(
+      JSON.stringify(DEFAULT_SETTINGS) !== JSON.stringify(initialSettings),
+    );
+    toast.info("Settings reset to defaults (unsaved)");
+  };
 
   if (loading) {
     return (
       <div className="space-y-6">
         <div>
           <h1 className="text-2xl font-bold">Settings</h1>
-          <p className="text-muted-foreground mt-1">Configure your proxy server</p>
+          <p className="text-muted-foreground mt-1">
+            Configure your proxy server
+          </p>
         </div>
         <Card>
           <CardContent className="p-6 space-y-4">
@@ -121,7 +135,7 @@ export default function SettingsScreen() {
           </CardContent>
         </Card>
       </div>
-    )
+    );
   }
 
   return (
@@ -133,7 +147,9 @@ export default function SettingsScreen() {
     >
       <motion.div variants={itemVariants}>
         <h1 className="text-2xl font-bold">Settings</h1>
-        <p className="text-muted-foreground mt-1">Configure your proxy server</p>
+        <p className="text-muted-foreground mt-1">
+          Configure your proxy server
+        </p>
       </motion.div>
 
       {/* Server Configuration */}
@@ -158,7 +174,12 @@ export default function SettingsScreen() {
                 min={1}
                 max={65535}
                 value={settings.serverPort}
-                onChange={(e) => updateField('serverPort', parseInt(e.target.value, 10) || 20128)}
+                onChange={(e) =>
+                  updateField(
+                    "serverPort",
+                    parseInt(e.target.value, 10) || 20199,
+                  )
+                }
                 className="max-w-xs"
               />
               <p className="text-xs text-muted-foreground">
@@ -171,21 +192,25 @@ export default function SettingsScreen() {
               <Label htmlFor="routingStrategy">Default Routing Strategy</Label>
               <Select
                 value={settings.defaultRoutingStrategy}
-                onValueChange={(value) => updateField('defaultRoutingStrategy', value)}
+                onValueChange={(value) =>
+                  updateField("defaultRoutingStrategy", value)
+                }
               >
-                  <SelectTrigger id="routingStrategy" className="w-full max-w-xs">
-                    <SelectValue placeholder="Select strategy" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="fallback">Fallback</SelectItem>
-                    <SelectItem value="round-robin">Round-Robin</SelectItem>
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">
-                  <span className="font-medium">Fallback:</span> Try the first provider, fall back to the next on failure.{' '}
-                  <span className="font-medium">Round-Robin:</span> Rotate the starting model across combo requests.
-                </p>
-              </div>
+                <SelectTrigger id="routingStrategy" className="w-full max-w-xs">
+                  <SelectValue placeholder="Select strategy" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="fallback">Fallback</SelectItem>
+                  <SelectItem value="round-robin">Round-Robin</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                <span className="font-medium">Fallback:</span> Try the first
+                provider, fall back to the next on failure.{" "}
+                <span className="font-medium">Round-Robin:</span> Rotate the
+                starting model across combo requests.
+              </p>
+            </div>
           </CardContent>
         </Card>
       </motion.div>
@@ -214,36 +239,48 @@ export default function SettingsScreen() {
               <Switch
                 id="apiKeyAuth"
                 checked={settings.apiKeyAuthEnabled}
-                onCheckedChange={(checked) => updateField('apiKeyAuthEnabled', checked)}
+                onCheckedChange={(checked) =>
+                  updateField("apiKeyAuthEnabled", checked)
+                }
               />
             </div>
 
             {/* Warning when disabling */}
-            {initialSettings.apiKeyAuthEnabled && !settings.apiKeyAuthEnabled && (
-              <Alert variant="destructive" className="border-red-200 dark:border-red-800">
-                <ShieldAlert className="size-4" />
-                <AlertDescription>
-                  <strong>Warning:</strong> Disabling API key authentication will allow anyone to use your
-                  proxy server without credentials. This may expose your API keys and quota to unauthorized
-                  access. Only disable this in trusted network environments.
-                </AlertDescription>
-              </Alert>
-            )}
+            {initialSettings.apiKeyAuthEnabled &&
+              !settings.apiKeyAuthEnabled && (
+                <Alert
+                  variant="destructive"
+                  className="border-red-200 dark:border-red-800"
+                >
+                  <ShieldAlert className="size-4" />
+                  <AlertDescription>
+                    <strong>Warning:</strong> Disabling API key authentication
+                    will allow anyone to use your proxy server without
+                    credentials. This may expose your API keys and quota to
+                    unauthorized access. Only disable this in trusted network
+                    environments.
+                  </AlertDescription>
+                </Alert>
+              )}
 
-            {!initialSettings.apiKeyAuthEnabled && settings.apiKeyAuthEnabled && (
-              <Alert className="border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/20">
-                <AlertDescription className="text-emerald-700 dark:text-emerald-400">
-                  <strong>Good choice!</strong> API key authentication will be enabled, protecting your server
-                  from unauthorized access.
-                </AlertDescription>
-              </Alert>
-            )}
+            {!initialSettings.apiKeyAuthEnabled &&
+              settings.apiKeyAuthEnabled && (
+                <Alert className="border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/20">
+                  <AlertDescription className="text-emerald-700 dark:text-emerald-400">
+                    <strong>Good choice!</strong> API key authentication will be
+                    enabled, protecting your server from unauthorized access.
+                  </AlertDescription>
+                </Alert>
+              )}
           </CardContent>
         </Card>
       </motion.div>
 
       {/* Actions */}
-      <motion.div variants={itemVariants} className="flex flex-col sm:flex-row gap-3 pt-2">
+      <motion.div
+        variants={itemVariants}
+        className="flex flex-col sm:flex-row gap-3 pt-2"
+      >
         <Button
           onClick={handleSave}
           disabled={!hasChanges || saving}
@@ -272,5 +309,5 @@ export default function SettingsScreen() {
         </Button>
       </motion.div>
     </motion.div>
-  )
+  );
 }

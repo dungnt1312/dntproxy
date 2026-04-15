@@ -2,9 +2,11 @@ package service
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/dungnt/dntproxy/internal/port"
 )
@@ -12,8 +14,8 @@ import (
 // ChatService orchestrates: resolve model -> get credentials -> execute -> stream.
 // Implements port.ChatService.
 type ChatService struct {
-	resolver        port.ModelResolver
-	accountSelector port.AccountSelector
+	resolver        *ModelResolver
+	accountSelector *AccountSelector
 	comboHandler    *ComboHandler
 	providers       port.ProviderRegistry
 	store           port.CredentialStore
@@ -35,8 +37,8 @@ func NewChatService(
 
 // NewChatServiceWithDeps creates a ChatService with explicit dependencies (for testing).
 func NewChatServiceWithDeps(
-	resolver port.ModelResolver,
-	accountSelector port.AccountSelector,
+	resolver *ModelResolver,
+	accountSelector *AccountSelector,
 	comboHandler *ComboHandler,
 	providers port.ProviderRegistry,
 	store port.CredentialStore,
@@ -51,51 +53,41 @@ func NewChatServiceWithDeps(
 }
 
 // HandleChat processes a chat completion request.
+// Unified flow: resolve → combo/single → weighted random connection → execute.
 func (s *ChatService) HandleChat(body []byte, modelStr string, requestID string) *port.ChatResult {
-	comboModels, err := s.resolver.GetComboModels(modelStr)
+	routing, err := s.resolver.ResolveRouting(modelStr)
 	if err != nil {
-		log.Printf("[CHAT] Error checking combo: %s", err)
+		return &port.ChatResult{StatusCode: http.StatusBadRequest, Error: fmt.Sprintf("resolve model: %s", err)}
 	}
 
-	if comboModels != nil {
-		return s.handleComboChat(body, modelStr, comboModels, requestID)
-	}
-
-	return s.handleSingleModel(body, modelStr, requestID)
-}
-
-func (s *ChatService) handleComboChat(body []byte, comboName string, models []string, requestID string) *port.ChatResult {
-	settings, _ := s.store.GetSettings()
+	// Determine combo strategy
 	strategy := "fallback"
-	if settings != nil && settings.ComboStrategy != "" {
-		strategy = settings.ComboStrategy
-	}
-	if settings != nil && settings.ComboStrategies != nil {
-		if cs, ok := settings.ComboStrategies[comboName]; ok && cs != "" {
-			strategy = cs
+	if routing.IsCombo {
+		settings, _ := s.store.GetSettings()
+		if settings != nil && settings.ComboStrategy != "" {
+			strategy = settings.ComboStrategy
+		}
+		if settings != nil && settings.ComboStrategies != nil {
+			if cs, ok := settings.ComboStrategies[routing.ComboName]; ok && cs != "" {
+				strategy = cs
+			}
 		}
 	}
 
-	log.Printf("[CHAT] Combo %q with %d models (strategy: %s)", comboName, len(models), strategy)
+	comboName := routing.ComboName
+	if comboName == "" {
+		comboName = modelStr // use model string as key for non-combo (for logging)
+	}
 
-	result, err := s.comboHandler.HandleCombo(models, comboName, strategy, func(modelStr string) (*ComboResult, error) {
-		chatResult := s.handleSingleModel(body, modelStr, requestID)
-		if chatResult.Stream != nil && chatResult.StatusCode == http.StatusOK {
-			return &ComboResult{
-				OK:         true,
-				Stream:     chatResult.Stream,
-				StatusCode: http.StatusOK,
-			}, nil
-		}
+	log.Printf("[CHAT] %q → %d models (strategy: %s, combo: %v)", modelStr, len(routing.Models), strategy, routing.IsCombo)
 
-		return &ComboResult{
-			OK:         false,
-			StatusCode: chatResult.StatusCode,
-			Error:      chatResult.Error,
-		}, nil
+	// Unified: every request goes through comboHandler.
+	// For single models, this is just a loop of 1.
+	result, err := s.comboHandler.HandleCombo(routing.Models, comboName, strategy, func(qualifiedModel string) (*ComboResult, error) {
+		return s.executeOnProvider(body, qualifiedModel, requestID, routing.AllowedConnectionIDs)
 	})
 	if err != nil {
-		log.Printf("[COMBO] Handle combo failed: %s", err)
+		log.Printf("[CHAT] All models exhausted: %s", err)
 	}
 
 	if result != nil && result.OK && result.Stream != nil {
@@ -109,7 +101,7 @@ func (s *ChatService) handleComboChat(body []byte, comboName string, models []st
 		}
 		msg := result.Error
 		if msg == "" {
-			msg = "All combo models unavailable"
+			msg = "All models unavailable"
 		}
 		return &port.ChatResult{StatusCode: status, Error: msg}
 	}
@@ -118,52 +110,49 @@ func (s *ChatService) handleComboChat(body []byte, comboName string, models []st
 		return &port.ChatResult{StatusCode: http.StatusServiceUnavailable, Error: err.Error()}
 	}
 
-	return &port.ChatResult{StatusCode: http.StatusServiceUnavailable, Error: "All combo models unavailable"}
+	return &port.ChatResult{StatusCode: http.StatusServiceUnavailable, Error: "All models unavailable"}
 }
 
-func (s *ChatService) handleSingleModel(body []byte, modelStr string, requestID string) *port.ChatResult {
-	modelInfo, err := s.resolver.Resolve(modelStr)
-	if err != nil {
-		return &port.ChatResult{StatusCode: http.StatusBadRequest, Error: fmt.Sprintf("resolve model: %s", err)}
+// executeOnProvider handles a single "provider/model" string:
+// parse → get executor → weighted random connection → execute → retry on fail.
+func (s *ChatService) executeOnProvider(body []byte, qualifiedModel string, requestID string, allowedConnectionIDs []string) (*ComboResult, error) {
+	// Parse "provider/model"
+	idx := strings.Index(qualifiedModel, "/")
+	if idx < 0 {
+		return &ComboResult{OK: false, StatusCode: http.StatusBadRequest, Error: fmt.Sprintf("invalid model format: %s", qualifiedModel)}, nil
 	}
+	provider := qualifiedModel[:idx]
+	model := qualifiedModel[idx+1:]
 
-	if modelInfo.Provider == "" {
-		comboModels, _ := s.resolver.GetComboModels(modelStr)
-		if comboModels != nil {
-			return s.handleComboChat(body, modelStr, comboModels, requestID)
-		}
-		return &port.ChatResult{StatusCode: http.StatusBadRequest, Error: "Invalid model format"}
-	}
-
-	provider := modelInfo.Provider
-	model := modelInfo.Model
-
-	log.Printf("[ROUTING] %s -> %s/%s", modelStr, provider, model)
+	log.Printf("[ROUTING] %s → %s/%s", qualifiedModel, provider, model)
 
 	executor := s.providers.GetExecutor(provider)
 	if executor == nil {
-		return &port.ChatResult{StatusCode: http.StatusBadRequest, Error: fmt.Sprintf("Provider '%s' not supported", provider)}
+		return &ComboResult{OK: false, StatusCode: http.StatusBadRequest, Error: fmt.Sprintf("Provider '%s' not supported", provider)}, nil
 	}
 
+	// Inject model into body
 	var bodyMap map[string]interface{}
 	if err := json.Unmarshal(body, &bodyMap); err != nil {
-		return &port.ChatResult{StatusCode: http.StatusBadRequest, Error: "Invalid JSON body"}
+		return &ComboResult{OK: false, StatusCode: http.StatusBadRequest, Error: "Invalid JSON body"}, nil
 	}
 	bodyMap["model"] = model
 	updatedBody, err := json.Marshal(bodyMap)
 	if err != nil {
-		return &port.ChatResult{StatusCode: http.StatusInternalServerError, Error: "Failed to serialize request body"}
+		return &ComboResult{OK: false, StatusCode: http.StatusInternalServerError, Error: "Failed to serialize request body"}, nil
 	}
 
+	// Try connections with weighted random + fallback on failure
 	excludeIDs := make(map[string]bool)
 
 	for {
-		creds, err := s.accountSelector.SelectCredentials(provider, excludeIDs, model)
+		creds, err := s.accountSelector.SelectCredentials(provider, excludeIDs, model, allowedConnectionIDs)
 		if err != nil {
-			if mapped := mapSelectionErrorToChatResult(err); mapped != nil {
-				return mapped
+			// Map selection errors to appropriate combo results
+			if mapped := mapSelectionErrorToComboResult(err); mapped != nil {
+				return mapped, nil
 			}
-			return &port.ChatResult{StatusCode: http.StatusServiceUnavailable, Error: "All accounts unavailable"}
+			return &ComboResult{OK: false, StatusCode: http.StatusServiceUnavailable, Error: "All accounts unavailable"}, nil
 		}
 
 		log.Printf("[AUTH] Using %s account: %s", provider, creds.ConnectionName)
@@ -171,7 +160,7 @@ func (s *ChatService) handleSingleModel(body []byte, modelStr string, requestID 
 		stream, status, execErr := executor.Execute(model, updatedBody, creds, requestID)
 		if execErr == nil && status == http.StatusOK {
 			s.accountSelector.ClearError(creds.ConnectionID, model)
-			return &port.ChatResult{Stream: stream, StatusCode: http.StatusOK}
+			return &ComboResult{OK: true, Stream: stream, StatusCode: http.StatusOK}, nil
 		}
 
 		errMsg := ""
@@ -182,12 +171,32 @@ func (s *ChatService) handleSingleModel(body []byte, modelStr string, requestID 
 
 		if !shouldFallbackToNextAccount(status, errMsg) {
 			statusCode, message := normalizeExecutorFailure(status, errMsg)
-			return &port.ChatResult{StatusCode: statusCode, Error: message}
+			return &ComboResult{OK: false, StatusCode: statusCode, Error: message}, nil
 		}
 
 		if err := s.accountSelector.MarkUnavailable(creds.ConnectionID, status, errMsg, model); err != nil {
 			log.Printf("[AUTH] Failed marking account unavailable (%s): %s", creds.ConnectionName, err)
 		}
 		excludeIDs[creds.ConnectionID] = true
+	}
+}
+
+// mapSelectionErrorToComboResult converts AccountSelectionError to ComboResult
+// so the combo handler can decide whether to fall back to the next model.
+func mapSelectionErrorToComboResult(err error) *ComboResult {
+	var selErr *AccountSelectionError
+	if !errors.As(err, &selErr) {
+		return nil
+	}
+
+	switch selErr.Kind {
+	case SelectionErrNoActiveCredentials:
+		return &ComboResult{OK: false, StatusCode: http.StatusNotFound, Error: selErr.Error()}
+	case SelectionErrUnsupportedModel:
+		return &ComboResult{OK: false, StatusCode: http.StatusBadRequest, Error: selErr.Error()}
+	case SelectionErrRateLimited, SelectionErrModelLocked:
+		return &ComboResult{OK: false, StatusCode: http.StatusTooManyRequests, Error: selErr.Error()}
+	default:
+		return &ComboResult{OK: false, StatusCode: http.StatusServiceUnavailable, Error: selErr.Error()}
 	}
 }

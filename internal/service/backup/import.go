@@ -225,9 +225,6 @@ func importSettings(cfg *domain.AppConfig, src domain.Settings) {
 	if src.RequireAPIKey {
 		cfg.Settings.RequireAPIKey = true
 	}
-	if src.StickyRoundRobinLimit > 0 {
-		cfg.Settings.StickyRoundRobinLimit = src.StickyRoundRobinLimit
-	}
 	if len(src.ComboStrategies) > 0 {
 		cfg.Settings.ComboStrategies = src.ComboStrategies
 	}

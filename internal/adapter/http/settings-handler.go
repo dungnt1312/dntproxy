@@ -43,9 +43,6 @@ func apiUpdateSettings(store port.CredentialStore) gin.HandlerFunc {
 		if req.ComboStrategies != nil {
 			cfg.Settings.ComboStrategies = req.ComboStrategies
 		}
-		if req.StickyRoundRobinLimit > 0 {
-			cfg.Settings.StickyRoundRobinLimit = req.StickyRoundRobinLimit
-		}
 
 		if err := store.Save(cfg); err != nil {
 			c.JSON(500, gin.H{"error": "Failed to save config"})

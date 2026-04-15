@@ -8,7 +8,7 @@ type ProviderConnection struct {
 	Provider             string                 `json:"provider"`
 	AuthType             string                 `json:"authType"` // "oauth" or "apikey"
 	Name                 string                 `json:"name"`
-	Priority             int                    `json:"priority"`
+	Weight               int                    `json:"weight"`
 	IsActive             bool                   `json:"isActive"`
 	AccessToken          string                 `json:"accessToken,omitempty"`
 	RefreshToken         string                 `json:"refreshToken,omitempty"`

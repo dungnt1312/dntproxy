@@ -5,12 +5,13 @@ import (
 	"io"
 	"log"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
 // ComboHandler manages combo fallback and round-robin strategies.
 type ComboHandler struct {
-	rotationState sync.Map // comboName -> int (current index)
+	rotationState sync.Map // comboName -> *int32 (atomic pointer for thread-safe rotation)
 }
 
 // NewComboHandler creates a new ComboHandler.
@@ -54,6 +55,8 @@ func (ch *ComboHandler) HandleCombo(
 
 		if result.OK {
 			log.Printf("[COMBO] Model %s succeeded", modelStr)
+			// Only advance rotation on success
+			ch.advanceRotation(comboName, strategy)
 			return result, nil
 		}
 
@@ -99,18 +102,35 @@ func (ch *ComboHandler) getRotatedModels(models []string, comboName string, stra
 		return models
 	}
 
-	val, _ := ch.rotationState.LoadOrStore(comboName, 0)
-	currentIndex := val.(int)
+	// Use atomic operations for thread-safe rotation
+	val, _ := ch.rotationState.LoadOrStore(comboName, new(int32))
+	counter := val.(*int32)
+
+	currentIndex := atomic.LoadInt32(counter)
 
 	rotated := make([]string, len(models))
 	for i := range models {
-		rotated[i] = models[(currentIndex+i)%len(models)]
+		rotated[i] = models[(int(currentIndex)+i)%len(models)]
 	}
 
-	nextIndex := (currentIndex + 1) % len(models)
-	ch.rotationState.Store(comboName, nextIndex)
-
 	return rotated
+}
+
+// advanceRotation advances the rotation index only when a request succeeds.
+func (ch *ComboHandler) advanceRotation(comboName string, strategy string) {
+	if strategy != "round-robin" {
+		return
+	}
+
+	val, ok := ch.rotationState.Load(comboName)
+	if !ok {
+		return
+	}
+
+	counter := val.(*int32)
+	currentIndex := atomic.LoadInt32(counter)
+	newIndex := (currentIndex + 1) % 1000 // Prevent overflow
+	atomic.StoreInt32(counter, newIndex)
 }
 
 func (ch *ComboHandler) ClearRotation(comboName string) {

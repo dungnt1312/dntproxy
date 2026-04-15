@@ -37,7 +37,7 @@ Port `frontend/` (Next.js) into `ui/` (React + Vite), remove Next.js runtime dep
 
 ### Phase 4 - Tooling + verification
 - Update `ui/package.json` dependencies for migrated components
-- Update `vite.config.ts` proxy to Go backend port `20128`
+- Update `vite.config.ts` proxy to Go backend port `20199`
 - Build and fix compile/runtime integration issues
 
 ## Done Criteria

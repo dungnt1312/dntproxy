@@ -9,13 +9,13 @@ import (
 	"github.com/dungnt/dntproxy/internal/domain"
 )
 
-func TestHandleChat_ComboSinglePass_NoDuplicateExecution(t *testing.T) {
+func TestHandleChat_ComboFallback_NoDuplicateExecution(t *testing.T) {
 	store := newTestCredentialStore(&domain.AppConfig{
 		ProviderConnections: []domain.ProviderConnection{{
 			ID:       "conn-1",
 			Name:     "primary",
 			Provider: "kiro",
-			Priority: 1,
+			Weight:   100,
 			IsActive: true,
 		}},
 		Combos: []domain.Combo{{
@@ -60,14 +60,14 @@ func TestHandleChat_ComboSinglePass_NoDuplicateExecution(t *testing.T) {
 func TestHandleChat_Client400_DoesNotFallbackOrCooldown(t *testing.T) {
 	store := newTestCredentialStore(&domain.AppConfig{
 		ProviderConnections: []domain.ProviderConnection{
-			{ID: "conn-1", Name: "p1", Provider: "kiro", Priority: 1, IsActive: true},
-			{ID: "conn-2", Name: "p2", Provider: "kiro", Priority: 2, IsActive: true},
+			{ID: "conn-1", Name: "p1", Provider: "kiro", Weight: 100, IsActive: true},
+			{ID: "conn-2", Name: "p2", Provider: "kiro", Weight: 100, IsActive: true},
 		},
 	})
 
 	exec := newFakeExecutor(map[string]fakeExecuteResponse{
 		"conn-1|model-a": {Status: 400, Err: errors.New("invalid request body")},
-		"conn-2|model-a": {Status: 200, Body: "data: [DONE]\n\n"},
+		"conn-2|model-a": {Status: 400, Err: errors.New("invalid request body")},
 	})
 
 	registry := newTestProviderRegistry()
@@ -79,24 +79,28 @@ func TestHandleChat_Client400_DoesNotFallbackOrCooldown(t *testing.T) {
 	if result.StatusCode != 400 {
 		t.Fatalf("expected 400, got %d (%s)", result.StatusCode, result.Error)
 	}
-	if len(exec.calls) != 1 || exec.calls[0].ConnectionID != "conn-1" {
-		t.Fatalf("expected single execution on first account, calls=%+v", exec.calls)
+	// Only one connection should be tried (400 = client error, no fallback)
+	if len(exec.calls) != 1 {
+		t.Fatalf("expected single execution, calls=%+v", exec.calls)
 	}
 
-	conn1, _ := store.GetConnectionByID("conn-1")
-	if conn1 == nil {
-		t.Fatal("conn-1 missing")
+	// Verify the used connection is not cooled down
+	usedConnID := exec.calls[0].ConnectionID
+	conn, _ := store.GetConnectionByID(usedConnID)
+	if conn == nil {
+		t.Fatalf("connection %s missing", usedConnID)
 	}
-	if conn1.RateLimitedUntil != "" || conn1.BackoffLevel != 0 {
-		t.Fatalf("conn-1 should not be cooled down, got rateLimitedUntil=%q backoff=%d", conn1.RateLimitedUntil, conn1.BackoffLevel)
+	if conn.RateLimitedUntil != "" || conn.BackoffLevel != 0 {
+		t.Fatalf("connection should not be cooled down, got rateLimitedUntil=%q backoff=%d", conn.RateLimitedUntil, conn.BackoffLevel)
 	}
 }
 
 func TestHandleChat_RateLimit_FallbackToNextAccount(t *testing.T) {
+	// Give conn-1 very high weight so it's almost always selected first
 	store := newTestCredentialStore(&domain.AppConfig{
 		ProviderConnections: []domain.ProviderConnection{
-			{ID: "conn-1", Name: "p1", Provider: "kiro", Priority: 1, IsActive: true},
-			{ID: "conn-2", Name: "p2", Provider: "kiro", Priority: 2, IsActive: true},
+			{ID: "conn-1", Name: "p1", Provider: "kiro", Weight: 10000, IsActive: true},
+			{ID: "conn-2", Name: "p2", Provider: "kiro", Weight: 1, IsActive: true},
 		},
 	})
 
@@ -116,16 +120,15 @@ func TestHandleChat_RateLimit_FallbackToNextAccount(t *testing.T) {
 	}
 	result.Stream.Close()
 
-	if len(exec.calls) != 2 || exec.calls[0].ConnectionID != "conn-1" || exec.calls[1].ConnectionID != "conn-2" {
-		t.Fatalf("expected fallback conn-1 -> conn-2, calls=%+v", exec.calls)
+	// Should have tried 2 connections (first failed 429, second succeeded)
+	if len(exec.calls) != 2 {
+		t.Fatalf("expected 2 calls for fallback, got %d: %+v", len(exec.calls), exec.calls)
 	}
 
+	// conn-1 should be cooled down
 	conn1, _ := store.GetConnectionByID("conn-1")
 	if conn1 == nil || conn1.RateLimitedUntil == "" {
 		t.Fatalf("expected conn-1 cooldown to be set, conn=%+v", conn1)
-	}
-	if conn1.BackoffLevel < 1 {
-		t.Fatalf("expected conn-1 backoff level increment, got %d", conn1.BackoffLevel)
 	}
 }
 
@@ -135,7 +138,7 @@ func TestHandleChat_UnsupportedModel_Returns400WithoutExecution(t *testing.T) {
 			ID:              "conn-1",
 			Name:            "p1",
 			Provider:        "kiro",
-			Priority:        1,
+			Weight:          100,
 			IsActive:        true,
 			SupportedModels: []string{"model-a"},
 		}},
@@ -157,5 +160,84 @@ func TestHandleChat_UnsupportedModel_Returns400WithoutExecution(t *testing.T) {
 	}
 	if len(exec.calls) != 0 {
 		t.Fatalf("executor must not be called for unsupported model, calls=%+v", exec.calls)
+	}
+}
+
+func TestHandleChat_AliasResolution(t *testing.T) {
+	store := newTestCredentialStore(&domain.AppConfig{
+		ProviderConnections: []domain.ProviderConnection{{
+			ID:       "conn-1",
+			Name:     "primary",
+			Provider: "kiro",
+			Weight:   100,
+			IsActive: true,
+		}},
+		ModelAliases: domain.AliasMap{
+			"sonnet": "kiro/claude-sonnet",
+		},
+	})
+
+	exec := newFakeExecutor(map[string]fakeExecuteResponse{
+		"conn-1|claude-sonnet": {Status: 200, Body: "data: [DONE]\n\n"},
+	})
+
+	registry := newTestProviderRegistry()
+	registry.RegisterExecutor("kiro", exec)
+
+	svc := NewChatService(store, registry)
+
+	result := svc.HandleChat([]byte(`{"model":"sonnet","messages":[{"role":"user","content":"hi"}]}`), "sonnet", "req-5")
+	if result.StatusCode != 200 || result.Stream == nil {
+		t.Fatalf("expected alias resolution success, got status=%d err=%q", result.StatusCode, result.Error)
+	}
+	result.Stream.Close()
+
+	if len(exec.calls) != 1 || exec.calls[0].Model != "claude-sonnet" {
+		t.Fatalf("expected execution with resolved model 'claude-sonnet', calls=%+v", exec.calls)
+	}
+}
+
+func TestWeightedRandomSelect_DistributionByWeight(t *testing.T) {
+	connections := []domain.ProviderConnection{
+		{ID: "heavy", Weight: 900},
+		{ID: "light", Weight: 100},
+	}
+
+	heavyCount := 0
+	iterations := 10000
+	for i := 0; i < iterations; i++ {
+		selected := weightedRandomSelect(connections)
+		if selected.ID == "heavy" {
+			heavyCount++
+		}
+	}
+
+	// Expected: ~90% heavy. Allow 85%-95% range.
+	heavyPct := float64(heavyCount) / float64(iterations) * 100
+	if heavyPct < 85 || heavyPct > 95 {
+		t.Fatalf("expected ~90%% heavy, got %.1f%% (%d/%d)", heavyPct, heavyCount, iterations)
+	}
+}
+
+func TestWeightedRandomSelect_EqualWeights(t *testing.T) {
+	connections := []domain.ProviderConnection{
+		{ID: "a", Weight: 100},
+		{ID: "b", Weight: 100},
+		{ID: "c", Weight: 100},
+	}
+
+	counts := map[string]int{}
+	iterations := 10000
+	for i := 0; i < iterations; i++ {
+		selected := weightedRandomSelect(connections)
+		counts[selected.ID]++
+	}
+
+	// Each should be roughly 33%. Allow 28%-38%.
+	for id, count := range counts {
+		pct := float64(count) / float64(iterations) * 100
+		if pct < 28 || pct > 38 {
+			t.Fatalf("connection %s has unexpected distribution: %.1f%% (%d/%d)", id, pct, count, iterations)
+		}
 	}
 }

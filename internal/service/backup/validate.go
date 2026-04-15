@@ -32,8 +32,8 @@ func ValidateBackup(b *BackupData) error {
 		if conn.AuthType != "" && conn.AuthType != "oauth" && conn.AuthType != "apikey" {
 			return fmt.Errorf("providerConnections[%d]: invalid authType %q (must be 'oauth' or 'apikey')", i, conn.AuthType)
 		}
-		if conn.Priority < 0 {
-			return fmt.Errorf("providerConnections[%d]: negative priority", i)
+		if conn.Weight < 0 {
+			return fmt.Errorf("providerConnections[%d]: negative weight", i)
 		}
 	}
 

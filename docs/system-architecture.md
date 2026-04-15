@@ -8,9 +8,10 @@
 cmd/                     [User Edge] Entrypoint / CLI parsing
  └── internal/
       ├── adapter/            [Infrastructure] External libraries, framework specific APIs (Gin, file IO)
-      │    ├── http/          (Gin server / HTTP Listeners)
+      │    ├── http/          (Gin server / HTTP Listeners / Messages endpoint)
       │    ├── kiro/          (Kiro API Translator / AWS EventStream parser)
       │    ├── openai/        (OpenAI executor + Codex translator)
+      │    ├── anthropic/     (Anthropic Messages API executor + bidirectional translation)
       │    ├── auth/          (OAuth flows: Builder ID, IDC, Social, Import)
       │    ├── tunnel/        (Cloudflared download, lifecycle, state)
       │    ├── custom/        (NoOp adapters for providers without APIs)
@@ -22,6 +23,7 @@ cmd/                     [User Edge] Entrypoint / CLI parsing
       ├── service/            [Use Cases] Coordination of entities to achieve outcomes
       │    ├── chat-service.go
       │    ├── model-resolver.go
+      │    ├── model-cache.go
       │    ├── account-selector.go
       │    ├── combo-handler.go
       │    ├── token-refresh-scheduler.go
@@ -46,7 +48,7 @@ The system supports 7 providers with an extensible architecture:
 | GLM (Zhipu AI) | `glm` | API Key | openai-chat |
 | MiniMax | `minimax` | API Key | openai-chat |
 | Qwen (Alibaba) | `qwen` | API Key, OAuth | openai-chat |
-| Anthropic | `anthropic` | API Key | anthropic-msg (TODO) |
+| Anthropic | `anthropic` | API Key | anthropic-messages |
 
 ## Request Flow
 The core lifecycle of an incoming chat completion request:
@@ -302,3 +304,102 @@ Structured request logging with persistence and live streaming:
 - **Raw Body Logging**: Via `DNTPROXY_LOG_RAW_BODIES` env var (dev mode)
 - **Body Sanitization**: Redacts sensitive fields (API keys, tokens, auth headers)
 - **30-Day Retention**: Automatic cleanup of old logs
+
+## Anthropic Messages API
+Full bidirectional translation between OpenAI Chat Completions and Anthropic Messages API:
+
+### Architecture
+```
+┌──────────────────┐     ┌─────────────────────┐     ┌──────────────────┐
+│ OpenAI Request   │────►│ AnthropicExecutor   │────►│ Anthropic API    │
+│ /v1/chat/        │     │ - Request translator│     │ /v1/messages     │
+│ completions      │     │ - Response parser   │     │                  │
+└──────────────────┘     └─────────────────────┘     └──────────────────┘
+                                    │
+                         ┌──────────▼──────────┐
+                         │ SSE Event Stream    │
+                         │ - message_start     │
+                         │ - content_block_*   │
+                         │ - message_delta     │
+                         │ - message_stop      │
+                         └─────────────────────┘
+```
+
+### Key Components
+- **`adapter/anthropic/executor.go`**: Full executor with streaming support
+- **`adapter/http/messages-handler.go`**: Native `/v1/messages` endpoint
+
+### Features
+- **Bidirectional Translation**: OpenAI ↔ Anthropic format conversion
+- **Tool Calling**: Function/tool definitions and results
+- **System Messages**: Proper system message handling
+- **Content Blocks**: Text, tool use, tool result blocks
+- **Streaming**: SSE event-by-event conversion
+- **Stop Reasons**: Mapping between provider stop reasons
+
+### Endpoints
+- `POST /v1/chat/completions` with `model: anthropic/claude-*` → translates to Anthropic
+- `POST /v1/messages` → native Anthropic Messages API endpoint
+
+## Quota Checking System
+Flexible quota checking with provider-specific implementations:
+
+### Architecture
+```
+┌──────────────────┐     ┌─────────────────────┐     ┌──────────────────┐
+│ UI/API Request   │────►│ QuotaChecker        │────►│ Provider API     │
+│ GET /api/quota/:id│     │ Interface           │     │ (usage endpoint) │
+└──────────────────┘     └─────────────────────┘     └──────────────────┘
+                                    │
+                         ┌──────────▼──────────┐
+                         │ QuotaResult         │
+                         │ - Buckets (used/max)│
+                         │ - Reset times       │
+                         │ - Percentages       │
+                         └─────────────────────┘
+```
+
+### Key Components
+- **`port/quota-checker.go`**: `QuotaChecker` interface with bucket-based results
+- **`adapter/http/quota-handler.go`**: HTTP handler with provider-specific logic
+- **`service/model-cache.go`**: TTL-based cache with singleflight deduplication
+
+### Supported Providers
+- **OpenAI (API Key)**: Rate-limit headers parsing
+- **OpenAI (OAuth)**: Codex API usage endpoint
+- **Kiro**: Amazon Q usage API
+- **MiniMax**: `coding_plan/remains` API with interval/weekly buckets
+
+### Features
+- **Bucket-Based Results**: Flexible quota representation (daily, weekly, monthly)
+- **Auto Token Refresh**: Refreshes expired OAuth tokens before checking
+- **Gzip Support**: Handles compressed responses
+- **Cloudflare Detection**: Detects and reports Cloudflare blocks
+- **Model Caching**: Caches model lists with TTL to reduce API calls
+
+## Model Fetching System
+Dynamic model discovery with caching:
+
+### Architecture
+```
+┌──────────────────┐     ┌─────────────────────┐     ┌──────────────────┐
+│ UI/API Request   │────►│ ModelFetcher        │────►│ Provider API     │
+│ GET /v1/models   │     │ Interface + Cache   │     │ /v1/models       │
+└──────────────────┘     └─────────────────────┘     └──────────────────┘
+                                    │
+                         ┌──────────▼──────────┐
+                         │ ModelCache          │
+                         │ - TTL: 5 minutes    │
+                         │ - Singleflight      │
+                         └─────────────────────┘
+```
+
+### Key Components
+- **`port/model-fetcher.go`**: `ModelFetcher` interface
+- **`service/model-cache.go`**: Cache with deduplication
+- **`adapter/custom/model-fetcher.go`**: NoOp implementation for providers without APIs
+
+### Features
+- **TTL Caching**: 5-minute cache to reduce API calls
+- **Singleflight**: Deduplicates concurrent requests for same provider
+- **Fallback**: Returns static model definitions if API unavailable

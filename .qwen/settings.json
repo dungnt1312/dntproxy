@@ -37,7 +37,13 @@
       "Bash(robocopy *)",
       "Read(C:\\Users\\dungnt\\.qwen\\skills/**)",
       "Bash(npm run *)",
-      "Bash(timeout *)"
+      "Bash(timeout *)",
+      "WebFetch(github.com)",
+      "WebFetch(medium.com)",
+      "WebFetch(ameow.xyz)",
+      "Bash(cat *)",
+      "Bash(jq *)",
+      "Bash(move *)"
     ]
   },
   "$version": 3

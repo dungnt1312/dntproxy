@@ -1,165 +1,181 @@
-import { RefreshCw } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
+import { RefreshCw } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 export interface QuotaBucket {
-    key: string;
-    label: string;
-    used: number;
-    total: number;
-    remaining: number;
-    pct: number;
-    resetAt?: string;
-    unlimited: boolean;
+  key: string;
+  label: string;
+  used: number;
+  total: number;
+  remaining: number;
+  pct: number;
+  resetAt?: string;
+  unlimited: boolean;
 }
 
 export interface UsageData {
-    provider?: string;
-    plan?: string;
-    limitReached?: boolean;
-    message?: string;
-    quotas?: QuotaBucket[];
-    error?: string;
+  provider?: string;
+  plan?: string;
+  limitReached?: boolean;
+  message?: string;
+  quotas?: QuotaBucket[];
+  error?: string;
 }
 
 function timeUntil(dateStr: string): string {
-    const diff = new Date(dateStr).getTime() - Date.now();
-    if (diff <= 0) return 'now';
-    const mins = Math.floor(diff / 60000);
-    const hours = Math.floor(mins / 60);
-    const days = Math.floor(hours / 24);
-    if (days > 0) return `in ${days}d ${hours % 24}h`;
-    if (hours > 0) return `in ${hours}h ${mins % 60}m`;
-    return `in ${mins}m`;
+  const diff = new Date(dateStr).getTime() - Date.now();
+  if (diff <= 0) return "now";
+  const mins = Math.floor(diff / 60000);
+  const hours = Math.floor(mins / 60);
+  const days = Math.floor(hours / 24);
+  if (days > 0) return `in ${days}d ${hours % 24}h`;
+  if (hours > 0) return `in ${hours}h ${mins % 60}m`;
+  return `in ${mins}m`;
 }
 
 interface QuotaPanelProps {
-    data: UsageData | null;
-    loading?: boolean;
-    onRefresh?: (e?: React.MouseEvent) => void;
+  data: UsageData | null;
+  loading?: boolean;
+  onRefresh?: (e?: React.MouseEvent) => void;
 }
 
-export default function QuotaPanel({ data, loading, onRefresh }: QuotaPanelProps) {
-    if (loading && !data) {
-        return (
-            <div className="flex flex-col gap-1.5 justify-center py-1">
-                <div className="flex items-center gap-2 text-muted-foreground">
-                    <RefreshCw className="h-3 w-3 animate-spin" />
-                    <span className="text-[11px]">Fetching quota...</span>
-                </div>
-            </div>
-        );
-    }
-    
-    if (!data) return null;
-
-    if (data.error) {
-        return (
-            <div className="flex items-center justify-between gap-2">
-                <p className="text-[11px] text-destructive flex-1">{data.error}</p>
-                {onRefresh && (
-                    <div 
-                        className="p-1 rounded-md hover:bg-muted/80 text-muted-foreground hover:text-foreground cursor-pointer transition-colors shrink-0"
-                        onClick={onRefresh}
-                        title="Retry"
-                    >
-                        <RefreshCw size={12} className={cn(loading && 'animate-spin')} />
-                    </div>
-                )}
-            </div>
-        );
-    }
-
-    const quotas = data.quotas ?? [];
-    if (data.message && quotas.length === 0) {
-        return (
-            <div className="flex items-center justify-between gap-2">
-                <p className="text-[11px] text-muted-foreground italic flex-1 leading-tight">{data.message}</p>
-                {onRefresh && (
-                    <div 
-                        className="p-1 rounded-md hover:bg-muted/80 text-muted-foreground hover:text-foreground cursor-pointer transition-colors shrink-0"
-                        onClick={onRefresh}
-                        title="Refresh"
-                    >
-                        <RefreshCw size={12} className={cn(loading && 'animate-spin')} />
-                    </div>
-                )}
-            </div>
-        );
-    }
-
-    if (quotas.length === 0) {
-        return (
-            <div className="flex items-center justify-between gap-2">
-                <p className="text-[11px] text-muted-foreground italic flex-1">No quota info available.</p>
-                {onRefresh && (
-                    <div 
-                        className="p-1 rounded-md hover:bg-muted/80 text-muted-foreground hover:text-foreground cursor-pointer transition-colors shrink-0"
-                        onClick={onRefresh}
-                        title="Refresh"
-                    >
-                        <RefreshCw size={12} className={cn(loading && 'animate-spin')} />
-                    </div>
-                )}
-            </div>
-        );
-    }
-
-    const barColor = (pct: number) => (pct >= 90 ? 'bg-red-500' : pct >= 70 ? 'bg-amber-500' : 'bg-emerald-500');
-
+export default function QuotaPanel({
+  data,
+  loading,
+  onRefresh,
+}: QuotaPanelProps) {
+  if (loading && !data) {
     return (
-        <div className="space-y-1.5 w-full">
-            <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                    {data.plan && (
-                        <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-widest">
-                            {data.plan}
-                        </span>
-                    )}
-                    {data.limitReached && (
-                        <Badge
-                            variant="outline"
-                            className="text-destructive border-destructive/30 bg-destructive/10 text-[9px] px-1 py-0 h-4"
-                        >
-                            Limit Reached
-                        </Badge>
-                    )}
-                </div>
-                {onRefresh && (
-                    <div 
-                        className="p-1 -mr-1 rounded hover:bg-muted/60 text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
-                        onClick={onRefresh}
-                        title="Refresh quota"
-                    >
-                        <RefreshCw size={12} className={cn(loading && 'animate-spin')} />
-                    </div>
-                )}
-            </div>
-
-            <div className="space-y-2">
-                {quotas.map((b) => (
-                    <div key={b.key} className="space-y-1.5">
-                        <div className="flex items-end justify-between text-xs leading-none">
-                            <span className="text-muted-foreground/80 font-medium capitalize text-[11px]">{b.label}</span>
-                            <div className="flex items-center gap-1.5">
-                                <span className="font-mono text-[11px] text-foreground/80 font-medium">
-                                    {b.used} <span className="text-muted-foreground/50 text-[10px]">/ {b.total}</span>
-                                </span>
-                                {b.resetAt && (
-                                    <span className="text-[10px] text-muted-foreground/50">· {timeUntil(b.resetAt)}</span>
-                                )}
-                            </div>
-                        </div>
-                        <div className="relative h-1.5 rounded-full bg-muted/60 overflow-hidden w-full">
-                            <div
-                                className={`absolute inset-y-0 left-0 rounded-full transition-all duration-500 ${barColor(b.pct)}`}
-                                style={{ width: `${Math.max(0, 100 - b.pct)}%` }}
-                            />
-                        </div>
-                    </div>
-                ))}
-            </div>
+      <div className="flex flex-col gap-1.5 justify-center py-1">
+        <div className="flex items-center gap-2 text-muted-foreground">
+          <RefreshCw className="h-3 w-3 animate-spin" />
+          <span className="text-[11px]">Fetching quota...</span>
         </div>
+      </div>
     );
+  }
+
+  if (!data) return null;
+
+  if (data.error) {
+    return (
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[11px] text-destructive flex-1">{data.error}</p>
+        {onRefresh && (
+          <div
+            className="p-1 rounded-md hover:bg-muted/80 text-muted-foreground hover:text-foreground cursor-pointer transition-colors shrink-0"
+            onClick={onRefresh}
+            title="Retry"
+          >
+            <RefreshCw size={12} className={cn(loading && "animate-spin")} />
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  const quotas = data.quotas ?? [];
+  if (data.message && quotas.length === 0) {
+    return (
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[11px] text-muted-foreground italic flex-1 leading-tight">
+          {data.message}
+        </p>
+        {onRefresh && (
+          <div
+            className="p-1 rounded-md hover:bg-muted/80 text-muted-foreground hover:text-foreground cursor-pointer transition-colors shrink-0"
+            onClick={onRefresh}
+            title="Refresh"
+          >
+            <RefreshCw size={12} className={cn(loading && "animate-spin")} />
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (quotas.length === 0) {
+    return (
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[11px] text-muted-foreground italic flex-1">
+          No quota info available.
+        </p>
+        {onRefresh && (
+          <div
+            className="p-1 rounded-md hover:bg-muted/80 text-muted-foreground hover:text-foreground cursor-pointer transition-colors shrink-0"
+            onClick={onRefresh}
+            title="Refresh"
+          >
+            <RefreshCw size={12} className={cn(loading && "animate-spin")} />
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  const barColor = (pct: number) =>
+    pct >= 90 ? "bg-red-500" : pct >= 70 ? "bg-amber-500" : "bg-emerald-500";
+
+  return (
+    <div className="space-y-1.5 w-full">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          {data.plan && (
+            <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-widest">
+              {data.plan}
+            </span>
+          )}
+          {data.limitReached && (
+            <Badge
+              variant="outline"
+              className="text-destructive border-destructive/30 bg-destructive/10 text-[9px] px-1 py-0 h-4"
+            >
+              Limit Reached
+            </Badge>
+          )}
+        </div>
+        {onRefresh && (
+          <div
+            className="p-1 -mr-1 rounded hover:bg-muted/60 text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
+            onClick={onRefresh}
+            title="Refresh quota"
+          >
+            <RefreshCw size={12} className={cn(loading && "animate-spin")} />
+          </div>
+        )}
+      </div>
+
+      <div className="space-y-2">
+        {quotas.map((b) => (
+          <div key={b.key} className="space-y-1.5">
+            <div className="flex items-end justify-between text-xs leading-none">
+              <span className="text-muted-foreground/80 font-medium capitalize text-[11px]">
+                {b.label}
+              </span>
+              <div className="flex items-center gap-1.5">
+                <span className="font-mono text-[11px] text-foreground/80 font-medium">
+                  {b.remaining}{" "}
+                  <span className="text-muted-foreground/50 text-[10px]">
+                    / {b.total}
+                  </span>
+                </span>
+                {b.resetAt && (
+                  <span className="text-[10px] text-muted-foreground/50">
+                    · {timeUntil(b.resetAt)}
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="relative h-1.5 rounded-full bg-muted/60 overflow-hidden w-full">
+              <div
+                className={`absolute inset-y-0 left-0 rounded-full transition-all duration-500 ${barColor(b.pct)}`}
+                style={{ width: `${Math.max(0, 100 - b.pct)}%` }}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }

@@ -44,8 +44,12 @@ export interface LogConnectionSummary {
   requests: number
   errors: number
   totalTokens: number
+  inputTokens: number
+  outputTokens: number
   costTotal: number
   currency: string
+  lastUsedMs: number
+  avgLatencyMs: number
 }
 
 export interface LogFilters {

@@ -49,7 +49,6 @@ import { useAppStore } from "@/stores/app-store";
 import DashboardScreen from "@/components/screens/dashboard-screen";
 import ConnectionsScreen from "@/components/screens/connections-screen";
 import ModelsScreen from "@/components/screens/models-screen";
-import CombosScreen from "@/components/screens/combos-screen";
 import PlaygroundScreen from "@/components/screens/playground-screen";
 import LogsScreen from "@/components/screens/logs-screen";
 import SettingsScreen from "@/components/screens/settings-screen";
@@ -82,11 +81,10 @@ const navItems: NavItem[] = [
   },
   {
     path: "/models",
-    label: "Models & Aliases",
+    label: "Model Registry",
     icon: Boxes,
     group: "Management",
   },
-  { path: "/combos", label: "Combos", icon: Layers, group: "Management" },
   { path: "/profiles", label: "Profiles", icon: UserCircle, group: "Management" },
   { path: "/api-keys", label: "API Keys", icon: Key, group: "Security" },
   { path: "/tunnel", label: "Tunnel", icon: Globe, group: "Network" },
@@ -346,7 +344,6 @@ export default function App() {
             <Route path="/connections" element={<ConnectionsScreen />} />
             <Route path="/connections/add" element={<AddConnectionPage />} />
             <Route path="/models" element={<ModelsScreen />} />
-            <Route path="/combos" element={<CombosScreen />} />
             <Route path="/profiles" element={<ProfilesScreen />} />
             <Route path="/playground" element={<PlaygroundScreen />} />
             <Route path="/logs" element={<LogsScreen />} />

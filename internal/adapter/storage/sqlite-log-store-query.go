@@ -69,7 +69,11 @@ func (s *SQLiteLogStore) ConnectionSummaries(ctx context.Context, query domain.L
 		COUNT(CASE WHEN direction = 'response' THEN 1 END),
 		COUNT(CASE WHEN level = 'ERROR' THEN 1 END),
 		COALESCE(SUM(total_tokens), 0),
-		COALESCE(SUM(cost_total), 0)
+		COALESCE(SUM(input_tokens), 0),
+		COALESCE(SUM(output_tokens), 0),
+		COALESCE(SUM(cost_total), 0),
+		COALESCE(MAX(timestamp_ms), 0),
+		COALESCE(AVG(duration_ms), 0)
 		FROM request_logs `+where+`
 		GROUP BY connection_id, connection_name, provider
 		HAVING COALESCE(connection_id, '') <> ''
@@ -84,7 +88,9 @@ func (s *SQLiteLogStore) ConnectionSummaries(ctx context.Context, query domain.L
 		var item domain.LogConnectionSummary
 		item.Currency = "USD"
 		if err := rows.Scan(&item.ConnectionID, &item.ConnectionName, &item.Provider,
-			&item.Requests, &item.Errors, &item.TotalTokens, &item.CostTotal); err != nil {
+			&item.Requests, &item.Errors, &item.TotalTokens,
+			&item.InputTokens, &item.OutputTokens,
+			&item.CostTotal, &item.LastUsedMs, &item.AvgLatencyMs); err != nil {
 			return nil, err
 		}
 		result = append(result, item)

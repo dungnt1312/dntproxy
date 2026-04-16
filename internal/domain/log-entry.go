@@ -61,8 +61,12 @@ type LogConnectionSummary struct {
 	Requests       int     `json:"requests"`
 	Errors         int     `json:"errors"`
 	TotalTokens    int     `json:"totalTokens"`
+	InputTokens    int     `json:"inputTokens"`
+	OutputTokens   int     `json:"outputTokens"`
 	CostTotal      float64 `json:"costTotal"`
 	Currency       string  `json:"currency"`
+	LastUsedMs     int64   `json:"lastUsedMs"`
+	AvgLatencyMs   float64 `json:"avgLatencyMs"`
 }
 
 // ModelPrice stores an editable price profile used for estimated cost.

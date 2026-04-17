@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useCallback } from 'react';
+import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../api';
 import { Plus, Search, Link2, AlertTriangle, ChevronDown, Zap, RefreshCw } from 'lucide-react';
@@ -82,6 +82,7 @@ export default function ConnectionsScreen() {
     // Track which provider groups have been fetched for quota + which are loading
     const [fetchedGroups, setFetchedGroups] = useState<Record<string, boolean>>({});
     const [fetchingGroups, setFetchingGroups] = useState<Record<string, boolean>>({});
+    const quotaRefreshInFlightRef = useRef(false);
 
     const toggleGroup = useCallback((id: string) => {
         setCollapsedGroups((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -191,13 +192,24 @@ export default function ConnectionsScreen() {
                 .map(async (c: any) => {
                     try {
                         const res = await api.getUsage(c.id);
-                        setQuotaResult((prev) => ({ ...prev, [c.id]: res }));
+                        return [c.id, res] as const;
                     } catch (e: any) {
-                        setQuotaResult((prev) => ({ ...prev, [c.id]: { error: e.message } }));
+                        return [c.id, { error: e.message }] as const;
                     }
                 });
 
-            await Promise.allSettled(promises);
+            const settled = await Promise.allSettled(promises);
+            const quotaUpdates: Record<string, any> = {};
+            settled.forEach((result) => {
+                if (result.status === 'fulfilled') {
+                    const [connId, value] = result.value;
+                    quotaUpdates[connId] = value;
+                }
+            });
+
+            if (Object.keys(quotaUpdates).length > 0) {
+                setQuotaResult((prev) => ({ ...prev, ...quotaUpdates }));
+            }
             setFetchingGroups((prev) => ({ ...prev, [groupId]: false }));
             setFetchedGroups((prev) => ({ ...prev, [groupId]: true }));
         },
@@ -210,20 +222,47 @@ export default function ConnectionsScreen() {
         const fetchedGroupIds = Object.keys(fetchedGroups);
         if (fetchedGroupIds.length === 0) return;
 
-        const t = setInterval(() => {
-            fetchedGroupIds.forEach((groupId) => {
-                const group = groupedConns.find((g) => g.id === groupId);
-                group?.items.forEach((c: any) => {
-                    if (c.isActive) {
-                        api.getUsage(c.id)
-                            .then((res) => setQuotaResult((prev) => ({ ...prev, [c.id]: res })))
-                            .catch(() => {});
+        const refreshFetchedGroupsQuota = async () => {
+            if (quotaRefreshInFlightRef.current) return;
+            quotaRefreshInFlightRef.current = true;
+
+            try {
+                const activeConnections = fetchedGroupIds.flatMap((groupId) => {
+                    const group = groupedConns.find((g) => g.id === groupId);
+                    if (!group) return [] as any[];
+                    return group.items.filter((c: any) => c.isActive);
+                });
+
+                if (activeConnections.length === 0) return;
+
+                const uniqueConnections = Array.from(new Map(activeConnections.map((c: any) => [c.id, c])).values());
+                const results = await Promise.allSettled(
+                    uniqueConnections.map(async (c: any) => {
+                        const usage = await api.getUsage(c.id);
+                        return [c.id, usage] as const;
+                    }),
+                );
+
+                const quotaUpdates: Record<string, any> = {};
+                results.forEach((result) => {
+                    if (result.status === 'fulfilled') {
+                        const [id, usage] = result.value;
+                        quotaUpdates[id] = usage;
                     }
                 });
-            });
-        }, 30000);
+
+                if (Object.keys(quotaUpdates).length > 0) {
+                    setQuotaResult((prev) => ({ ...prev, ...quotaUpdates }));
+                }
+            } finally {
+                quotaRefreshInFlightRef.current = false;
+            }
+        };
+
+        refreshFetchedGroupsQuota();
+        const t = setInterval(refreshFetchedGroupsQuota, 30000);
         return () => clearInterval(t);
-    }, [autoRefreshQuota, conns, fetchedGroups, groupedConns]);
+    }, [autoRefreshQuota, fetchedGroups, groupedConns]);
 
     // ── Handlers ───────────────────────────────────────────────────────────────
     const handleDeleteConfirm = async (id: string) => {

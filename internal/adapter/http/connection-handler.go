@@ -140,12 +140,14 @@ func apiImportConnection(store port.CredentialStore) gin.HandlerFunc {
 		}
 
 		name := email
-		cfg, _ := store.Load()
+		cfg, err := store.Load()
+		if err != nil {
+			c.JSON(500, gin.H{"error": "Failed to load config"})
+			return
+		}
 		if name == "" {
 			name = providerLabel + " Account"
-			if cfg != nil {
-				name += " " + string(rune('1'+len(cfg.ProviderConnections)))
-			}
+			name += fmt.Sprintf(" %d", len(cfg.ProviderConnections)+1)
 		}
 
 		now := time.Now().UTC().Format(time.RFC3339)

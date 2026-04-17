@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { LiveRequestStream } from './live-request-stream'
 import { ConnectionUsageCharts } from './connection-usage-charts'
@@ -87,6 +88,11 @@ function ErrorsTab({ errors, loading }: { errors: RecentError[]; loading: boolea
 }
 
 function AnalyticsTab({ summaries, loading }: { summaries: LogConnectionSummary[]; loading: boolean }) {
+  const sortedSummaries = useMemo(
+    () => [...summaries].sort((a, b) => b.requests - a.requests),
+    [summaries],
+  )
+
   if (loading) {
     return (
       <div className="space-y-3 p-4">
@@ -103,7 +109,7 @@ function AnalyticsTab({ summaries, loading }: { summaries: LogConnectionSummary[
 
   return (
     <div className="p-4 space-y-1">
-      {summaries.sort((a, b) => b.requests - a.requests).map(s => {
+      {sortedSummaries.map(s => {
         const rate = s.requests > 0 ? (((s.requests - s.errors) / s.requests) * 100).toFixed(0) : '-'
         return (
           <div key={s.connectionId} className="flex items-center justify-between py-2 px-2 rounded-md hover:bg-muted/50 text-sm">

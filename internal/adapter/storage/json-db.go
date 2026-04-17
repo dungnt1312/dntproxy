@@ -75,8 +75,11 @@ func (db *JsonDB) Load() (*domain.AppConfig, error) {
 	// Fast path: return from cache if valid
 	db.configCacheMu.RLock()
 	if db.cachedConfig != nil && time.Since(db.cachedConfigAt) < db.configCacheTTL {
-		cfg := db.cachedConfig
+		cfg, err := cloneConfig(db.cachedConfig)
 		db.configCacheMu.RUnlock()
+		if err != nil {
+			return nil, err
+		}
 		return cfg, nil
 	}
 	db.configCacheMu.RUnlock()
@@ -87,7 +90,7 @@ func (db *JsonDB) Load() (*domain.AppConfig, error) {
 
 	// Double-check after acquiring write lock
 	if db.cachedConfig != nil && time.Since(db.cachedConfigAt) < db.configCacheTTL {
-		return db.cachedConfig, nil
+		return cloneConfig(db.cachedConfig)
 	}
 
 	cfg, err := db.readFromDisk()
@@ -95,9 +98,13 @@ func (db *JsonDB) Load() (*domain.AppConfig, error) {
 		return nil, err
 	}
 
-	db.cachedConfig = cfg
+	db.cachedConfig, err = cloneConfig(cfg)
+	if err != nil {
+		return nil, err
+	}
 	db.cachedConfigAt = time.Now()
-	return cfg, nil
+
+	return cloneConfig(cfg)
 }
 
 func (db *JsonDB) readFromDisk() (*domain.AppConfig, error) {
@@ -138,8 +145,12 @@ func (db *JsonDB) Save(cfg *domain.AppConfig) error {
 	}
 
 	// Update cache with new config
+	cacheCfg, err := cloneConfig(cfg)
+	if err != nil {
+		return err
+	}
 	db.configCacheMu.Lock()
-	db.cachedConfig = cfg
+	db.cachedConfig = cacheCfg
 	db.cachedConfigAt = time.Now()
 	db.configCacheMu.Unlock()
 
@@ -160,7 +171,11 @@ func (db *JsonDB) writeToDisk(cfg *domain.AppConfig) error {
 		return fmt.Errorf("rename temp to db: %w", err)
 	}
 
-	db.cache = cfg
+	cacheCfg, err := cloneConfig(cfg)
+	if err != nil {
+		return err
+	}
+	db.cache = cacheCfg
 	return nil
 }
 
@@ -219,12 +234,31 @@ func (db *JsonDB) Update(fn func(cfg *domain.AppConfig)) error {
 	}
 
 	// Update cache with new config
+	cacheCfg, err := cloneConfig(cfg)
+	if err != nil {
+		return err
+	}
 	db.configCacheMu.Lock()
-	db.cachedConfig = cfg
+	db.cachedConfig = cacheCfg
 	db.cachedConfigAt = time.Now()
 	db.configCacheMu.Unlock()
 
 	return nil
+}
+
+func cloneConfig(cfg *domain.AppConfig) (*domain.AppConfig, error) {
+	if cfg == nil {
+		return nil, nil
+	}
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("clone config marshal: %w", err)
+	}
+	var cloned domain.AppConfig
+	if err := json.Unmarshal(data, &cloned); err != nil {
+		return nil, fmt.Errorf("clone config unmarshal: %w", err)
+	}
+	return &cloned, nil
 }
 
 // UpdateConnection persists changes to a connection (atomic).

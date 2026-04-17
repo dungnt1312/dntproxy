@@ -18,8 +18,21 @@ export function LiveRequestStream() {
   const [paused, setPaused] = useState(false)
   const [open, setOpen] = useState(true)
   const esRef = useRef<EventSource | null>(null)
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pausedRef = useRef(false)
+
+  useEffect(() => {
+    pausedRef.current = paused
+  }, [paused])
+
+  const clearReconnectTimer = useCallback(() => {
+    if (!reconnectTimerRef.current) return
+    clearTimeout(reconnectTimerRef.current)
+    reconnectTimerRef.current = null
+  }, [])
 
   const connect = useCallback(() => {
+    clearReconnectTimer()
     if (esRef.current) {
       esRef.current.close()
       esRef.current = null
@@ -34,7 +47,10 @@ export function LiveRequestStream() {
         if (data.type === 'init' && Array.isArray(data.logs)) {
           setEntries(data.logs.slice(0, MAX_ENTRIES))
         } else if (data.type === 'delta' && data.log) {
-          setEntries(prev => [data.log, ...prev].slice(0, MAX_ENTRIES))
+          setEntries(prev => {
+            if (prev.some(entry => entry.id === data.log.id)) return prev
+            return [data.log, ...prev].slice(0, MAX_ENTRIES)
+          })
         }
       } catch {
         // ignore parse errors
@@ -45,21 +61,29 @@ export function LiveRequestStream() {
       es.close()
       esRef.current = null
       // reconnect after 5s
-      setTimeout(() => {
-        if (!paused) connect()
+      clearReconnectTimer()
+      reconnectTimerRef.current = setTimeout(() => {
+        reconnectTimerRef.current = null
+        if (!pausedRef.current) connect()
       }, 5000)
     }
-  }, [paused])
+  }, [clearReconnectTimer])
 
   useEffect(() => {
     if (!paused) connect()
+    else if (esRef.current) {
+      esRef.current.close()
+      esRef.current = null
+    }
+
     return () => {
+      clearReconnectTimer()
       if (esRef.current) {
         esRef.current.close()
         esRef.current = null
       }
     }
-  }, [paused, connect])
+  }, [paused, connect, clearReconnectTimer])
 
   const handleClear = () => setEntries([])
 

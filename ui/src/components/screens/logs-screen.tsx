@@ -121,6 +121,10 @@ export default function LogsScreen({
   const [live, setLive] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [debouncedFilters, setDebouncedFilters] = useState<LogFilters>(() => ({
+    ...DEFAULT_FILTERS,
+    ...initialFilters,
+  }));
 
   // Sync initial filters if they change from parent
   useEffect(() => {
@@ -138,7 +142,26 @@ export default function LogsScreen({
         return hasChanges ? newFilters : prev;
       });
     }
-  }, [JSON.stringify(initialFilters)]);
+  }, [
+    initialFilters?.range,
+    initialFilters?.connectionId,
+    initialFilters?.provider,
+    initialFilters?.level,
+    initialFilters?.q,
+  ]);
+
+  useEffect(() => {
+    if (filters.q === debouncedFilters.q) {
+      setDebouncedFilters(filters);
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      setDebouncedFilters(filters);
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [filters, debouncedFilters.q]);
 
   // Client-side pagination config
   const [page, setPage] = useState(1);
@@ -151,38 +174,53 @@ export default function LogsScreen({
   const eventSourceRef = useRef<EventSource | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const backoffRef = useRef(1000);
+  const fetchReqIdRef = useRef(0);
+  const logIdSetRef = useRef<Set<string>>(new Set());
+
+  const filteredProviderOptions = useMemo(
+    () => PROVIDER_OPTIONS.filter((o) => !allowedProviders || o.value === "all" || o.value === "CLIENT" || allowedProviders.includes(o.value)),
+    [allowedProviders],
+  );
 
   const fetchConnections = useCallback(async () => {
     try {
-      const res = await goApi.getLogConnections({ range: filters.range });
+      const res = await goApi.getLogConnections({ range: debouncedFilters.range });
       if (res) setConnections(res);
     } catch {
       // Silently fail
     }
-  }, [filters.range]);
+  }, [debouncedFilters.range]);
 
   const fetchLogs = useCallback(async (isAuto = false) => {
-    const skipLoading = typeof isAuto === "boolean" ? isAuto : false;
+    const skipLoading = Boolean(isAuto);
+    const reqId = ++fetchReqIdRef.current;
     if (!skipLoading) setIsLoading(true);
+
     try {
-      const res = await goApi.getLogs(filters);
+      const res = await goApi.getLogs(debouncedFilters);
+
+      if (reqId !== fetchReqIdRef.current) return;
+
       if (Array.isArray(res)) {
+        logIdSetRef.current = new Set(res.map((log) => log.id));
         setLogs(res);
         setPage(1); // Reset page on new data
       }
     } catch {
+      if (reqId !== fetchReqIdRef.current) return;
       toast.error("Failed to fetch logs");
     } finally {
+      if (reqId !== fetchReqIdRef.current) return;
       setIsLoading(false);
       setIsRefreshing(false);
     }
-  }, [filters]);
+  }, [debouncedFilters]);
 
   // Initial fetch and when filters (except live) change
   useEffect(() => {
     fetchConnections();
     fetchLogs();
-  }, [filters, fetchConnections, fetchLogs]);
+  }, [debouncedFilters, fetchConnections, fetchLogs]);
 
   // SSE Live stream handling
   useEffect(() => {
@@ -201,7 +239,7 @@ export default function LogsScreen({
     const connectSSE = () => {
       if (eventSourceRef.current) eventSourceRef.current.close();
 
-      const params = buildFilterParams(filters);
+      const params = buildFilterParams(debouncedFilters);
       // Ensure range is 1h for stream to avoid pulling massive history if they select 30d
       params.set("range", "1h");
       const url = `${SSE_BASE}/logs/stream?${params.toString()}`;
@@ -221,15 +259,17 @@ export default function LogsScreen({
 
           const data = JSON.parse(rawData);
           if (data.type === "init" && Array.isArray(data.logs)) {
+            logIdSetRef.current = new Set(data.logs.map((log: LogEntry) => log.id));
             setLogs(data.logs);
             setPage(1);
           } else if (data.type === "delta" && data.log) {
             setLogs((prev) => {
-              const exists = prev.some((l) => l.id === data.log.id);
-              if (exists) return prev;
+              if (logIdSetRef.current.has(data.log.id)) return prev;
               const newLogs = [data.log, ...prev];
               // Optional: cap array size in live mode
-              return newLogs.slice(0, 1000);
+              const cappedLogs = newLogs.slice(0, 1000);
+              logIdSetRef.current = new Set(cappedLogs.map((log) => log.id));
+              return cappedLogs;
             });
           }
         } catch (e) {
@@ -259,7 +299,7 @@ export default function LogsScreen({
         reconnectTimerRef.current = null;
       }
     };
-  }, [live, filters]);
+  }, [live, debouncedFilters]);
 
   const handleRefresh = () => {
     if (live) return;
@@ -268,7 +308,9 @@ export default function LogsScreen({
   };
 
   const clearFilters = () => {
-    setFilters({ ...DEFAULT_FILTERS, ...initialFilters });
+    const resetFilters = { ...DEFAULT_FILTERS, ...initialFilters };
+    setFilters(resetFilters);
+    setDebouncedFilters(resetFilters);
   };
 
   const hasActiveFilters =
@@ -365,13 +407,13 @@ export default function LogsScreen({
             <SelectTrigger className="w-[130px]" size="sm">
               <SelectValue placeholder="Provider" />
             </SelectTrigger>
-            <SelectContent>
-              {PROVIDER_OPTIONS.filter((o) => !allowedProviders || o.value === "all" || o.value === "CLIENT" || allowedProviders.includes(o.value)).map((o) => (
-                <SelectItem key={o.value} value={o.value}>
-                  {o.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
+              <SelectContent>
+               {filteredProviderOptions.map((o) => (
+                 <SelectItem key={o.value} value={o.value}>
+                   {o.label}
+                 </SelectItem>
+               ))}
+             </SelectContent>
           </Select>
         )}
 
@@ -468,11 +510,11 @@ export default function LogsScreen({
                 <TableRow>
                   <TableHead className="w-[140px]">Time</TableHead>
                   <TableHead className="w-[60px]">Method</TableHead>
-                  <TableHead className="min-w-[160px]">Path</TableHead>
                   <TableHead className="w-[70px]">Status</TableHead>
                   <TableHead className="w-[90px]">Provider</TableHead>
-                  <TableHead className="w-[90px]">Model</TableHead>
-                  <TableHead className="w-[110px] hidden lg:table-cell">Connection</TableHead>
+                  <TableHead className="w-[140px]">Model</TableHead>
+                  <TableHead className="w-[140px] hidden lg:table-cell">Connection</TableHead>
+                  <TableHead className="min-w-[200px]">Path</TableHead>
                   <TableHead className="w-[80px]">Latency</TableHead>
                   <TableHead className="w-[40px] hidden xl:table-cell"></TableHead>
                 </TableRow>
@@ -492,18 +534,18 @@ export default function LogsScreen({
                         {log.method || "—"}
                       </Badge>
                     </TableCell>
-                    <TableCell className="font-mono text-xs max-w-[200px] truncate" title={log.path || log.message}>
-                      {log.path || log.message || "—"}
-                    </TableCell>
                     <TableCell>
                       <StatusBadge status={log.statusCode} level={log.level} />
                     </TableCell>
                     <TableCell className="text-xs">{log.provider || "—"}</TableCell>
-                    <TableCell className="text-xs max-w-[90px] truncate" title={log.model || ""}>
+                    <TableCell className="text-xs max-w-[140px] truncate" title={log.model || ""}>
                       {log.model || "—"}
                     </TableCell>
-                    <TableCell className="text-xs hidden lg:table-cell truncate" title={log.connectionName || ""}>
+                    <TableCell className="text-xs hidden lg:table-cell max-w-[140px] truncate" title={log.connectionName || ""}>
                       {log.connectionName || "—"}
+                    </TableCell>
+                    <TableCell className="font-mono text-xs max-w-[200px] truncate" title={log.path || log.message}>
+                      {log.path || log.message || "—"}
                     </TableCell>
                     <TableCell className="text-xs">
                       <div className="flex items-center gap-1">

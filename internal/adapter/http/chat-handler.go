@@ -2,7 +2,6 @@ package http
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -51,20 +50,6 @@ func chatHandler(chatService port.ChatService, store port.CredentialStore) gin.H
 		log.Printf("[CHAT] POST /v1/chat/completions | model=%s", partial.Model)
 
 		result := chatService.HandleChat(body, partial.Model, requestID)
-		logger.Get().AddEntry(domain.LogEntry{
-			Level:      statusLevel(result.StatusCode),
-			Provider:   "CLIENT",
-			Direction:  "inbound",
-			Method:     c.Request.Method,
-			Path:       c.Request.URL.Path,
-			StatusCode: result.StatusCode,
-			DurationMs: time.Since(start).Milliseconds(),
-			Model:      partial.Model,
-			RequestID:  requestID,
-			Message:    "Client chat completion request",
-			Error:      result.Error,
-			BodySize:   len(body),
-		})
 
 		if result.Stream != nil {
 			c.Header("Content-Type", "text/event-stream")
@@ -74,30 +59,47 @@ func chatHandler(chatService port.ChatService, store port.CredentialStore) gin.H
 			c.Status(http.StatusOK)
 			c.Writer.Flush()
 
-			buf := make([]byte, 4096)
+			done := make(chan struct{})
+			defer close(done)
+			chunks, errs := streamChunks(done, result.Stream)
+			timeout := time.NewTimer(streamReadTimeout)
+			defer timeout.Stop()
 			for {
-				n, readErr := readWithTimeout(result.Stream, buf, streamReadTimeout)
-				if n > 0 {
-					if _, writeErr := c.Writer.Write(buf[:n]); writeErr != nil {
-						break
+				select {
+				case chunk, ok := <-chunks:
+					if !ok {
+						result.Stream.Close()
+						return
 					}
-					c.Writer.Flush()
-				}
-				if readErr != nil {
-					if readErr != io.EOF {
+					if len(chunk) > 0 {
+						if _, writeErr := c.Writer.Write(chunk); writeErr != nil {
+							result.Stream.Close()
+							return
+						}
+						c.Writer.Flush()
+					}
+					if !timeout.Stop() {
+						select {
+						case <-timeout.C:
+						default:
+						}
+					}
+					timeout.Reset(streamReadTimeout)
+				case readErr, ok := <-errs:
+					if ok && readErr != nil && readErr != io.EOF {
 						log.Printf("[CHAT] Stream error: %s", readErr)
 					}
-					break
-				}
-				select {
+					result.Stream.Close()
+					return
+				case <-timeout.C:
+					log.Printf("[CHAT] Stream error: stream read timeout after %v", streamReadTimeout)
+					result.Stream.Close()
+					return
 				case <-c.Request.Context().Done():
 					result.Stream.Close()
 					return
-				default:
 				}
 			}
-			result.Stream.Close()
-			return
 		}
 
 		c.JSON(result.StatusCode, gin.H{
@@ -106,31 +108,48 @@ func chatHandler(chatService port.ChatService, store port.CredentialStore) gin.H
 	}
 }
 
+func streamChunks(done <-chan struct{}, r io.Reader) (<-chan []byte, <-chan error) {
+	chunks := make(chan []byte)
+	errs := make(chan error, 1)
+
+	go func() {
+		defer close(chunks)
+		defer close(errs)
+
+		buf := make([]byte, 4096)
+		for {
+			select {
+			case <-done:
+				return
+			default:
+			}
+
+			n, err := r.Read(buf)
+			if n > 0 {
+				chunk := make([]byte, n)
+				copy(chunk, buf[:n])
+				select {
+				case chunks <- chunk:
+				case <-done:
+					return
+				}
+			}
+			if err != nil {
+				select {
+				case errs <- err:
+				case <-done:
+				}
+				return
+			}
+		}
+	}()
+
+	return chunks, errs
+}
+
 func statusLevel(status int) string {
 	if status >= 400 {
 		return "ERROR"
 	}
 	return "INFO"
-}
-
-// readWithTimeout reads from a stream with a timeout.
-// If no data is received within the timeout, it returns an error.
-func readWithTimeout(r io.Reader, buf []byte, timeout time.Duration) (int, error) {
-	type readResult struct {
-		n   int
-		err error
-	}
-
-	ch := make(chan readResult, 1)
-	go func() {
-		n, err := r.Read(buf)
-		ch <- readResult{n, err}
-	}()
-
-	select {
-	case res := <-ch:
-		return res.n, res.err
-	case <-time.After(timeout):
-		return 0, fmt.Errorf("stream read timeout after %v", timeout)
-	}
 }

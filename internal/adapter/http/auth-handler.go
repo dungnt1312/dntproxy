@@ -237,12 +237,14 @@ func authPoll(store port.CredentialStore) gin.HandlerFunc {
 		}
 
 		name := email
-		cfg, _ := store.Load()
+		cfg, err := store.Load()
+		if err != nil {
+			c.JSON(500, gin.H{"error": "Failed to load config"})
+			return
+		}
 		if name == "" {
 			name = providerLabel + " Account"
-			if cfg != nil {
-				name += fmt.Sprintf(" %d", len(cfg.ProviderConnections)+1)
-			}
+			name += fmt.Sprintf(" %d", len(cfg.ProviderConnections)+1)
 		}
 
 		now := time.Now().UTC().Format(time.RFC3339)
@@ -390,12 +392,14 @@ func authExchangeSocial(store port.CredentialStore) gin.HandlerFunc {
 		}
 
 		name := email
-		cfg, _ := store.Load()
+		cfg, err := store.Load()
+		if err != nil {
+			c.JSON(500, gin.H{"error": "Failed to load config"})
+			return
+		}
 		if name == "" {
 			name = providerLabel + " Account"
-			if cfg != nil {
-				name += fmt.Sprintf(" %d", len(cfg.ProviderConnections)+1)
-			}
+			name += fmt.Sprintf(" %d", len(cfg.ProviderConnections)+1)
 		}
 
 		now := time.Now().UTC().Format(time.RFC3339)
@@ -537,13 +541,13 @@ func apiFetchConnectionModels(store port.CredentialStore) gin.HandlerFunc {
 		defer resp.Body.Close()
 
 		if resp.StatusCode != 200 {
-			body, _ := io.ReadAll(resp.Body)
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 1*1024*1024))
 			c.JSON(resp.StatusCode, gin.H{"error": fmt.Sprintf("Provider returned %d: %s", resp.StatusCode, string(body))})
 			return
 		}
 
 		var modelsResp map[string]interface{}
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1*1024*1024))
 		if err := json.Unmarshal(body, &modelsResp); err != nil {
 			c.JSON(500, gin.H{"error": "Failed to parse models response"})
 			return
@@ -761,7 +765,7 @@ func authOpenAIExchange(store port.CredentialStore) gin.HandlerFunc {
 		}
 		defer resp.Body.Close()
 
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1*1024*1024))
 		if resp.StatusCode != 200 {
 			c.JSON(400, gin.H{"error": fmt.Sprintf("Token exchange failed (%d): %s", resp.StatusCode, string(body))})
 			return
@@ -784,7 +788,11 @@ func authOpenAIExchange(store port.CredentialStore) gin.HandlerFunc {
 			email = auth.ExtractEmailFromJWT(tokens.AccessToken)
 		}
 
-		cfg, _ := store.Load()
+		cfg, err := store.Load()
+		if err != nil {
+			c.JSON(500, gin.H{"error": "Failed to load config"})
+			return
+		}
 		name := email
 		if name == "" {
 			name = fmt.Sprintf("OpenAI Account %d", len(cfg.ProviderConnections)+1)
@@ -934,19 +942,21 @@ func authQwenPoll(store port.CredentialStore) gin.HandlerFunc {
 		email := auth.ExtractEmailFromJWT(tokens.AccessToken)
 
 		name := email
-		cfg, _ := store.Load()
+		cfg, err := store.Load()
+		if err != nil {
+			c.JSON(500, gin.H{"error": "Failed to load config"})
+			return
+		}
 		if name == "" {
 			name = "Qwen Account"
-			if cfg != nil {
-				count := 0
-				for _, conn := range cfg.ProviderConnections {
-					if conn.Provider == "qwen" {
-						count++
-					}
+			count := 0
+			for _, conn := range cfg.ProviderConnections {
+				if conn.Provider == "qwen" {
+					count++
 				}
-				if count > 0 {
-					name = fmt.Sprintf("Qwen Account %d", count+1)
-				}
+			}
+			if count > 0 {
+				name = fmt.Sprintf("Qwen Account %d", count+1)
 			}
 		}
 

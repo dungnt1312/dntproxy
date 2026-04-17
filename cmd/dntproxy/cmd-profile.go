@@ -222,8 +222,11 @@ func runProfileShow(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	cfg, _ := store.Load()
-	isActive := cfg != nil && cfg.Settings.ActiveProfile == name
+	cfg, err := store.Load()
+	if err != nil {
+		return err
+	}
+	isActive := cfg.Settings.ActiveProfile == name
 
 	status := "inactive"
 	if isActive {

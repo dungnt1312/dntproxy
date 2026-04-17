@@ -32,6 +32,10 @@ const (
 	DefaultWeight = 100
 )
 
+func init() {
+	rand.Seed(time.Now().UnixNano())
+}
+
 type AccountSelectionError struct {
 	Kind     AccountSelectionErrorKind
 	Provider string

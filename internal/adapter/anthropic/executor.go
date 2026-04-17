@@ -187,11 +187,9 @@ func (e *Executor) Execute(model string, body []byte, credentials *domain.Creden
 		scanner := bufio.NewScanner(resp.Body)
 		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 		currentEvent := ""
-		var bodyBytes []byte
 
 		for scanner.Scan() {
 			line := scanner.Text()
-			bodyBytes = append(bodyBytes, []byte(line+"\n")...)
 
 			if strings.HasPrefix(line, "event: ") {
 				currentEvent = strings.TrimPrefix(line, "event: ")

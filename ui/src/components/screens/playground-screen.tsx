@@ -179,6 +179,36 @@ export default function PlaygroundScreen() {
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const scrollAnchorRef = useRef<HTMLDivElement | null>(null);
+  const pendingAssistantDeltaRef = useRef("");
+  const deltaFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearDeltaFlushTimer = useCallback(() => {
+    if (!deltaFlushTimerRef.current) return;
+    clearTimeout(deltaFlushTimerRef.current);
+    deltaFlushTimerRef.current = null;
+  }, []);
+
+  const flushAssistantDelta = useCallback((assistantId: string) => {
+    clearDeltaFlushTimer();
+    const delta = pendingAssistantDeltaRef.current;
+    if (!delta) return;
+
+    pendingAssistantDeltaRef.current = "";
+    setMessages((current) =>
+      current.map((message) =>
+        message.id === assistantId
+          ? { ...message, content: message.content + delta }
+          : message,
+      ),
+    );
+  }, [clearDeltaFlushTimer]);
+
+  useEffect(() => {
+    return () => {
+      clearDeltaFlushTimer();
+      pendingAssistantDeltaRef.current = "";
+    };
+  }, [clearDeltaFlushTimer]);
 
   // ─── Load data ───────────────────────────────────────────────────────────
 
@@ -214,8 +244,8 @@ export default function PlaygroundScreen() {
 
   // Auto-scroll
   useEffect(() => {
-    scrollAnchorRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    scrollAnchorRef.current?.scrollIntoView({ behavior: sending ? "auto" : "smooth" });
+  }, [messages.length, sending]);
 
   // ─── Group models by provider & connection ───────────────────────────────
 
@@ -369,13 +399,12 @@ export default function PlaygroundScreen() {
           const delta = extractDeltaContent(line);
           if (delta) {
             fullResponse += delta;
-            setMessages((current) =>
-              current.map((message) =>
-                message.id === assistantId
-                  ? { ...message, content: message.content + delta }
-                  : message,
-              ),
-            );
+            pendingAssistantDeltaRef.current += delta;
+            if (!deltaFlushTimerRef.current) {
+              deltaFlushTimerRef.current = setTimeout(() => {
+                flushAssistantDelta(assistantId);
+              }, 48);
+            }
           }
 
           // Extract usage if available
@@ -385,6 +414,7 @@ export default function PlaygroundScreen() {
       }
 
       const duration = Date.now() - startTime;
+      flushAssistantDelta(assistantId);
       logEntry.responseBody = fullResponse;
       logEntry.durationMs = duration;
       logEntry.status = "success";
@@ -398,6 +428,7 @@ export default function PlaygroundScreen() {
 
       setRequestLogs((prev) => [logEntry, ...prev].slice(0, 50)); // Keep last 50 logs
     } catch (error) {
+      flushAssistantDelta(assistantId);
       const message =
         error instanceof Error ? error.message : "Chat request failed";
       const duration = Date.now() - startTime;
@@ -416,6 +447,8 @@ export default function PlaygroundScreen() {
       setRequestLogs((prev) => [logEntry, ...prev].slice(0, 50));
       toast.error(message);
     } finally {
+      clearDeltaFlushTimer();
+      pendingAssistantDeltaRef.current = "";
       abortControllerRef.current = null;
       setSending(false);
     }

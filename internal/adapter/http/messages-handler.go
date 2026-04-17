@@ -42,16 +42,16 @@ type anthropicMsgItem struct {
 // --- OpenAI types for translation ---
 
 type openaiChatMsg struct {
-	Role       string             `json:"role"`
-	Content    interface{}        `json:"content,omitempty"`
-	ToolCalls  []openaiToolCallT  `json:"tool_calls,omitempty"`
-	ToolCallID string             `json:"tool_call_id,omitempty"`
+	Role       string            `json:"role"`
+	Content    interface{}       `json:"content,omitempty"`
+	ToolCalls  []openaiToolCallT `json:"tool_calls,omitempty"`
+	ToolCallID string            `json:"tool_call_id,omitempty"`
 }
 
 type openaiToolCallT struct {
-	ID       string         `json:"id"`
-	Type     string         `json:"type"`
-	Function openaiToolFnT  `json:"function"`
+	ID       string        `json:"id"`
+	Type     string        `json:"type"`
+	Function openaiToolFnT `json:"function"`
 }
 
 type openaiToolFnT struct {
@@ -113,21 +113,6 @@ func messagesHandler(chatService port.ChatService, store port.CredentialStore) g
 
 		// Use chatService (always gets OpenAI SSE stream back)
 		result := chatService.HandleChat(openaiBody, antReq.Model, requestID)
-
-		logger.Get().AddEntry(domain.LogEntry{
-			Level:      statusLevel(result.StatusCode),
-			Provider:   "CLIENT",
-			Direction:  "inbound",
-			Method:     c.Request.Method,
-			Path:       c.Request.URL.Path,
-			StatusCode: result.StatusCode,
-			DurationMs: time.Since(start).Milliseconds(),
-			Model:      antReq.Model,
-			RequestID:  requestID,
-			Message:    "Client Anthropic messages request",
-			Error:      result.Error,
-			BodySize:   len(body),
-		})
 
 		if result.Stream == nil {
 			writeAnthropicError(c, result.StatusCode, "api_error", result.Error)
@@ -716,9 +701,9 @@ type openaiSSEChunk struct {
 }
 
 type openaiSSEChoice struct {
-	Index        int              `json:"index"`
-	Delta        openaiSSEDelta   `json:"delta"`
-	FinishReason *string          `json:"finish_reason"`
+	Index        int            `json:"index"`
+	Delta        openaiSSEDelta `json:"delta"`
+	FinishReason *string        `json:"finish_reason"`
 }
 
 type openaiSSEDelta struct {
@@ -728,10 +713,10 @@ type openaiSSEDelta struct {
 }
 
 type openaiSSEToolCall struct {
-	Index    int               `json:"index"`
-	ID       string            `json:"id,omitempty"`
-	Type     string            `json:"type,omitempty"`
-	Function openaiSSEToolFn   `json:"function"`
+	Index    int             `json:"index"`
+	ID       string          `json:"id,omitempty"`
+	Type     string          `json:"type,omitempty"`
+	Function openaiSSEToolFn `json:"function"`
 }
 
 type openaiSSEToolFn struct {

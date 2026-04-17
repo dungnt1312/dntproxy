@@ -64,7 +64,10 @@ func apiCreateKey(store port.CredentialStore) gin.HandlerFunc {
 		}
 
 		keyBytes := make([]byte, 24)
-		rand.Read(keyBytes)
+		if _, err := rand.Read(keyBytes); err != nil {
+			c.JSON(500, gin.H{"error": "failed to generate secure API key"})
+			return
+		}
 		key := "sk-dnt-" + hex.EncodeToString(keyBytes)
 
 		apiKey := domain.APIKey{

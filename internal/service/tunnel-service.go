@@ -28,6 +28,8 @@ type TunnelService struct {
 	ctx         context.Context
 	cancel      context.CancelFunc
 	mu          sync.Mutex
+	lastError   string
+	starting    bool
 }
 
 // NewTunnelService creates a new tunnel service.
@@ -86,7 +88,15 @@ func (s *TunnelService) Enable(localPort int) error {
 		s.mu.Unlock()
 		return nil // Already running
 	}
+	s.starting = true
+	s.lastError = ""
 	s.mu.Unlock()
+
+	defer func() {
+		s.mu.Lock()
+		s.starting = false
+		s.mu.Unlock()
+	}()
 
 	// Kill any existing process
 	if err := s.cloudflared.Kill(); err != nil {
@@ -96,6 +106,7 @@ func (s *TunnelService) Enable(localPort int) error {
 	// Generate IDs
 	tunnelState, err := s.state.LoadState()
 	if err != nil {
+		s.setError(fmt.Sprintf("load state: %v", err))
 		return err
 	}
 
@@ -106,17 +117,20 @@ func (s *TunnelService) Enable(localPort int) error {
 		tunnelState.MachineID = generateMachineID()
 	}
 	if err := s.state.SaveState(tunnelState); err != nil {
+		s.setError(fmt.Sprintf("save state: %v", err))
 		return err
 	}
 
 	// Ensure binary exists
 	if err := s.cloudflared.EnsureBinary(); err != nil {
+		s.setError(fmt.Sprintf("download cloudflared: %v", err))
 		return fmt.Errorf("ensure cloudflared binary: %w", err)
 	}
 
 	// Spawn tunnel
 	log.Printf("[tunnel] Starting cloudflared quick tunnel on port %d...", localPort)
 	if err := s.cloudflared.Spawn(s.ctx, localPort); err != nil {
+		s.setError(fmt.Sprintf("spawn cloudflared: %v", err))
 		return fmt.Errorf("spawn cloudflared: %w", err)
 	}
 
@@ -128,16 +142,24 @@ func (s *TunnelService) Enable(localPort int) error {
 			break
 		}
 		if i == 29 {
+			s.setError("timeout waiting for tunnel URL (30s)")
 			return fmt.Errorf("timeout waiting for tunnel URL")
 		}
 	}
 
 	// DNS warmup
-	log.Printf("[tunnel] Waiting 8s for DNS propagation...")
-	time.Sleep(8 * time.Second)
+	log.Printf("[tunnel] Waiting 5s for DNS propagation...")
+	time.Sleep(5 * time.Second)
 
 	log.Printf("[tunnel] Tunnel started successfully")
 	return nil
+}
+
+func (s *TunnelService) setError(msg string) {
+	s.mu.Lock()
+	s.lastError = msg
+	s.mu.Unlock()
+	log.Printf("[tunnel] Error: %s", msg)
 }
 
 // Disable stops the running tunnel.
@@ -157,6 +179,12 @@ func (s *TunnelService) Disable() error {
 		ts.TunnelURL = ""
 		s.state.SaveState(ts)
 	}
+
+	// Clear error state
+	s.mu.Lock()
+	s.lastError = ""
+	s.starting = false
+	s.mu.Unlock()
 
 	// Update settings
 	s.store.Update(func(cfg *domain.AppConfig) {
@@ -179,13 +207,31 @@ func (s *TunnelService) Status() port.TunnelStatus {
 	ts, _ := s.state.LoadState()
 	running := s.cloudflared.IsRunning()
 
+	s.mu.Lock()
+	lastErr := s.lastError
+	starting := s.starting
+	s.mu.Unlock()
+
+	// If settings say enabled but process is dead and not starting, sync state
+	if settings.TunnelEnabled && !running && !starting && ts.TunnelURL != "" {
+		// Stale state — process died
+		ts.TunnelURL = ""
+		s.state.SaveState(ts)
+		s.store.Update(func(cfg *domain.AppConfig) {
+			cfg.Settings.TunnelRunning = false
+			cfg.Settings.TunnelURL = ""
+		})
+	}
+
 	return port.TunnelStatus{
 		Enabled:   settings.TunnelEnabled,
 		Running:   running,
+		Starting:  starting,
 		Provider:  settings.TunnelProvider,
 		TunnelURL: ts.TunnelURL,
 		ShortID:   ts.ShortID,
-		PublicURL: ts.TunnelURL, // trycloudflare.com is already public
+		PublicURL: ts.TunnelURL,
+		LastError: lastErr,
 	}
 }
 

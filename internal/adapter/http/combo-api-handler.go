@@ -165,7 +165,7 @@ func apiUpdateCombo(store port.CredentialStore) gin.HandlerFunc {
 	}
 }
 
-func apiDeleteCombo(store port.CredentialStore) gin.HandlerFunc {
+func apiDeleteCombo(store port.CredentialStore, onComboDelete func(string)) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
 		cfg, err := store.Load()
@@ -175,8 +175,10 @@ func apiDeleteCombo(store port.CredentialStore) gin.HandlerFunc {
 		}
 
 		found := false
+		deletedName := ""
 		for i, combo := range cfg.Combos {
 			if combo.ID == id || combo.Name == id {
+				deletedName = combo.Name
 				cfg.Combos = append(cfg.Combos[:i], cfg.Combos[i+1:]...)
 				found = true
 				break
@@ -191,6 +193,12 @@ func apiDeleteCombo(store port.CredentialStore) gin.HandlerFunc {
 			c.JSON(500, gin.H{"error": err.Error()})
 			return
 		}
+
+		// Clear rotation state for deleted combo
+		if onComboDelete != nil && deletedName != "" {
+			onComboDelete(deletedName)
+		}
+
 		c.JSON(200, gin.H{"ok": true})
 	}
 }

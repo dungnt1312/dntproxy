@@ -43,12 +43,12 @@ type UsageResponse struct {
 
 // OverageInfo contains overage usage when user has exceeded their plan limits.
 type OverageInfo struct {
-	Used       float64 `json:"used"`
-	Cap        float64 `json:"cap"`
-	Remaining  float64 `json:"remaining"`
-	Status     string  `json:"status,omitempty"`
-	Charge     float64 `json:"charge,omitempty"`
-	Rate       float64 `json:"rate,omitempty"`
+	Used      float64 `json:"used"`
+	Cap       float64 `json:"cap"`
+	Remaining float64 `json:"remaining"`
+	Status    string  `json:"status,omitempty"`
+	Charge    float64 `json:"charge,omitempty"`
+	Rate      float64 `json:"rate,omitempty"`
 }
 
 func (r *UsageResponse) addBucket(key, label string, used, total int, resetAt string, unlimited bool) {
@@ -269,7 +269,6 @@ func fetchKiroUsage(conn *domain.ProviderConnection) (*UsageResponse, error) {
 // parseKiroUsageBody fills UsageResponse from the CodeWhisperer GetUsageLimits JSON body
 // using the same field mapping as parseKiroQuotaResponse in quota-handler.go.
 func parseKiroUsageBody(body []byte, resp *UsageResponse) {
-	log.Printf("[Kiro Quota] Raw response: %s", string(body))
 	var data map[string]interface{}
 	if json.Unmarshal(body, &data) != nil {
 		return

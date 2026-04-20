@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"strings"
+	"sync"
 )
 
 type openAIUsage struct {
@@ -120,6 +121,7 @@ func extractResponsePreview(body []byte) (string, bool) {
 // for usage extraction and response preview after the stream ends.
 type openaiStreamSniffer struct {
 	io.ReadCloser
+	mu      sync.Mutex
 	bodyBuf []byte
 	onClose func([]byte)
 }
@@ -127,18 +129,23 @@ type openaiStreamSniffer struct {
 func (s *openaiStreamSniffer) Read(p []byte) (n int, err error) {
 	n, err = s.ReadCloser.Read(p)
 	if n > 0 {
+		s.mu.Lock()
 		// keep up to 100KB to avoid memory explosion if stream is huge
 		if len(s.bodyBuf) < 100*1024 {
 			s.bodyBuf = append(s.bodyBuf, p[:n]...)
 		}
+		s.mu.Unlock()
 	}
 	return n, err
 }
 
 func (s *openaiStreamSniffer) Close() error {
 	err := s.ReadCloser.Close()
-	if s.onClose != nil && len(s.bodyBuf) > 0 {
-		s.onClose(s.bodyBuf)
+	s.mu.Lock()
+	buf := s.bodyBuf
+	s.mu.Unlock()
+	if s.onClose != nil && len(buf) > 0 {
+		s.onClose(buf)
 	}
 	return err
 }

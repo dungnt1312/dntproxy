@@ -9,9 +9,9 @@ import (
 )
 
 // RegisterTunnelRoutes registers tunnel API endpoints.
-func RegisterTunnelRoutes(r *gin.Engine, tunnelMgr port.TunnelManager, port int) {
+func RegisterTunnelRoutes(r *gin.Engine, tunnelMgr port.TunnelManager, store port.CredentialStore) {
 	r.POST("/api/tunnel/enable", func(c *gin.Context) {
-		enableTunnel(c, tunnelMgr, port)
+		enableTunnel(c, tunnelMgr, store)
 	})
 	r.POST("/api/tunnel/disable", func(c *gin.Context) {
 		disableTunnel(c, tunnelMgr)
@@ -21,7 +21,7 @@ func RegisterTunnelRoutes(r *gin.Engine, tunnelMgr port.TunnelManager, port int)
 	})
 }
 
-func enableTunnel(c *gin.Context, tunnelMgr port.TunnelManager, localPort int) {
+func enableTunnel(c *gin.Context, tunnelMgr port.TunnelManager, store port.CredentialStore) {
 	// Check if already running
 	status := tunnelMgr.Status()
 	if status.Running {
@@ -33,10 +33,16 @@ func enableTunnel(c *gin.Context, tunnelMgr port.TunnelManager, localPort int) {
 		return
 	}
 
+	// Read port from settings dynamically
+	localPort := 20199
+	if settings, err := store.GetSettings(); err == nil && settings.Port > 0 {
+		localPort = settings.Port
+	}
+
 	// Start tunnel in background
 	go func() {
 		if err := tunnelMgr.Enable(localPort); err != nil {
-			// Error logged in service
+			// Error is stored in TunnelStatus.LastError via service
 		}
 	}()
 
@@ -69,5 +75,7 @@ func getTunnelStatus(c *gin.Context, tunnelMgr port.TunnelManager) {
 		"tunnelUrl": status.TunnelURL,
 		"shortId":   status.ShortID,
 		"publicUrl": status.PublicURL,
+		"lastError": status.LastError,
+		"starting":  status.Starting,
 	})
 }

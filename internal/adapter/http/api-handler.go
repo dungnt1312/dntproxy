@@ -19,7 +19,7 @@ import (
 //   - model-api-handler.go   — model list + registry CRUD
 //   - quota-handler.go       — quota check + Codex probing
 //   - backup-handler.go      — backup export/import
-func RegisterAPIRoutes(r *gin.Engine, store port.CredentialStore, providers port.ProviderRegistry) {
+func RegisterAPIRoutes(r *gin.Engine, store port.CredentialStore, providers port.ProviderRegistry, onComboDelete func(string)) {
 	api := r.Group("/api")
 	api.Use(apiKeyMiddleware(store))
 	{
@@ -49,7 +49,7 @@ func RegisterAPIRoutes(r *gin.Engine, store port.CredentialStore, providers port
 		api.GET("/combos", apiListCombos(store))
 		api.POST("/combos", apiCreateCombo(store))
 		api.PUT("/combos/:id", apiUpdateCombo(store))
-		api.DELETE("/combos/:id", apiDeleteCombo(store))
+		api.DELETE("/combos/:id", apiDeleteCombo(store, onComboDelete))
 
 		// Aliases
 		api.GET("/aliases", apiListAliases(store))

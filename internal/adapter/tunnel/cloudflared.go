@@ -137,30 +137,25 @@ func (c *Cloudflared) downloadURL() string {
 	goos := runtime.GOOS
 	goarch := runtime.GOARCH
 
-	// Map Go arch to cloudflared arch
-	arch := goarch
-	if goarch == "amd64" {
-		arch = "amd64"
-	} else if goarch == "arm64" {
-		arch = "arm64"
-	} else {
+	if goarch != "amd64" && goarch != "arm64" {
 		return ""
 	}
 
-	if goos == "windows" {
-		return fmt.Sprintf("https://github.com/cloudflare/cloudflared/releases/download/%s/cloudflared-windows-%s.exe",
-			cloudflaredVersion, arch)
-	}
+	base := fmt.Sprintf("https://github.com/cloudflare/cloudflared/releases/download/%s", cloudflaredVersion)
 
-	ext := ""
-	if goos == "darwin" {
-		ext = ".tgz"
-	} else {
-		ext = fmt.Sprintf("-%s-%s", goos, arch)
+	switch goos {
+	case "windows":
+		// cloudflared-windows-amd64.exe
+		return fmt.Sprintf("%s/cloudflared-windows-%s.exe", base, goarch)
+	case "darwin":
+		// cloudflared-darwin-amd64.tgz
+		return fmt.Sprintf("%s/cloudflared-darwin-%s.tgz", base, goarch)
+	case "linux":
+		// cloudflared-linux-amd64 (direct binary)
+		return fmt.Sprintf("%s/cloudflared-linux-%s", base, goarch)
+	default:
+		return ""
 	}
-
-	return fmt.Sprintf("https://github.com/cloudflare/cloudflared/releases/download/%s/cloudflared-%s%s",
-		cloudflaredVersion, goos, ext)
 }
 
 // Spawn starts a cloudflared quick tunnel to the given local port.
@@ -298,9 +293,12 @@ func (c *Cloudflared) IsRunning() bool {
 	defer c.mu.Unlock()
 
 	if c.cmd != nil && c.cmd.Process != nil {
-		// Check if process is alive
-		err := c.cmd.Process.Signal(os.Signal(nil))
-		return err == nil
+		// Check if process has exited via ProcessState (set after Wait())
+		if c.cmd.ProcessState != nil {
+			return false // already exited
+		}
+		// Process hasn't been waited on yet — check via PID
+		return isProcessRunning(c.cmd.Process.Pid)
 	}
 
 	// Check via PID file

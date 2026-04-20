@@ -32,10 +32,6 @@ const (
 	DefaultWeight = 100
 )
 
-func init() {
-	rand.Seed(time.Now().UnixNano())
-}
-
 type AccountSelectionError struct {
 	Kind     AccountSelectionErrorKind
 	Provider string
@@ -397,6 +393,14 @@ func (s *AccountSelector) ClearError(connectionID string, model string) error {
 
 		if model != "" && conn.ModelLocks != nil {
 			delete(conn.ModelLocks, model)
+
+			// Clean up any expired model locks while we're here
+			now := time.Now()
+			for k, expiry := range conn.ModelLocks {
+				if t, err := time.Parse(time.RFC3339, expiry); err == nil && t.Before(now) {
+					delete(conn.ModelLocks, k)
+				}
+			}
 		}
 	})
 }

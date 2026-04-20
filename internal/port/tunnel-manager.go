@@ -4,10 +4,12 @@ package port
 type TunnelStatus struct {
 	Enabled   bool   `json:"enabled"`
 	Running   bool   `json:"running"`
+	Starting  bool   `json:"starting"`
 	Provider  string `json:"provider"`
 	TunnelURL string `json:"tunnelUrl"`
 	ShortID   string `json:"shortId"`
 	PublicURL string `json:"publicUrl"`
+	LastError string `json:"lastError,omitempty"`
 }
 
 // TunnelManager manages cloudflared tunnel lifecycle.

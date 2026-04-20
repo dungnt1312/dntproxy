@@ -143,10 +143,3 @@ func streamChunks(done <-chan struct{}, r io.Reader) (<-chan []byte, <-chan erro
 
 	return chunks, errs
 }
-
-func statusLevel(status int) string {
-	if status >= 400 {
-		return "ERROR"
-	}
-	return "INFO"
-}

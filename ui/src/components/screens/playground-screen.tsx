@@ -58,6 +58,7 @@ import type {
   ChatParams,
 } from "./playground/types";
 import { PlaygroundParamsPanel } from "./playground/PlaygroundParamsPanel";
+import { ModelSelector } from "./playground/model-selector";
 
 type ChatApiMessage = {
   role: "user" | "assistant" | "system";
@@ -159,9 +160,9 @@ export default function PlaygroundScreen() {
   const [loadingModels, setLoadingModels] = useState(true);
 
   // Selection
-  const [selectedModelId, setSelectedModelId] = useState("");
-  const [selectedConnectionFilter, setSelectedConnectionFilter] =
-    useState<string>("all");
+  const [selectedProvider, setSelectedProvider] = useState("");
+  const [selectedModel, setSelectedModel] = useState("");
+  const [selectedAccount, setSelectedAccount] = useState("auto");
 
   // Chat
   const [messages, setMessages] = useState<Message[]>([]);
@@ -229,8 +230,15 @@ export default function PlaygroundScreen() {
           : [];
         setConnections(availableConnections);
 
+        // Auto-select first model
         if (availableModels.length > 0) {
-          setSelectedModelId(availableModels[0].id);
+          const firstModel = availableModels[0];
+          setSelectedProvider(firstModel.provider);
+          // Strip provider prefix from model ID
+          const modelName = firstModel.id.includes('/') 
+            ? firstModel.id.split('/').slice(1).join('/')
+            : firstModel.id;
+          setSelectedModel(modelName);
         }
       } catch {
         toast.error("Failed to load models and connections");
@@ -247,66 +255,22 @@ export default function PlaygroundScreen() {
     scrollAnchorRef.current?.scrollIntoView({ behavior: sending ? "auto" : "smooth" });
   }, [messages.length, sending]);
 
-  // ─── Group models by provider & connection ───────────────────────────────
-
-  const filteredModels = useMemo(() => {
-    if (selectedConnectionFilter === "all") {
-      return models;
+  // Build final model string for API: "provider/model@account"
+  const finalModelString = useMemo(() => {
+    if (!selectedProvider || !selectedModel) return '';
+    
+    const base = `${selectedProvider}/${selectedModel}`;
+    if (selectedAccount && selectedAccount !== 'auto') {
+      return `${base}@${selectedAccount}`;
     }
-
-    const conn = connections.find((c) => c.id === selectedConnectionFilter);
-    if (!conn) return models;
-
-    // Filter: only show models that this connection supports
-    if (conn.supportedModels && conn.supportedModels.length > 0) {
-      // supportedModels contains model IDs without provider prefix (e.g. "claude-sonnet-4.5")
-      // model.id has full format (e.g. "kiro/claude-sonnet-4.5")
-      // Check both: exact match OR matches after stripping provider prefix
-      const allowed = new Set(conn.supportedModels);
-      return models.filter((m) => {
-        // Exact match (if supportedModels has full IDs)
-        if (allowed.has(m.id)) return true;
-        // Match by stripping provider prefix: "kiro/claude-sonnet-4.5" → "claude-sonnet-4.5"
-        const shortId = m.id.includes("/") ? m.id.split("/")[1] : m.id;
-        return allowed.has(shortId);
-      });
-    }
-
-    // Fallback: show models with matching provider
-    return models.filter((m) => m.provider === conn.provider);
-  }, [models, connections, selectedConnectionFilter]);
-
-  const groupedModels = useMemo(() => {
-    const groups: Record<string, Model[]> = {};
-
-    for (const model of filteredModels) {
-      const provider = model.provider || "Unknown";
-      if (!groups[provider]) groups[provider] = [];
-      groups[provider].push(model);
-    }
-
-    return groups;
-  }, [filteredModels]);
-
-  // Auto-select first model when connection filter changes
-  useEffect(() => {
-    if (filteredModels.length > 0 && !filteredModels.some(m => m.id === selectedModelId)) {
-      setSelectedModelId(filteredModels[0].id);
-    }
-  }, [filteredModels, selectedModelId]);
-
-  const filteredModelsCount = useMemo(() => {
-    return Object.values(groupedModels).reduce(
-      (sum, group) => sum + group.length,
-      0,
-    );
-  }, [groupedModels]);
+    return base;
+  }, [selectedProvider, selectedModel, selectedAccount]);
 
   // ─── Send message ────────────────────────────────────────────────────────
 
   async function handleSend() {
     const content = input.trim();
-    if (!content || sending || !selectedModelId) return;
+    if (!content || sending || !finalModelString) return;
 
     const userMessage: Message = {
       id: crypto.randomUUID(),
@@ -342,7 +306,7 @@ export default function PlaygroundScreen() {
     );
 
     const requestBody = {
-      model: selectedModelId,
+      model: finalModelString,
       stream: true,
       messages: nextMessages,
       temperature: params.temperature,
@@ -354,7 +318,7 @@ export default function PlaygroundScreen() {
     const logEntry: RequestLog = {
       id: logId,
       timestamp: new Date().toISOString(),
-      model: selectedModelId,
+      model: finalModelString,
       status: "success",
       requestBody: JSON.stringify(requestBody, null, 2),
     };
@@ -510,87 +474,18 @@ export default function PlaygroundScreen() {
           </div>
         </div>
 
-        {/* Model & Connection Selection */}
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Connection filter */}
-          <Select
-            value={selectedConnectionFilter}
-            onValueChange={setSelectedConnectionFilter}
-          >
-            <SelectTrigger className="w-[180px] h-8 text-xs">
-              <SelectValue placeholder="Filter by connection" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All connections</SelectItem>
-              {connections
-                .filter((c) => c.isActive)
-                .map((conn) => (
-                  <SelectItem key={conn.id} value={conn.id}>
-                    <div className="flex items-center gap-2">
-                      <ProviderBadge provider={conn.provider} />
-                      <span className="truncate">{conn.name}</span>
-                    </div>
-                  </SelectItem>
-                ))}
-            </SelectContent>
-          </Select>
-
-          {/* Model selector */}
-          <Select
-            value={selectedModelId}
-            onValueChange={setSelectedModelId}
-            disabled={loadingModels || models.length === 0}
-          >
-            <SelectTrigger className="w-[280px] h-8">
-              <SelectValue
-                placeholder={
-                  loadingModels
-                    ? "Loading models…"
-                    : filteredModelsCount === 0
-                      ? "No models available"
-                      : "Select model"
-                }
-              />
-            </SelectTrigger>
-            <SelectContent>
-              {Object.entries(groupedModels).map(([provider, groupModels]) =>
-                groupModels.length > 0 ? (
-                  <SelectGroup key={provider}>
-                    <SelectLabel className="flex items-center gap-2 text-xs">
-                      <ProviderBadge provider={provider} />
-                      <span className="text-muted-foreground">
-                        ({groupModels.length})
-                      </span>
-                    </SelectLabel>
-                    {groupModels.map((model) => (
-                      <SelectItem
-                        key={model.id}
-                        value={model.id}
-                        className="text-sm"
-                      >
-                        <div className="flex items-center gap-2">
-                          <span className="truncate">{model.displayName}</span>
-                          <Badge
-                            variant="outline"
-                            className="text-[10px] ml-auto"
-                          >
-                            {model.id.split("/").pop()}
-                          </Badge>
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                ) : null,
-              )}
-            </SelectContent>
-          </Select>
-
-          {selectedModelId && (
-            <Badge variant="secondary" className="text-xs">
-              {selectedModelId}
-            </Badge>
-          )}
-        </div>
+        {/* Model Selection */}
+        <ModelSelector
+          models={models}
+          connections={connections}
+          selectedProvider={selectedProvider}
+          selectedModel={selectedModel}
+          selectedAccount={selectedAccount}
+          onProviderChange={setSelectedProvider}
+          onModelChange={setSelectedModel}
+          onAccountChange={setSelectedAccount}
+          disabled={loadingModels}
+        />
 
         {/* Parameters panel */}
         {showParams && (
@@ -647,9 +542,9 @@ export default function PlaygroundScreen() {
                       and test routing with real chat prompts.
                     </p>
                   </div>
-                  {selectedModelId && (
+                  {finalModelString && (
                     <div className="flex items-center gap-2">
-                      <Badge variant="secondary">{selectedModelId}</Badge>
+                      <Badge variant="secondary">{finalModelString}</Badge>
                       <Zap className="h-4 w-4 text-emerald-600" />
                     </div>
                   )}
@@ -709,20 +604,20 @@ export default function PlaygroundScreen() {
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && !event.shiftKey) {
                     event.preventDefault();
-                    handleSend();
-                  }
-                }}
-                placeholder="Type your message…"
-                className="min-h-[44px] resize-none rounded-xl"
-                rows={1}
-                disabled={sending || !selectedModelId}
-              />
-              <Button
-                onClick={handleSend}
-                disabled={sending || !input.trim() || !selectedModelId}
-                size="icon"
-                className="h-[44px] w-[44px] shrink-0 rounded-xl"
-              >
+                  handleSend();
+                }
+              }}
+              placeholder="Type your message…"
+              className="min-h-[44px] resize-none rounded-xl"
+              rows={1}
+              disabled={sending || !finalModelString}
+            />
+            <Button
+              onClick={handleSend}
+              disabled={sending || !input.trim() || !finalModelString}
+              size="icon"
+              className="h-[44px] w-[44px] shrink-0 rounded-xl"
+            >
                 {sending ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (

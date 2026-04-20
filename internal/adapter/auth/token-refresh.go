@@ -10,6 +10,7 @@ import (
 
 	"github.com/dungnt/dntproxy/internal/domain"
 	"github.com/dungnt/dntproxy/internal/port"
+	"golang.org/x/sync/singleflight"
 )
 
 const tokenExpiryBuffer = 5 * time.Minute
@@ -17,6 +18,7 @@ const tokenExpiryBuffer = 5 * time.Minute
 // TokenRefreshService handles automatic token refresh for Kiro connections.
 type TokenRefreshService struct {
 	store port.CredentialStore
+	sfg   singleflight.Group
 }
 
 // NewTokenRefreshService creates a new TokenRefreshService.
@@ -148,7 +150,7 @@ func (s *TokenRefreshService) refreshQwen(conn *domain.ProviderConnection) (*dom
 }
 
 // CheckAndRefresh checks if token needs refresh and refreshes if needed.
-// Returns updated credentials.
+// Uses singleflight to deduplicate concurrent refreshes for the same connection.
 func (s *TokenRefreshService) CheckAndRefresh(conn *domain.ProviderConnection) (*domain.ProviderConnection, error) {
 	if !s.NeedsRefresh(conn) {
 		return conn, nil
@@ -156,19 +158,24 @@ func (s *TokenRefreshService) CheckAndRefresh(conn *domain.ProviderConnection) (
 
 	log.Printf("[TOKEN] Token expiring soon for %s, refreshing...", conn.Name)
 
-	updated, err := s.Refresh(conn)
-	if err != nil {
-		return conn, fmt.Errorf("auto-refresh failed: %w", err)
-	}
+	// Deduplicate concurrent refreshes by connection ID
+	result, err, _ := s.sfg.Do(conn.ID, func() (interface{}, error) {
+		updated, err := s.Refresh(conn)
+		if err != nil {
+			return conn, fmt.Errorf("auto-refresh failed: %w", err)
+		}
 
-	// Persist to DB
-	if err := s.store.UpdateConnection(updated); err != nil {
-		log.Printf("[TOKEN] Failed to persist refreshed token: %s", err)
-	} else {
-		log.Printf("[TOKEN] Token refreshed and persisted for %s", conn.Name)
-	}
+		// Persist to DB
+		if err := s.store.UpdateConnection(updated); err != nil {
+			log.Printf("[TOKEN] Failed to persist refreshed token: %s", err)
+		} else {
+			log.Printf("[TOKEN] Token refreshed and persisted for %s", conn.Name)
+		}
 
-	return updated, nil
+		return updated, nil
+	})
+
+	return result.(*domain.ProviderConnection), err
 }
 
 // ExtractEmailFromJWT extracts email from a JWT access token.

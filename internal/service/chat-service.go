@@ -241,3 +241,8 @@ func mapSelectionErrorToComboResult(err error) *ComboResult {
 		return &ComboResult{OK: false, StatusCode: http.StatusServiceUnavailable, Error: selErr.Error()}
 	}
 }
+
+// ClearComboRotation clears the rotation state for a deleted combo.
+func (s *ChatService) ClearComboRotation(comboName string) {
+	s.comboHandler.ClearRotation(comboName)
+}

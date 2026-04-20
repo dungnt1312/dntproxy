@@ -1,20 +1,22 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { motion } from 'framer-motion'
 import {
   Globe,
-  Power,
   Copy,
   Check,
   Loader2,
   AlertTriangle,
   ExternalLink,
   RefreshCw,
-  Info,
+  Zap,
+  ZapOff,
+  CircleAlert,
+  Terminal,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Separator } from '@/components/ui/separator'
 import { toast } from 'sonner'
@@ -23,23 +25,25 @@ import { goApi } from '@/lib/go-api'
 interface TunnelStatus {
   enabled: boolean
   running: boolean
+  starting: boolean
   provider: string
   tunnelUrl: string
   shortId: string
   publicUrl: string
+  lastError: string
 }
 
 const containerVariants = {
   hidden: { opacity: 0 },
   visible: {
     opacity: 1,
-    transition: { staggerChildren: 0.1 },
+    transition: { staggerChildren: 0.08 },
   },
 }
 
 const itemVariants = {
-  hidden: { opacity: 0, y: 20 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.4 } },
+  hidden: { opacity: 0, y: 16 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.3 } },
 }
 
 export default function TunnelScreen() {
@@ -47,39 +51,65 @@ export default function TunnelScreen() {
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState(false)
   const [copied, setCopied] = useState(false)
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const safetyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const stopPolling = useCallback(() => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current)
+      pollRef.current = null
+    }
+    if (safetyTimerRef.current) {
+      clearTimeout(safetyTimerRef.current)
+      safetyTimerRef.current = null
+    }
+  }, [])
 
   const fetchStatus = useCallback(async () => {
     try {
-      setLoading(true)
       const data = await goApi.getTunnelStatus()
       setStatus(data)
-    } catch (error) {
-      toast.error('Failed to fetch tunnel status')
-    } finally {
-      setLoading(false)
+      return data
+    } catch {
+      return null
     }
   }, [])
 
   useEffect(() => {
-    fetchStatus()
-  }, [fetchStatus])
+    setLoading(true)
+    fetchStatus().finally(() => setLoading(false))
+    return stopPolling
+  }, [fetchStatus, stopPolling])
+
+  const startPolling = useCallback(() => {
+    stopPolling()
+    pollRef.current = setInterval(async () => {
+      const data = await fetchStatus()
+      if (!data) return // fetch failed, keep polling
+      if (data.running && !data.starting && data.tunnelUrl) {
+        // Fully connected: process alive + URL ready
+        stopPolling()
+        toast.success('Tunnel connected!', { description: data.tunnelUrl })
+      } else if (data.lastError) {
+        stopPolling()
+        toast.error('Tunnel failed', { description: data.lastError })
+      }
+      // Otherwise keep polling: starting=true, or running but URL not yet propagated
+    }, 2000)
+    // Safety: stop polling after 90s and refresh status one last time
+    safetyTimerRef.current = setTimeout(() => {
+      stopPolling()
+      fetchStatus()
+    }, 90000)
+  }, [fetchStatus, stopPolling])
 
   const handleEnable = async () => {
     setActionLoading(true)
     try {
       await goApi.enableTunnel()
-      toast.success('Tunnel starting...', { description: 'It may take up to 30 seconds to connect.' })
-      // Poll status every 2s until connected
-      const poll = setInterval(async () => {
-        const data = await goApi.getTunnelStatus()
-        setStatus(data)
-        if (data.running) {
-          clearInterval(poll)
-          toast.success('Tunnel connected!')
-        }
-      }, 2000)
-      // Stop polling after 60s
-      setTimeout(() => clearInterval(poll), 60000)
+      setStatus(prev => prev ? { ...prev, starting: true, lastError: '' } : null)
+      toast.info('Starting tunnel...', { description: 'Downloading binary & connecting. This may take ~35 seconds.' })
+      startPolling()
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Unknown error'
       toast.error('Failed to start tunnel', { description: message })
@@ -90,9 +120,10 @@ export default function TunnelScreen() {
 
   const handleDisable = async () => {
     setActionLoading(true)
+    stopPolling()
     try {
       await goApi.disableTunnel()
-      setStatus((prev) => prev ? { ...prev, enabled: false, running: false, tunnelUrl: '', publicUrl: '' } : null)
+      setStatus(prev => prev ? { ...prev, enabled: false, running: false, starting: false, tunnelUrl: '', publicUrl: '', lastError: '' } : null)
       toast.success('Tunnel stopped')
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Unknown error'
@@ -105,25 +136,24 @@ export default function TunnelScreen() {
   const copyUrl = async (url: string) => {
     await navigator.clipboard.writeText(url)
     setCopied(true)
-    toast.success('URL copied to clipboard')
+    toast.success('Copied to clipboard')
     setTimeout(() => setCopied(false), 2000)
   }
 
   if (loading) {
     return (
       <motion.div variants={containerVariants} initial="hidden" animate="visible" className="space-y-6">
-        <motion.div variants={itemVariants}>
-          <Skeleton className="h-8 w-48" />
-        </motion.div>
-        <motion.div variants={itemVariants}>
-          <Skeleton className="h-32 w-full rounded-xl" />
-        </motion.div>
+        <motion.div variants={itemVariants}><Skeleton className="h-8 w-48" /></motion.div>
+        <motion.div variants={itemVariants}><Skeleton className="h-40 w-full rounded-xl" /></motion.div>
+        <motion.div variants={itemVariants}><Skeleton className="h-24 w-full rounded-xl" /></motion.div>
       </motion.div>
     )
   }
 
   const isRunning = status?.running ?? false
+  const isStarting = status?.starting ?? false
   const tunnelUrl = status?.tunnelUrl || status?.publicUrl || ''
+  const hasError = !!status?.lastError
 
   return (
     <motion.div variants={containerVariants} initial="hidden" animate="visible" className="space-y-6">
@@ -135,162 +165,141 @@ export default function TunnelScreen() {
             Cloudflare Tunnel
           </h1>
           <p className="text-muted-foreground mt-1">
-            Expose your local proxy to the internet via a secure Cloudflare quick tunnel.
+            Expose your local proxy to the internet securely.
           </p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={fetchStatus} disabled={actionLoading}>
-            <RefreshCw className="w-4 h-4 mr-1" />
-            Refresh
-          </Button>
-          {isRunning ? (
-            <Button variant="destructive" size="sm" onClick={handleDisable} disabled={actionLoading}>
-              {actionLoading ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Power className="w-4 h-4 mr-1" />}
-              Stop
-            </Button>
-          ) : (
-            <Button size="sm" onClick={handleEnable} disabled={actionLoading}>
-              {actionLoading ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Power className="w-4 h-4 mr-1" />}
-              Start
-            </Button>
-          )}
-        </div>
+        <Button variant="ghost" size="icon" onClick={() => fetchStatus()} disabled={actionLoading}>
+          <RefreshCw className="w-4 h-4" />
+        </Button>
       </motion.div>
 
-      {/* Status Alert */}
-      {isRunning && tunnelUrl && (
-        <motion.div variants={itemVariants}>
-          <Alert className="border-green-500/50 bg-green-500/5">
-            <Globe className="h-4 w-4 text-green-600" />
-            <AlertTitle className="text-green-600">Tunnel is running</AlertTitle>
-            <AlertDescription>
-              <div className="flex items-center gap-2 mt-2">
-                <code className="flex-1 bg-green-500/10 px-2 py-1 rounded text-sm break-all">
-                  {tunnelUrl}
-                </code>
-                <Button variant="ghost" size="sm" onClick={() => copyUrl(tunnelUrl)}>
-                  {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                </Button>
-                <Button variant="ghost" size="sm" onClick={() => window.open(tunnelUrl, '_blank')}>
-                  <ExternalLink className="w-4 h-4" />
-                </Button>
+      {/* Main Control Card */}
+      <motion.div variants={itemVariants}>
+        <Card className={isRunning ? 'border-green-500/30' : hasError ? 'border-destructive/30' : ''}>
+          <CardContent className="pt-6">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className={`w-3 h-3 rounded-full ${isRunning ? 'bg-green-500 animate-pulse' : isStarting ? 'bg-yellow-500 animate-pulse' : 'bg-muted-foreground/30'}`} />
+                <div>
+                  <p className="font-semibold text-lg">
+                    {isRunning ? 'Connected' : isStarting ? 'Starting...' : 'Disconnected'}
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    {isRunning ? 'Tunnel is active and forwarding traffic' : isStarting ? 'Downloading binary & connecting' : 'Tunnel is not running'}
+                  </p>
+                </div>
               </div>
-            </AlertDescription>
-          </Alert>
+              <div>
+                {isRunning ? (
+                  <Button variant="destructive" onClick={handleDisable} disabled={actionLoading}>
+                    {actionLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <ZapOff className="w-4 h-4 mr-2" />}
+                    Stop Tunnel
+                  </Button>
+                ) : isStarting ? (
+                  <Button variant="outline" onClick={handleDisable} disabled={actionLoading}>
+                    {actionLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <ZapOff className="w-4 h-4 mr-2" />}
+                    Cancel
+                  </Button>
+                ) : (
+                  <Button onClick={handleEnable} disabled={actionLoading}>
+                    {actionLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Zap className="w-4 h-4 mr-2" />}
+                    Start Tunnel
+                  </Button>
+                )}
+              </div>
+            </div>
+
+            {/* Starting progress */}
+            {isStarting && (
+              <div className="mt-4 flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>This may take up to 35 seconds...</span>
+              </div>
+            )}
+
+            {/* Tunnel URL */}
+            {isRunning && tunnelUrl && (
+              <div className="mt-4 p-3 bg-green-500/5 border border-green-500/20 rounded-lg">
+                <p className="text-xs text-muted-foreground mb-1">Public URL</p>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 text-sm font-mono break-all text-green-600 dark:text-green-400">
+                    {tunnelUrl}
+                  </code>
+                  <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => copyUrl(tunnelUrl)}>
+                    {copied ? <Check className="w-4 h-4 text-green-600" /> : <Copy className="w-4 h-4" />}
+                  </Button>
+                  <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => window.open(tunnelUrl, '_blank')}>
+                    <ExternalLink className="w-4 h-4" />
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Error message */}
+            {hasError && !isStarting && (
+              <Alert variant="destructive" className="mt-4">
+                <CircleAlert className="h-4 w-4" />
+                <AlertDescription>{status!.lastError}</AlertDescription>
+              </Alert>
+            )}
+          </CardContent>
+        </Card>
+      </motion.div>
+
+      {/* Details */}
+      {(isRunning || status?.shortId) && (
+        <motion.div variants={itemVariants}>
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Details</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-sm">
+                <div>
+                  <p className="text-muted-foreground">Provider</p>
+                  <p className="font-medium capitalize mt-0.5">{status?.provider || 'cloudflare'}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Short ID</p>
+                  <p className="font-mono mt-0.5">{status?.shortId || '—'}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Status</p>
+                  <Badge variant={isRunning ? 'default' : 'secondary'} className="mt-0.5">
+                    {isRunning ? 'Active' : 'Inactive'}
+                  </Badge>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
         </motion.div>
       )}
 
-      {/* Status Card */}
+      {/* Security Warning */}
       <motion.div variants={itemVariants}>
-        <Card>
-          <CardHeader>
-            <CardTitle>Status</CardTitle>
-            <CardDescription>Current tunnel connection details</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-2 gap-4 text-sm">
-              <div>
-                <span className="text-muted-foreground">Enabled</span>
-                <div className="mt-1">
-                  <Badge variant={status?.enabled ? 'default' : 'secondary'}>
-                    {status?.enabled ? 'Yes' : 'No'}
-                  </Badge>
-                </div>
-              </div>
-              <div>
-                <span className="text-muted-foreground">Running</span>
-                <div className="mt-1">
-                  <Badge variant={isRunning ? 'default' : 'destructive'}>
-                    {isRunning ? 'Connected' : 'Disconnected'}
-                  </Badge>
-                </div>
-              </div>
-              <div>
-                <span className="text-muted-foreground">Provider</span>
-                <div className="mt-1 font-medium capitalize">
-                  {status?.provider || '—'}
-                </div>
-              </div>
-              <div>
-                <span className="text-muted-foreground">Short ID</span>
-                <div className="mt-1 font-mono text-sm">
-                  {status?.shortId || '—'}
-                </div>
-              </div>
-            </div>
-
-            <Separator />
-
-            <div>
-              <span className="text-muted-foreground">Tunnel URL</span>
-              <div className="mt-1 font-mono text-sm break-all text-muted-foreground">
-                {tunnelUrl || 'Not connected'}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </motion.div>
-
-      {/* Info Card */}
-      <motion.div variants={itemVariants}>
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Info className="w-4 h-4" />
-              How it works
-            </CardTitle>
-            <CardDescription>
-              Cloudflare quick tunnels provide a public URL to your local proxy
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ul className="space-y-2 text-sm text-muted-foreground">
-              <li className="flex items-start gap-2">
-                <span className="text-primary mt-0.5">1.</span>
-                Click <strong>Start</strong> to download cloudflared (if needed) and create a quick tunnel.
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="text-primary mt-0.5">2.</span>
-                A public <code className="bg-muted px-1 rounded">trycloudflare.com</code> URL will be generated.
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="text-primary mt-0.5">3.</span>
-                Use this URL as your API endpoint in any AI client.
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="text-primary mt-0.5">4.</span>
-                The tunnel stops when you click <strong>Stop</strong> or restart the proxy.
-              </li>
-            </ul>
-
-            <Alert className="mt-4">
-              <AlertTriangle className="h-4 w-4" />
-              <AlertTitle>Security note</AlertTitle>
-              <AlertDescription>
-                Make sure <strong>Require API Key</strong> is enabled in Settings before starting a tunnel to protect your proxy from unauthorized access.
-              </AlertDescription>
-            </Alert>
-          </CardContent>
-        </Card>
+        <Alert>
+          <AlertTriangle className="h-4 w-4" />
+          <AlertDescription>
+            Enable <strong>Require API Key</strong> in Settings before starting a tunnel to prevent unauthorized access.
+          </AlertDescription>
+        </Alert>
       </motion.div>
 
       {/* CLI Usage */}
       <motion.div variants={itemVariants}>
         <Card>
-          <CardHeader>
-            <CardTitle>CLI Usage</CardTitle>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Terminal className="w-4 h-4" />
+              CLI Usage
+            </CardTitle>
             <CardDescription>Manage tunnels from the command line</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="space-y-2 text-sm font-mono bg-muted p-4 rounded-lg">
-              <p><span className="text-muted-foreground"># Start tunnel</span></p>
-              <p>dntproxy tunnel enable</p>
-              <Separator className="my-2" />
-              <p><span className="text-muted-foreground"># Stop tunnel</span></p>
-              <p>dntproxy tunnel disable</p>
-              <Separator className="my-2" />
-              <p><span className="text-muted-foreground"># Check status</span></p>
-              <p>dntproxy tunnel status</p>
+            <div className="space-y-1 text-sm font-mono bg-muted p-4 rounded-lg">
+              <p><span className="text-muted-foreground">#</span> dntproxy tunnel enable</p>
+              <p><span className="text-muted-foreground">#</span> dntproxy tunnel disable</p>
+              <p><span className="text-muted-foreground">#</span> dntproxy tunnel status</p>
             </div>
           </CardContent>
         </Card>

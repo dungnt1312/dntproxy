@@ -46,7 +46,7 @@ func CheckFallbackError(status int, errorText string, backoffLevel int) Fallback
 		return FallbackResult{true, CooldownRequestNotAlwd, backoffLevel}
 	}
 	if strings.Contains(lower, "improperly formed request") {
-		return FallbackResult{true, CooldownPaymentReq, backoffLevel}
+		return FallbackResult{true, CooldownTransient, backoffLevel}
 	}
 
 	// Rate limit keywords → exponential backoff

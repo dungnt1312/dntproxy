@@ -32,12 +32,14 @@ type anthropicMessage struct {
 
 // anthropicContentBlock represents a content block in Anthropic format.
 type anthropicContentBlock struct {
-	Type  string                 `json:"type"`
-	Text  string                 `json:"text,omitempty"`
-	Name  string                 `json:"name,omitempty"`
-	Input map[string]interface{} `json:"input,omitempty"`
-	ID    string                 `json:"id,omitempty"`
-	Usage map[string]interface{} `json:"usage,omitempty"`
+	Type      string                 `json:"type"`
+	Text      string                 `json:"text,omitempty"`
+	Name      string                 `json:"name,omitempty"`
+	Input     map[string]interface{} `json:"input,omitempty"`
+	ID        string                 `json:"id,omitempty"`
+	Usage     map[string]interface{} `json:"usage,omitempty"`
+	ToolUseID string                 `json:"tool_use_id,omitempty"`
+	Content   interface{}            `json:"content,omitempty"`
 }
 
 // anthropicTool represents a tool in Anthropic format.
@@ -290,11 +292,23 @@ func translateToAnthropic(openaiReq openaiChatRequest, model string) (*anthropic
 				})
 			}
 		case "tool":
-			// Tool results
-			content := translateContent(msg.Content, "text")
+			// Tool results — Anthropic requires tool_result blocks with tool_use_id
+			toolContent := translateContent(msg.Content, "text")
+			resultBlock := anthropicContentBlock{
+				Type:      "tool_result",
+				ToolUseID: msg.ToolCallID,
+				Content:   toolContent,
+			}
+			// Merge consecutive tool results into the same user message
+			if len(messages) > 0 && messages[len(messages)-1].Role == "user" {
+				if blocks, ok := messages[len(messages)-1].Content.([]anthropicContentBlock); ok {
+					messages[len(messages)-1].Content = append(blocks, resultBlock)
+					continue
+				}
+			}
 			messages = append(messages, anthropicMessage{
 				Role:    "user",
-				Content: content,
+				Content: []anthropicContentBlock{resultBlock},
 			})
 		}
 	}

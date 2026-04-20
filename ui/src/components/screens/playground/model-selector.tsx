@@ -138,9 +138,7 @@ export function ModelSelector({
               <Select 
                 value={selectedModel} 
                 onValueChange={(val) => {
-                  const parts = val.split('/')
-                  const modelName = parts.length > 1 ? parts.slice(1).join('/') : val
-                  onModelChange(modelName)
+                  onModelChange(val)
                 }}
                 disabled={disabled}
               >
@@ -148,14 +146,20 @@ export function ModelSelector({
                   <SelectValue placeholder="Select model..." />
                 </SelectTrigger>
                 <SelectContent>
-                  {availableModels.map(m => (
-                    <SelectItem key={m.id} value={m.id}>
-                      <div className="flex items-center gap-2">
-                        <Sparkles className="h-3 w-3 text-violet-500" />
-                        <span className="truncate">{m.displayName || m.name || m.id}</span>
-                      </div>
-                    </SelectItem>
-                  ))}
+                  {availableModels.map(m => {
+                    // Strip provider prefix for value to match selectedModel state
+                    const modelValue = m.id.includes('/') 
+                      ? m.id.split('/').slice(1).join('/')
+                      : m.id
+                    return (
+                      <SelectItem key={m.id} value={modelValue}>
+                        <div className="flex items-center gap-2">
+                          <Sparkles className="h-3 w-3 text-violet-500" />
+                          <span className="truncate">{m.displayName || m.name || m.id}</span>
+                        </div>
+                      </SelectItem>
+                    )
+                  })}
                 </SelectContent>
               </Select>
             </div>

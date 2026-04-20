@@ -135,9 +135,6 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	router := httpAdapter.NewRouter(store, providers, tunnelService)
 
-	scheduler := service.NewTokenRefreshScheduler(store)
-	go scheduler.Start()
-
 	// Auto-restart tunnel if it was enabled
 	if tunnelService != nil && cfg.Settings.TunnelEnabled {
 		go func() {
@@ -189,7 +186,6 @@ func runServe(cmd *cobra.Command, args []string) error {
 		tunnelService.Stop()
 	}
 
-	scheduler.Stop()
 	log.Printf("[dntproxy] Shutdown complete")
 	return nil
 }

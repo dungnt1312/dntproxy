@@ -61,9 +61,8 @@ internal/adapter/               → Implementations
 internal/service/               → Business logic orchestration
   ├── chat-service.go           → Resolve → credentials → execute → stream
   ├── model-resolver.go         → Alias, combo, provider/model parsing
-  ├── account-selector.go       → Multi-account selection, cooldown, backoff
+  ├── account-selector.go       → Multi-account selection, cooldown, backoff, on-demand token refresh
   ├── combo-handler.go          → Fallback + round-robin strategies
-  ├── token-refresh-scheduler.go → Background token refresh
   └── tunnel-service.go         → Tunnel enable/disable/status
 internal/logger/                → Structured logging (ring buffer + SQLite)
 ```
@@ -250,7 +249,7 @@ OpenAI request → model resolve → combo expand → account select →
 - AWS IAM Identity Center/IDC Enterprise (device code with custom startUrl/region)
 - Google/GitHub social login (PKCE + manual callback)
 - Import token (manual refresh token with auto-register)
-- Auto token refresh before expiry (5min buffer, integrated into account selector)
+- On-demand token refresh (integrated into account selector, no background scheduler)
 
 ### Phase 3: CLI Commands — DONE
 - `dntproxy auth add` (interactive, all 4 methods)

@@ -17,10 +17,15 @@ type ParsedModel struct {
 }
 
 // ParseModelString parses "provider/model@connectionId" format.
+// Format constraints:
+//   - provider: single segment (no slashes)
+//   - model: can contain slashes (e.g., "glm-5.1" or "v1/gpt-4")
+//   - connectionId: optional, UUID or "auto"
 // Examples:
 //   - "kr/opus@conn-123" → {Provider: "kiro", Model: "opus", ConnectionID: "conn-123"}
 //   - "kr/opus@auto" → {Provider: "kiro", Model: "opus", ConnectionID: ""}
 //   - "kr/opus" → {Provider: "kiro", Model: "opus", ConnectionID: ""}
+//   - "glm/glm-5.1" → {Provider: "glm", Model: "glm-5.1", ConnectionID: ""}
 func ParseModelString(modelStr string) (*ParsedModel, error) {
 	// Split @connectionId (only first @)
 	atIdx := strings.Index(modelStr, "@")
@@ -136,10 +141,17 @@ func (r *ModelResolver) ResolveRouting(modelStr string) (*RoutingResult, error) 
 
 // normalizeModelStr converts "alias/model@connectionId" to "provider/model@connectionId" using ProviderAliasToID.
 // Preserves @connectionId suffix if present.
+// Detects and fixes duplicate provider prefix (e.g., "glm/glm/glm-5.1" -> "glm/glm-5.1").
 func (r *ModelResolver) normalizeModelStr(modelStr string) (string, error) {
 	parsed, err := ParseModelString(modelStr)
 	if err != nil {
 		return "", err
+	}
+
+	// Detect duplicate prefix: if model starts with "provider/", strip it
+	// Example: provider="glm", model="glm/glm-5.1" -> model="glm-5.1"
+	if strings.HasPrefix(parsed.Model, parsed.Provider+"/") {
+		parsed.Model = strings.TrimPrefix(parsed.Model, parsed.Provider+"/")
 	}
 
 	// Return normalized format (keep @connectionId if present)
@@ -152,7 +164,14 @@ func (r *ModelResolver) normalizeModelStr(modelStr string) (string, error) {
 
 // Resolve parses a model string and returns provider + model.
 // Supports: "alias/model", "provider/model", combo names, model aliases.
+// Strips @connectionId suffix if present.
 func (r *ModelResolver) Resolve(modelStr string) (*domain.ModelInfo, error) {
+	// Strip @connectionId suffix before processing
+	atIdx := strings.Index(modelStr, "@")
+	if atIdx >= 0 {
+		modelStr = modelStr[:atIdx]
+	}
+
 	if strings.Contains(modelStr, "/") {
 		idx := strings.Index(modelStr, "/")
 		providerOrAlias := modelStr[:idx]
@@ -177,6 +196,11 @@ func (r *ModelResolver) Resolve(modelStr string) (*domain.ModelInfo, error) {
 	cfg, err := r.store.Load()
 	if err == nil && cfg != nil {
 		if resolved, ok := cfg.ModelAliases[modelStr]; ok && strings.Contains(resolved, "/") {
+			// Strip @connectionId from alias value
+			if atIdx := strings.Index(resolved, "@"); atIdx >= 0 {
+				resolved = resolved[:atIdx]
+			}
+
 			idx := strings.Index(resolved, "/")
 			providerOrAlias := resolved[:idx]
 			model := resolved[idx+1:]

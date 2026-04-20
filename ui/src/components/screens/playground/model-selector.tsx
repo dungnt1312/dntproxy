@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
-import { Pin, Shuffle } from 'lucide-react'
-import { Label } from '@/components/ui/label'
+import { Pin, Shuffle, ChevronRight, Sparkles } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
 import {
   Select,
   SelectContent,
@@ -8,6 +8,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { cn } from '@/lib/utils'
 
 interface Model {
   id: string
@@ -97,11 +98,12 @@ export function ModelSelector({
   }, [selectedProvider, selectedModel, selectedAccount])
 
   return (
-    <div className="space-y-3">
-      <div className="grid grid-cols-3 gap-3">
-        {/* 1. Provider */}
-        <div className="space-y-1.5">
-          <Label className="text-xs font-medium">1. Provider</Label>
+    <div className="space-y-4">
+      {/* Compact horizontal flow */}
+      <div className="flex items-center gap-2 flex-wrap">
+        {/* Provider */}
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground font-medium">Provider:</span>
           <Select 
             value={selectedProvider} 
             onValueChange={(val) => {
@@ -111,88 +113,114 @@ export function ModelSelector({
             }}
             disabled={disabled}
           >
-            <SelectTrigger className="h-9">
-              <SelectValue placeholder="Select provider" />
+            <SelectTrigger className="h-8 w-[140px]">
+              <SelectValue placeholder="Select..." />
             </SelectTrigger>
             <SelectContent>
               {providers.map(p => (
-                <SelectItem key={p} value={p}>{p}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        {/* 2. Model */}
-        <div className="space-y-1.5">
-          <Label className="text-xs font-medium">2. Model</Label>
-          <Select 
-            value={selectedModel} 
-            onValueChange={(val) => {
-              // Strip provider prefix if present
-              const parts = val.split('/')
-              const modelName = parts.length > 1 ? parts.slice(1).join('/') : val
-              onModelChange(modelName)
-            }}
-            disabled={disabled || !selectedProvider}
-          >
-            <SelectTrigger className="h-9">
-              <SelectValue placeholder={selectedProvider ? "Select model" : "Pick provider first"} />
-            </SelectTrigger>
-            <SelectContent>
-              {availableModels.map(m => (
-                <SelectItem key={m.id} value={m.id}>
-                  {m.displayName || m.name || m.id}
+                <SelectItem key={p} value={p}>
+                  <Badge variant="secondary" className="text-xs">
+                    {p}
+                  </Badge>
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
         </div>
 
-        {/* 3. Account */}
-        <div className="space-y-1.5">
-          <Label className="text-xs font-medium">3. Account</Label>
-          <Select 
-            value={selectedAccount} 
-            onValueChange={onAccountChange}
-            disabled={disabled || !selectedProvider}
-          >
-            <SelectTrigger className="h-9">
-              <SelectValue placeholder="Auto-select at runtime" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="auto">
-                <div className="flex items-center gap-2">
-                  <Shuffle className="h-3.5 w-3.5 opacity-50" />
-                  Auto-select at runtime
-                </div>
-              </SelectItem>
-              {availableAccounts.length > 0 && (
-                <>
-                  <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground">
-                    Pin to specific account
-                  </div>
-                  {availableAccounts.map(acc => (
-                    <SelectItem key={acc.id} value={acc.id}>
+        {selectedProvider && (
+          <>
+            <ChevronRight className="h-4 w-4 text-muted-foreground" />
+            
+            {/* Model */}
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground font-medium">Model:</span>
+              <Select 
+                value={selectedModel} 
+                onValueChange={(val) => {
+                  const parts = val.split('/')
+                  const modelName = parts.length > 1 ? parts.slice(1).join('/') : val
+                  onModelChange(modelName)
+                }}
+                disabled={disabled}
+              >
+                <SelectTrigger className="h-8 w-[200px]">
+                  <SelectValue placeholder="Select model..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {availableModels.map(m => (
+                    <SelectItem key={m.id} value={m.id}>
                       <div className="flex items-center gap-2">
-                        <Pin className="h-3.5 w-3.5 opacity-50" />
-                        {acc.name}
+                        <Sparkles className="h-3 w-3 text-violet-500" />
+                        <span className="truncate">{m.displayName || m.name || m.id}</span>
                       </div>
                     </SelectItem>
                   ))}
-                </>
-              )}
-            </SelectContent>
-          </Select>
-        </div>
+                </SelectContent>
+              </Select>
+            </div>
+          </>
+        )}
+
+        {selectedProvider && selectedModel && (
+          <>
+            <ChevronRight className="h-4 w-4 text-muted-foreground" />
+            
+            {/* Account */}
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground font-medium">Account:</span>
+              <Select 
+                value={selectedAccount} 
+                onValueChange={onAccountChange}
+                disabled={disabled}
+              >
+                <SelectTrigger className={cn(
+                  "h-8 w-[180px]",
+                  selectedAccount === 'auto' && "text-muted-foreground"
+                )}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="auto">
+                    <div className="flex items-center gap-2">
+                      <Shuffle className="h-3.5 w-3.5 opacity-50" />
+                      <span>Auto-select</span>
+                    </div>
+                  </SelectItem>
+                  {availableAccounts.length > 0 && (
+                    <>
+                      <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground border-t mt-1 pt-2">
+                        Pin to account
+                      </div>
+                      {availableAccounts.map(acc => (
+                        <SelectItem key={acc.id} value={acc.id}>
+                          <div className="flex items-center gap-2">
+                            <Pin className="h-3.5 w-3.5 text-violet-500" />
+                            <span>{acc.name}</span>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </>
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
+          </>
+        )}
       </div>
 
-      {/* Preview */}
+      {/* Preview badge */}
       {finalModelString && (
-        <div className="rounded-md bg-muted/50 border p-2 text-xs">
-          <div className="text-muted-foreground mb-1">Model string:</div>
-          <div className="font-mono text-sm">
+        <div className="flex items-center gap-2">
+          <Badge variant="outline" className="font-mono text-xs px-2 py-1">
             {finalModelString}
-          </div>
+          </Badge>
+          {selectedAccount !== 'auto' && (
+            <Badge variant="secondary" className="text-xs gap-1">
+              <Pin className="h-3 w-3" />
+              Pinned
+            </Badge>
+          )}
         </div>
       )}
     </div>

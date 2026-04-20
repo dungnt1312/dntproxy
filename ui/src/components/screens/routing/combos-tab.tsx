@@ -8,19 +8,6 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from '@/components/ui/command'
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover'
-import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -38,9 +25,9 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { Checkbox } from '@/components/ui/checkbox'
 import { ComboData, ConnectionOption, UiModel } from './types'
 import { RoutingCard } from './routing-card'
+import { ComboStepBuilder, ComboStep } from './combo-step-builder'
 
 function inferProvidersFromModels(models: string[]): string[] {
   const map: Record<string, string> = {
@@ -79,11 +66,9 @@ export default function CombosTab({ combos, connections, models, loading, onRefr
   const [selectedCombo, setSelectedCombo] = useState<ComboData | null>(null)
 
   const [formName, setFormName] = useState('')
-  const [formSelectedModels, setFormSelectedModels] = useState<string[]>([])
-  const [formConnectionIds, setFormConnectionIds] = useState<string[]>([])
+  const [formSteps, setFormSteps] = useState<ComboStep[]>([])
 
   const [searchQuery, setSearchQuery] = useState('')
-  const [modelComboboxOpen, setModelComboboxOpen] = useState(false)
 
   const connectionNameMap = useMemo(
     () => new Map(connections.map((connection) => [connection.id, connection.name])),
@@ -95,52 +80,75 @@ export default function CombosTab({ combos, connections, models, loading, onRefr
     [models]
   )
 
+  // Parse model string "provider/model@connectionId" to ComboStep
+  function parseModelString(modelStr: string, order: number): ComboStep {
+    const [modelPart, connId] = modelStr.split('@')
+    const parts = modelPart.split('/')
+    
+    // Handle "provider/model" or "provider/subprovider/model"
+    const provider = parts[0]
+    const model = parts.slice(1).join('/')
+    
+    return {
+      id: `step-${order}`,
+      provider,
+      model,
+      accountMode: connId && connId !== 'auto' ? 'pinned' : 'auto',
+      accountId: connId && connId !== 'auto' ? connId : undefined,
+      order,
+    }
+  }
+
+  // Serialize ComboStep to model string "provider/model@connectionId"
+  function serializeStep(step: ComboStep): string {
+    const base = `${step.provider}/${step.model}`
+    
+    if (step.accountMode === 'pinned' && step.accountId) {
+      return `${base}@${step.accountId}`
+    }
+    return base
+  }
+
   function openCreateDialog() {
     setSelectedCombo(null)
     setFormName('')
-    setFormSelectedModels([])
-    setFormConnectionIds([])
+    setFormSteps([])
     setDialogOpen(true)
   }
 
   function openEditDialog(combo: ComboData) {
     setSelectedCombo(combo)
     setFormName(combo.name)
-    setFormSelectedModels(combo.models)
-    setFormConnectionIds(combo.connectionIds || [])
+    // Parse existing models to steps
+    const steps = combo.models.map((m, idx) => parseModelString(m, idx))
+    setFormSteps(steps)
     setDialogOpen(true)
-  }
-
-  function toggleConnection(connectionId: string) {
-    setFormConnectionIds((current) =>
-      current.includes(connectionId)
-        ? current.filter((id) => id !== connectionId)
-        : [...current, connectionId]
-    )
   }
 
   async function handleSave() {
     const name = formName.trim()
-    const modelsList = formSelectedModels
 
     if (!name) {
       toast.error('Combo name is required')
       return
     }
 
-    if (modelsList.length === 0) {
-      toast.error('At least one model is required')
+    if (formSteps.length === 0) {
+      toast.error('At least one step is required')
       return
     }
 
     setSaving(true)
     try {
+      // Serialize steps to model strings
+      const models = formSteps
+        .sort((a, b) => a.order - b.order)
+        .map(serializeStep)
+
       const payload = {
         name,
-        models: modelsList,
-        connectionIds: formConnectionIds,
+        models,
         setModels: true,
-        setConnections: true,
       }
 
       if (selectedCombo) {
@@ -286,7 +294,7 @@ export default function CombosTab({ combos, connections, models, loading, onRefr
 
       {/* Create/Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-xl">
+        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-violet-500/10">
@@ -295,129 +303,37 @@ export default function CombosTab({ combos, connections, models, loading, onRefr
               {selectedCombo ? 'Edit Combo' : 'Create Combo'}
             </DialogTitle>
             <DialogDescription>
-              Define the combo exactly as supported by the backend: name, ordered models, and optional connection restrictions.
+              Build each combo step in sequence: provider, model, then account. This allows repeating the same provider and model with different accounts.
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-5 py-2">
             {/* Name */}
             <div className="space-y-2">
-              <Label htmlFor="combo-name" className="text-xs font-medium">Name</Label>
+              <Label htmlFor="combo-name" className="text-xs font-medium">Combo Name</Label>
               <Input
                 id="combo-name"
                 value={formName}
                 onChange={(event) => setFormName(event.target.value)}
-                placeholder="e.g. coder-fallback"
+                placeholder="e.g. primary-backup-chain"
                 className="h-9"
               />
             </div>
 
-            {/* Models Chain */}
-            <div className="space-y-2">
-              <Label className="text-xs font-medium">Models Chain</Label>
-              <Popover open={modelComboboxOpen} onOpenChange={setModelComboboxOpen}>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="outline"
-                    role="combobox"
-                    aria-expanded={modelComboboxOpen}
-                    className="w-full justify-between h-9 text-muted-foreground shadow-sm font-normal"
-                  >
-                    <span className="flex items-center gap-2">
-                      <Layers className="h-3.5 w-3.5 opacity-50" />
-                      Search and select to add a model
-                    </span>
-                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
-                  <Command>
-                    <CommandInput placeholder="Search models..." />
-                    <CommandList>
-                      <CommandEmpty>No model found.</CommandEmpty>
-                      <CommandGroup>
-                        {models.map((m) => (
-                          <CommandItem
-                            key={m.id}
-                            value={`${m.provider} ${m.displayName || ''} ${m.id}`}
-                            onSelect={() => {
-                              setFormSelectedModels(prev => [...prev, m.id]);
-                              setModelComboboxOpen(false);
-                            }}
-                          >
-                            <div className="flex flex-col">
-                              <span className="font-medium text-sm">{m.name || m.id}</span>
-                              <span className="text-xs text-muted-foreground">({m.provider}) {m.id}</span>
-                            </div>
-                          </CommandItem>
-                        ))}
-                      </CommandGroup>
-                    </CommandList>
-                  </Command>
-                </PopoverContent>
-              </Popover>
-              
-              {/* Selected models */}
-              <div className="space-y-1.5 mt-3">
-                 {formSelectedModels.map((m, idx) => (
-                    <div key={`${m}-${idx}`} className="flex items-center justify-between border rounded-lg px-3 py-2 text-sm bg-muted/20 group/item hover:bg-muted/40 transition-colors">
-                       <div className="flex items-center gap-2.5 min-w-0">
-                           <span className="flex h-5 w-5 items-center justify-center rounded text-[10px] font-semibold bg-violet-500/10 text-violet-600 dark:text-violet-400 shrink-0">
-                             {idx + 1}
-                           </span>
-                           <span className="font-medium truncate text-sm" title={modelNameMap.get(m) || m}>{modelNameMap.get(m) || m}</span>
-                       </div>
-                       <Button 
-                          variant="ghost" 
-                          size="icon" 
-                          className="h-6 w-6 text-muted-foreground hover:text-destructive opacity-0 group-hover/item:opacity-100 transition-opacity shrink-0" 
-                          onClick={() => setFormSelectedModels(prev => prev.filter((_, i) => i !== idx))}
-                       >
-                          <Trash2 className="h-3 w-3" />
-                       </Button>
-                    </div>
-                 ))}
-                 {formSelectedModels.length === 0 && (
-                    <div className="text-xs text-muted-foreground p-4 border border-dashed rounded-lg text-center">
-                      No models added yet. Use the dropdown above to add models.
-                    </div>
-                 )}
-              </div>
-              <p className="text-[11px] text-muted-foreground">
-                Order matters — backend combo routing uses this list with the global strategy.
-              </p>
-            </div>
-
-            {/* Connection restrictions */}
-            <div className="space-y-2">
-              <Label className="text-xs font-medium">Restrict to Connections (optional)</Label>
-              <div className="max-h-44 space-y-1 overflow-y-auto rounded-lg border p-3">
-                {connections.length === 0 ? (
-                  <p className="text-sm text-muted-foreground py-2 text-center">No connections available.</p>
-                ) : (
-                  connections.map((connection) => (
-                    <label 
-                      key={connection.id} 
-                      className="flex items-center gap-2.5 text-sm rounded-md px-2 py-1.5 hover:bg-muted/50 transition-colors cursor-pointer"
-                    >
-                      <Checkbox
-                        checked={formConnectionIds.includes(connection.id)}
-                        onCheckedChange={() => toggleConnection(connection.id)}
-                      />
-                      <span className="font-medium text-sm">{connection.name}</span>
-                      <span className="text-xs text-muted-foreground ml-auto">{connection.provider}</span>
-                    </label>
-                  ))
-                )}
-              </div>
-            </div>
+            {/* Step Builder */}
+            <ComboStepBuilder
+              steps={formSteps}
+              connections={connections}
+              models={models}
+              onChange={setFormSteps}
+            />
           </div>
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={handleSave} disabled={saving} className="gap-1.5">
+            <Button onClick={handleSave} disabled={saving || formSteps.length === 0} className="gap-1.5">
               {saving ? (
                 <>
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />

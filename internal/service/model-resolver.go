@@ -9,6 +9,49 @@ import (
 	"github.com/dungnt/dntproxy/internal/port"
 )
 
+// ParsedModel represents a parsed model string with optional connection pinning.
+type ParsedModel struct {
+	Provider     string
+	Model        string
+	ConnectionID string // empty if not pinned
+}
+
+// ParseModelString parses "provider/model@connectionId" format.
+// Examples:
+//   - "kr/opus@conn-123" → {Provider: "kiro", Model: "opus", ConnectionID: "conn-123"}
+//   - "kr/opus@auto" → {Provider: "kiro", Model: "opus", ConnectionID: ""}
+//   - "kr/opus" → {Provider: "kiro", Model: "opus", ConnectionID: ""}
+func ParseModelString(modelStr string) (*ParsedModel, error) {
+	// Split @connectionId (only first @)
+	atIdx := strings.Index(modelStr, "@")
+	modelPart := modelStr
+	var connID string
+	if atIdx >= 0 {
+		modelPart = modelStr[:atIdx]
+		connID = modelStr[atIdx+1:]
+		// Normalize "auto" to empty (explicit auto-select)
+		if connID == "auto" {
+			connID = ""
+		}
+	}
+
+	// Parse provider/model
+	idx := strings.Index(modelPart, "/")
+	if idx < 0 {
+		return nil, fmt.Errorf("invalid model format: %s (expected provider/model)", modelStr)
+	}
+
+	providerOrAlias := modelPart[:idx]
+	model := modelPart[idx+1:]
+	provider := resolveProviderAlias(providerOrAlias)
+
+	return &ParsedModel{
+		Provider:     provider,
+		Model:        model,
+		ConnectionID: connID,
+	}, nil
+}
+
 // ModelResolver handles model string parsing, alias resolution, and combo expansion.
 type ModelResolver struct {
 	store      port.CredentialStore
@@ -91,16 +134,20 @@ func (r *ModelResolver) ResolveRouting(modelStr string) (*RoutingResult, error) 
 	}, nil
 }
 
-// normalizeModelStr converts "alias/model" to "provider/model" using ProviderAliasToID.
+// normalizeModelStr converts "alias/model@connectionId" to "provider/model@connectionId" using ProviderAliasToID.
+// Preserves @connectionId suffix if present.
 func (r *ModelResolver) normalizeModelStr(modelStr string) (string, error) {
-	if !strings.Contains(modelStr, "/") {
-		return "", fmt.Errorf("invalid model format: %q (expected provider/model)", modelStr)
+	parsed, err := ParseModelString(modelStr)
+	if err != nil {
+		return "", err
 	}
-	idx := strings.Index(modelStr, "/")
-	providerOrAlias := modelStr[:idx]
-	model := modelStr[idx+1:]
-	provider := resolveProviderAlias(providerOrAlias)
-	return provider + "/" + model, nil
+
+	// Return normalized format (keep @connectionId if present)
+	result := parsed.Provider + "/" + parsed.Model
+	if parsed.ConnectionID != "" {
+		result += "@" + parsed.ConnectionID
+	}
+	return result, nil
 }
 
 // Resolve parses a model string and returns provider + model.

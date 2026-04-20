@@ -1,6 +1,7 @@
 package http
 
 import (
+	"strings"
 	"time"
 
 	"github.com/dungnt/dntproxy/internal/domain"
@@ -10,6 +11,33 @@ import (
 )
 
 // === Combos ===
+
+// normalizeModelString validates and normalizes "provider/model@connectionId" format.
+// Prevents duplicate provider prefix (e.g., "glm/glm/glm-5.1" -> "glm/glm-5.1").
+func normalizeModelString(modelStr string) string {
+	// Split @connectionId
+	atIdx := strings.Index(modelStr, "@")
+	modelPart := modelStr
+	connSuffix := ""
+	if atIdx >= 0 {
+		modelPart = modelStr[:atIdx]
+		connSuffix = modelStr[atIdx:]
+	}
+
+	// Split by / and check for duplicate prefix
+	parts := strings.Split(modelPart, "/")
+	if len(parts) < 2 {
+		return modelStr // Invalid format, let resolver handle error
+	}
+
+	// If first two parts are identical, it's a duplicate prefix
+	if len(parts) >= 3 && parts[0] == parts[1] {
+		// Remove duplicate: "glm/glm/glm-5.1" -> "glm/glm-5.1"
+		parts = append([]string{parts[0]}, parts[2:]...)
+	}
+
+	return strings.Join(parts, "/") + connSuffix
+}
 
 func apiListCombos(store port.CredentialStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -38,6 +66,12 @@ func apiCreateCombo(store port.CredentialStore) gin.HandlerFunc {
 			return
 		}
 
+		// Normalize all model strings to prevent duplicate prefixes
+		normalizedModels := make([]string, len(req.Models))
+		for i, m := range req.Models {
+			normalizedModels[i] = normalizeModelString(m)
+		}
+
 		cfg, err := store.Load()
 		if err != nil {
 			c.JSON(500, gin.H{"error": err.Error()})
@@ -55,7 +89,7 @@ func apiCreateCombo(store port.CredentialStore) gin.HandlerFunc {
 		combo := domain.Combo{
 			ID:            uuid.New().String(),
 			Name:          req.Name,
-			Models:        req.Models,
+			Models:        normalizedModels,
 			ConnectionIDs: req.ConnectionIDs,
 			CreatedAt:     now,
 			UpdatedAt:     now,
@@ -111,7 +145,12 @@ func apiUpdateCombo(store port.CredentialStore) gin.HandlerFunc {
 				c.JSON(400, gin.H{"error": "combo models cannot be empty"})
 				return
 			}
-			combo.Models = req.Models
+			// Normalize all model strings to prevent duplicate prefixes
+			normalizedModels := make([]string, len(req.Models))
+			for i, m := range req.Models {
+				normalizedModels[i] = normalizeModelString(m)
+			}
+			combo.Models = normalizedModels
 		}
 		if req.SetConnections {
 			combo.ConnectionIDs = req.ConnectionIDs

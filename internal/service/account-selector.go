@@ -73,6 +73,103 @@ func NewAccountSelector(store port.CredentialStore) *AccountSelector {
 	}
 }
 
+// SelectCredentialsForModel selects account based on model string (with optional @connectionId).
+// If model string contains @connectionId, it will pin to that specific connection.
+// Otherwise, it uses the existing weighted random selection logic.
+func (s *AccountSelector) SelectCredentialsForModel(
+	modelStr string,
+	excludeIDs map[string]bool,
+	allowedConnectionIDs []string,
+) (*domain.Credentials, error) {
+	parsed, err := ParseModelString(modelStr)
+	if err != nil {
+		return nil, fmt.Errorf("parse model: %w", err)
+	}
+
+	// If pinned to specific connection
+	if parsed.ConnectionID != "" {
+		// Pass only the model name (without @connectionId) to selectPinnedConnection
+		return s.selectPinnedConnection(parsed.Provider, parsed.Model, parsed.ConnectionID, excludeIDs)
+	}
+
+	// Otherwise use existing weighted random logic
+	return s.SelectCredentials(parsed.Provider, excludeIDs, parsed.Model, allowedConnectionIDs)
+}
+
+// selectPinnedConnection returns a specific connection by ID.
+// It still respects rate limits and model locks, but bypasses weighted random selection.
+func (s *AccountSelector) selectPinnedConnection(
+	provider string,
+	model string,
+	connectionID string,
+	excludeIDs map[string]bool,
+) (*domain.Credentials, error) {
+	// Skip if already excluded (failed in this request)
+	if excludeIDs != nil && excludeIDs[connectionID] {
+		return nil, &AccountSelectionError{
+			Kind:     SelectionErrUnavailable,
+			Provider: provider,
+			Model:    model,
+		}
+	}
+
+	connections, err := s.store.GetActiveConnections(provider)
+	if err != nil {
+		return nil, fmt.Errorf("get connections: %w", err)
+	}
+
+	for _, conn := range connections {
+		if conn.ID != connectionID {
+			continue
+		}
+
+		// Check if supports model (model should NOT contain @connectionId here)
+		// Exception: OpenAI OAuth connections accept any ChatGPT model slug
+		isOpenAIOAuth := conn.Provider == "openai" && conn.AuthType == "oauth"
+		if !isOpenAIOAuth && !conn.SupportsModel(model) {
+			return nil, &AccountSelectionError{
+				Kind:     SelectionErrUnsupportedModel,
+				Provider: provider,
+				Model:    model,
+			}
+		}
+
+		// Check if rate limited
+		if domain.IsAccountUnavailable(conn.RateLimitedUntil) {
+			return nil, &AccountSelectionError{
+				Kind:     SelectionErrRateLimited,
+				Provider: provider,
+				Model:    model,
+			}
+		}
+
+		// Check if model locked
+		if domain.IsModelLockActive(conn.ModelLocks, model) {
+			return nil, &AccountSelectionError{
+				Kind:     SelectionErrModelLocked,
+				Provider: provider,
+				Model:    model,
+			}
+		}
+
+		// Auto-refresh token if needed
+		if s.tokenRefresh.NeedsRefresh(&conn) {
+			refreshed, err := s.tokenRefresh.CheckAndRefresh(&conn)
+			if err == nil {
+				conn = *refreshed
+			}
+		}
+
+		return shared.ConnectionToCredentials(&conn), nil
+	}
+
+	return nil, &AccountSelectionError{
+		Kind:     SelectionErrNoActiveCredentials,
+		Provider: provider,
+		Model:    model,
+	}
+}
+
 // SelectCredentials returns a weighted-random available connection for a provider+model,
 // filtered by excludeIDs and optional allowedConnectionIDs restriction.
 func (s *AccountSelector) SelectCredentials(

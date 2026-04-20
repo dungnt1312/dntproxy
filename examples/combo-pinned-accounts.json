@@ -1,0 +1,87 @@
+{
+  "providerConnections": [
+    {
+      "id": "conn-kiro-primary",
+      "provider": "kiro",
+      "name": "Kiro Primary Account",
+      "authType": "oauth",
+      "isActive": true,
+      "weight": 100,
+      "email": "primary@example.com"
+    },
+    {
+      "id": "conn-kiro-backup",
+      "provider": "kiro",
+      "name": "Kiro Backup Account",
+      "authType": "oauth",
+      "isActive": true,
+      "weight": 50,
+      "email": "backup@example.com"
+    },
+    {
+      "id": "conn-openai-1",
+      "provider": "openai",
+      "name": "OpenAI Account 1",
+      "authType": "apikey",
+      "isActive": true,
+      "weight": 100
+    }
+  ],
+  "combos": [
+    {
+      "id": "combo-1",
+      "name": "primary-backup-chain",
+      "models": [
+        "kr/claude-opus-4.6@conn-kiro-primary",
+        "kr/claude-sonnet-4.5@conn-kiro-backup",
+        "oai/gpt-4"
+      ],
+      "createdAt": "2026-04-20T14:00:00Z",
+      "updatedAt": "2026-04-20T14:00:00Z"
+    },
+    {
+      "id": "combo-2",
+      "name": "cost-optimized",
+      "models": [
+        "kr/claude-haiku-4.5@conn-kiro-backup",
+        "kr/claude-sonnet-4.5",
+        "kr/claude-opus-4.6@conn-kiro-primary"
+      ],
+      "createdAt": "2026-04-20T14:00:00Z",
+      "updatedAt": "2026-04-20T14:00:00Z"
+    },
+    {
+      "id": "combo-3",
+      "name": "auto-select-only",
+      "models": [
+        "kr/claude-opus-4.6",
+        "oai/gpt-4",
+        "kr/claude-sonnet-4.5"
+      ],
+      "createdAt": "2026-04-20T14:00:00Z",
+      "updatedAt": "2026-04-20T14:00:00Z"
+    },
+    {
+      "id": "combo-4",
+      "name": "mixed-strategy",
+      "models": [
+        "kr/claude-opus-4.6@conn-kiro-primary",
+        "kr/claude-sonnet-4.5",
+        "oai/gpt-4@auto"
+      ],
+      "createdAt": "2026-04-20T14:00:00Z",
+      "updatedAt": "2026-04-20T14:00:00Z"
+    }
+  ],
+  "modelAliases": {
+    "opus": "kr/claude-opus-4.6",
+    "sonnet": "kr/claude-sonnet-4.5",
+    "haiku": "kr/claude-haiku-4.5",
+    "gpt4": "oai/gpt-4"
+  },
+  "settings": {
+    "comboStrategy": "fallback",
+    "requireApiKey": false,
+    "port": 20199
+  }
+}

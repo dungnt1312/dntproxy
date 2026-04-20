@@ -117,21 +117,21 @@ func (s *ChatService) HandleChat(body []byte, modelStr string, requestID string)
 	return &port.ChatResult{StatusCode: http.StatusServiceUnavailable, Error: "All models unavailable"}
 }
 
-// executeOnProvider handles a single "provider/model" string:
-// parse → get executor → weighted random connection → execute → retry on fail.
+// executeOnProvider handles a single "provider/model@connectionId" string:
+// parse → get executor → select connection (pinned or weighted random) → execute → retry on fail.
 func (s *ChatService) executeOnProvider(body []byte, qualifiedModel string, requestID string, allowedConnectionIDs []string) (*ComboResult, error) {
 	reqlog := logger.NewRequestLog(requestID)
 	reqlog.Begin("POST", "/v1/chat/completions", qualifiedModel, len(body))
 
-	// Parse "provider/model"
-	idx := strings.Index(qualifiedModel, "/")
-	if idx < 0 {
-		msg := fmt.Sprintf("invalid model format: %s", qualifiedModel)
+	// Parse "provider/model@connectionId"
+	parsed, err := ParseModelString(qualifiedModel)
+	if err != nil {
+		msg := fmt.Sprintf("invalid model format: %s", err)
 		reqlog.End(http.StatusBadRequest, msg)
 		return &ComboResult{OK: false, StatusCode: http.StatusBadRequest, Error: msg}, nil
 	}
-	provider := qualifiedModel[:idx]
-	model := qualifiedModel[idx+1:]
+	provider := parsed.Provider
+	model := parsed.Model
 
 	reqlog.Route(provider, model)
 
@@ -142,13 +142,17 @@ func (s *ChatService) executeOnProvider(body []byte, qualifiedModel string, requ
 		return &ComboResult{OK: false, StatusCode: http.StatusBadRequest, Error: msg}, nil
 	}
 
-	// Inject model into body
+	// Inject model into body (strip provider prefix if present)
 	var bodyMap map[string]interface{}
 	if err := json.Unmarshal(body, &bodyMap); err != nil {
 		reqlog.End(http.StatusBadRequest, "Invalid JSON body")
 		return &ComboResult{OK: false, StatusCode: http.StatusBadRequest, Error: "Invalid JSON body"}, nil
 	}
-	bodyMap["model"] = model
+	cleanModel := model
+	if idx := strings.LastIndex(model, "/"); idx >= 0 {
+		cleanModel = model[idx+1:]
+	}
+	bodyMap["model"] = cleanModel
 	updatedBody, err := json.Marshal(bodyMap)
 	if err != nil {
 		reqlog.End(http.StatusInternalServerError, "Failed to serialize request body")
@@ -156,10 +160,12 @@ func (s *ChatService) executeOnProvider(body []byte, qualifiedModel string, requ
 	}
 
 	// Try connections with weighted random + fallback on failure
+	// If model has @connectionId, SelectCredentialsForModel will pin to that connection
 	excludeIDs := make(map[string]bool)
 
 	for {
-		creds, err := s.accountSelector.SelectCredentials(provider, excludeIDs, model, allowedConnectionIDs)
+		// Use new method that handles @connectionId pinning
+		creds, err := s.accountSelector.SelectCredentialsForModel(qualifiedModel, excludeIDs, allowedConnectionIDs)
 		if err != nil {
 			// Map selection errors to appropriate combo results
 			if mapped := mapSelectionErrorToComboResult(err); mapped != nil {
@@ -206,6 +212,13 @@ func (s *ChatService) executeOnProvider(body []byte, qualifiedModel string, requ
 			}
 		}
 		excludeIDs[creds.ConnectionID] = true
+
+		// If this was a pinned connection, don't retry (no other connections to try)
+		if parsed.ConnectionID != "" {
+			msg := fmt.Sprintf("Pinned connection failed: %s", errMsg)
+			reqlog.End(http.StatusServiceUnavailable, msg)
+			return &ComboResult{OK: false, StatusCode: http.StatusServiceUnavailable, Error: msg}, nil
+		}
 	}
 }
 

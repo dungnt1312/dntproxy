@@ -140,7 +140,31 @@ qwen/<model>                   # Qwen provider
 anthropic/<model>              # Anthropic provider
 combo-name                     # Combo (fallback chain)
 alias-name                     # Model alias
+
+# NEW: Pinned account format
+kr/<model>@connectionId        # Pin to specific connection
+oai/<model>@conn-123           # Example: pin to conn-123
+kr/<model>@auto                # Explicit auto-select (same as no suffix)
 ```
+
+### Combo with Pinned Accounts
+
+```json
+{
+  "name": "my-combo",
+  "models": [
+    "kr/claude-opus-4.6@conn-primary",    // Pin to specific connection
+    "kr/claude-sonnet-4.5@conn-backup",   // Pin to different connection
+    "oai/gpt-4"                            // Auto-select (default)
+  ]
+}
+```
+
+**Behavior:**
+- Models with `@connectionId` will ONLY use that specific connection
+- Models without suffix use weighted random selection (existing behavior)
+- If pinned connection fails, move to next model (no retry on other connections)
+- See `docs/combo-pinned-accounts.md` for detailed documentation
 
 ## Key Behaviors
 

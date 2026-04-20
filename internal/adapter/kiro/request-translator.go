@@ -119,6 +119,7 @@ type OpenAIMessage struct {
 type ContentBlock struct {
 	Type      string          `json:"type"`
 	Text      string          `json:"text,omitempty"`
+	ImageURL  interface{}     `json:"image_url,omitempty"`
 	ToolUseID string          `json:"tool_use_id,omitempty"`
 	Content   json.RawMessage `json:"content,omitempty"` // for tool_result
 }
@@ -447,6 +448,11 @@ func extractUserContent(msg OpenAIMessage) (string, []KiroToolResult) {
 			if b.Text != "" {
 				textParts = append(textParts, b.Text)
 			}
+		case "image_url":
+			imgURL := extractImageURL(b.ImageURL)
+			if imgURL != "" {
+				textParts = append(textParts, fmt.Sprintf("[Image: %s]", imgURL))
+			}
 		case "tool_result":
 			text := ""
 			if len(b.Content) > 0 {
@@ -474,6 +480,21 @@ func extractUserContent(msg OpenAIMessage) (string, []KiroToolResult) {
 	}
 
 	return strings.Join(textParts, "\n"), toolResults
+}
+
+func extractImageURL(imageURL interface{}) string {
+	if imageURL == nil {
+		return ""
+	}
+	if urlMap, ok := imageURL.(map[string]interface{}); ok {
+		if url, ok := urlMap["url"].(string); ok {
+			return url
+		}
+	}
+	if url, ok := imageURL.(string); ok {
+		return url
+	}
+	return ""
 }
 
 func extractAssistantContent(msg OpenAIMessage) (string, []KiroToolUse) {

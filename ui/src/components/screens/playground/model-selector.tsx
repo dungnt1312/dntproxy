@@ -90,6 +90,11 @@ export function ModelSelector({
   const finalModelString = useMemo(() => {
     if (!selectedProvider || !selectedModel) return ''
     
+    // Combo and alias don't need provider prefix
+    if (selectedProvider === 'combo' || selectedProvider === 'alias') {
+      return selectedModel
+    }
+    
     const base = `${selectedProvider}/${selectedModel}`
     if (selectedAccount && selectedAccount !== 'auto') {
       return `${base}@${selectedAccount}`
@@ -166,7 +171,7 @@ export function ModelSelector({
           </>
         )}
 
-        {selectedProvider && selectedModel && (
+        {selectedProvider && selectedModel && selectedProvider !== 'combo' && selectedProvider !== 'alias' && (
           <>
             <ChevronRight className="h-4 w-4 text-muted-foreground" />
             

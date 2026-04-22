@@ -217,6 +217,10 @@ func apiKeyMiddleware(store port.CredentialStore) gin.HandlerFunc {
 
 		key := extractAPIKey(c.Request)
 		if key == "" {
+			// Fallback: accept key from query param (for EventSource/SSE which can't set headers)
+			key = c.Query("key")
+		}
+		if key == "" {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
 				"error": gin.H{"message": "Missing API key"},
 			})

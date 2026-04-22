@@ -56,13 +56,15 @@ import type {
   Message,
   RequestLog,
   ChatParams,
+  Attachment,
 } from "./playground/types";
 import { PlaygroundParamsPanel } from "./playground/PlaygroundParamsPanel";
 import { ModelSelector } from "./playground/model-selector";
+import { AttachmentInput } from "./playground/attachment-input";
 
 type ChatApiMessage = {
   role: "user" | "assistant" | "system";
-  content: string;
+  content: string | Array<{ type: string; text?: string; image_url?: { url: string } }>;
 };
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -167,6 +169,7 @@ export default function PlaygroundScreen() {
   // Chat
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [sending, setSending] = useState(false);
   const [params, setParams] = useState<ChatParams>(DEFAULT_PARAMS);
 
@@ -270,12 +273,13 @@ export default function PlaygroundScreen() {
 
   async function handleSend() {
     const content = input.trim();
-    if (!content || sending || !finalModelString) return;
+    if ((!content && attachments.length === 0) || sending || !finalModelString) return;
 
     const userMessage: Message = {
       id: crypto.randomUUID(),
       role: "user",
       content,
+      attachments: attachments.length > 0 ? [...attachments] : undefined,
     };
     const assistantId = crypto.randomUUID();
 
@@ -285,6 +289,7 @@ export default function PlaygroundScreen() {
       { id: assistantId, role: "assistant", content: "" },
     ]);
     setInput("");
+    setAttachments([]);
     setSending(true);
 
     // Build messages array with optional system prompt
@@ -295,15 +300,58 @@ export default function PlaygroundScreen() {
         content: params.systemPrompt.trim(),
       });
     }
+    
+    // Convert previous messages
     nextMessages.push(
       ...messages
         .filter((m) => m.role !== "system")
-        .map((m) => ({
-          role: m.role,
-          content: m.content,
-        })),
-      { role: userMessage.role, content: userMessage.content },
+        .map((m) => {
+          if (m.attachments && m.attachments.length > 0) {
+            // Multimodal message
+            const contentParts: Array<{ type: string; text?: string; image_url?: { url: string } }> = [];
+            if (m.content) {
+              contentParts.push({ type: "text", text: m.content });
+            }
+            m.attachments.forEach((att) => {
+              contentParts.push({
+                type: "image_url",
+                image_url: { url: att.dataUrl },
+              });
+            });
+            return {
+              role: m.role,
+              content: contentParts,
+            };
+          }
+          return {
+            role: m.role,
+            content: m.content,
+          };
+        })
     );
+
+    // Add current user message
+    if (userMessage.attachments && userMessage.attachments.length > 0) {
+      const contentParts: Array<{ type: string; text?: string; image_url?: { url: string } }> = [];
+      if (userMessage.content) {
+        contentParts.push({ type: "text", text: userMessage.content });
+      }
+      userMessage.attachments.forEach((att) => {
+        contentParts.push({
+          type: "image_url",
+          image_url: { url: att.dataUrl },
+        });
+      });
+      nextMessages.push({
+        role: userMessage.role,
+        content: contentParts,
+      });
+    } else {
+      nextMessages.push({
+        role: userMessage.role,
+        content: userMessage.content,
+      });
+    }
 
     const requestBody = {
       model: finalModelString,
@@ -423,6 +471,7 @@ export default function PlaygroundScreen() {
     abortControllerRef.current = null;
     setSending(false);
     setMessages([]);
+    setAttachments([]);
     setSelectedLogId(null);
   }
 
@@ -585,7 +634,21 @@ export default function PlaygroundScreen() {
                           </p>
                         </div>
                       ) : (
-                        <p className="whitespace-pre-wrap">{message.content}</p>
+                        <>
+                          {message.attachments && message.attachments.length > 0 && (
+                            <div className="flex flex-wrap gap-2 mb-2">
+                              {message.attachments.map((att) => (
+                                <img
+                                  key={att.id}
+                                  src={att.dataUrl}
+                                  alt={att.name}
+                                  className="max-w-[200px] max-h-[200px] rounded-lg border"
+                                />
+                              ))}
+                            </div>
+                          )}
+                          <p className="whitespace-pre-wrap">{message.content}</p>
+                        </>
                       )}
                     </div>
                   </div>
@@ -597,33 +660,41 @@ export default function PlaygroundScreen() {
 
           {/* Input area */}
           <div className="border-t bg-background/95 px-4 py-3 backdrop-blur-sm md:px-6">
-            <div className="mx-auto flex max-w-3xl gap-2">
-              <Textarea
-                value={input}
-                onChange={(event) => setInput(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" && !event.shiftKey) {
-                    event.preventDefault();
-                  handleSend();
-                }
-              }}
-              placeholder="Type your message…"
-              className="min-h-[44px] resize-none rounded-xl"
-              rows={1}
-              disabled={sending || !finalModelString}
-            />
-            <Button
-              onClick={handleSend}
-              disabled={sending || !input.trim() || !finalModelString}
-              size="icon"
-              className="h-[44px] w-[44px] shrink-0 rounded-xl"
-            >
-                {sending ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Send className="h-4 w-4" />
-                )}
-              </Button>
+            <div className="mx-auto max-w-3xl space-y-2">
+              <AttachmentInput
+                attachments={attachments}
+                onAttachmentsChange={setAttachments}
+                disabled={sending || !finalModelString}
+              />
+              
+              <div className="flex gap-2">
+                <Textarea
+                  value={input}
+                  onChange={(event) => setInput(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && !event.shiftKey) {
+                      event.preventDefault();
+                      handleSend();
+                    }
+                  }}
+                  placeholder="Type your message…"
+                  className="min-h-[44px] resize-none rounded-xl"
+                  rows={1}
+                  disabled={sending || !finalModelString}
+                />
+                <Button
+                  onClick={handleSend}
+                  disabled={sending || (!input.trim() && attachments.length === 0) || !finalModelString}
+                  size="icon"
+                  className="h-[44px] w-[44px] shrink-0 rounded-xl"
+                >
+                  {sending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Send className="h-4 w-4" />
+                  )}
+                </Button>
+              </div>
             </div>
           </div>
         </TabsContent>

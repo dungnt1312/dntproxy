@@ -19,10 +19,20 @@ export type Connection = {
   supportedModels?: string[];
 };
 
+export type Attachment = {
+  id: string;
+  type: "image" | "file";
+  name: string;
+  size: number;
+  dataUrl: string;
+  mimeType: string;
+};
+
 export type Message = {
   id: string;
   role: "user" | "assistant" | "system";
   content: string;
+  attachments?: Attachment[];
 };
 
 export type RequestLog = {

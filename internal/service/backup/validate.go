@@ -101,12 +101,4 @@ func ValidateBackup(b *BackupData) error {
 	return nil
 }
 
-// ValidateImportMode checks if the import mode is valid.
-func ValidateImportMode(mode string) error {
-	switch mode {
-	case "merge", "replace":
-		return nil
-	default:
-		return fmt.Errorf("invalid import mode %q (must be 'merge' or 'replace')", mode)
-	}
-}
+

@@ -1,57 +1,23 @@
 package backup
 
 import (
-	"strings"
 	"time"
 
 	"github.com/dungnt/dntproxy/internal/domain"
 	"github.com/dungnt/dntproxy/internal/port"
 )
 
-// ExportOption configures export behavior.
-type ExportOption func(*exportConfig)
-
-type exportConfig struct {
-	maskTokens   bool
-	skipRegistry bool
-}
-
-// WithMask enables token/key masking.
-func WithMask(enabled bool) ExportOption {
-	return func(c *exportConfig) {
-		c.maskTokens = enabled
-	}
-}
-
-// WithSkipRegistry excludes ModelRegistry from backup.
-func WithSkipRegistry(enabled bool) ExportOption {
-	return func(c *exportConfig) {
-		c.skipRegistry = enabled
-	}
-}
-
 // Export loads config from store and returns a BackupData snapshot.
-func Export(store port.CredentialStore, opts ...ExportOption) (*BackupData, error) {
-	cfg := &exportConfig{}
-	for _, o := range opts {
-		o(cfg)
-	}
-
+// Exports everything without masking or filtering.
+func Export(store port.CredentialStore) (*BackupData, error) {
 	appCfg, err := store.Load()
 	if err != nil {
 		return nil, err
 	}
 
-	// Clone connections with optional masking
+	// Clone connections
 	connections := make([]domain.ProviderConnection, len(appCfg.ProviderConnections))
-	for i, conn := range appCfg.ProviderConnections {
-		connections[i] = conn
-		if cfg.maskTokens {
-			connections[i].AccessToken = maskString(conn.AccessToken, 4, 4)
-			connections[i].RefreshToken = maskString(conn.RefreshToken, 4, 4)
-			connections[i].APIKey = maskString(conn.APIKey, 4, 4)
-		}
-	}
+	copy(connections, appCfg.ProviderConnections)
 
 	// Clone combos
 	combos := make([]domain.Combo, len(appCfg.Combos))
@@ -63,21 +29,16 @@ func Export(store port.CredentialStore, opts ...ExportOption) (*BackupData, erro
 		aliases[k] = v
 	}
 
-	// Clone API keys with optional masking
+	// Clone API keys
 	apiKeys := make([]domain.APIKey, len(appCfg.APIKeys))
-	for i, k := range appCfg.APIKeys {
-		apiKeys[i] = k
-		if cfg.maskTokens {
-			apiKeys[i].Key = maskString(k.Key, 10, 4)
-		}
-	}
+	copy(apiKeys, appCfg.APIKeys)
 
 	// Clone settings
 	settings := appCfg.Settings
 
-	// Model registry (optional)
+	// Clone model registry
 	var registry *domain.ModelRegistry
-	if !cfg.skipRegistry && appCfg.ModelRegistry != nil {
+	if appCfg.ModelRegistry != nil {
 		registry = appCfg.ModelRegistry
 	}
 
@@ -91,17 +52,4 @@ func Export(store port.CredentialStore, opts ...ExportOption) (*BackupData, erro
 		Settings:            settings,
 		ModelRegistry:       registry,
 	}, nil
-}
-
-// maskString truncates a string showing only first/last N chars.
-func maskString(s string, first, last int) string {
-	if len(s) <= first+last {
-		return "***"
-	}
-	return s[:first] + "..." + s[len(s)-last:]
-}
-
-// IsMasked checks if a string looks like a masked value.
-func IsMasked(s string) bool {
-	return s == "" || strings.HasSuffix(s, "...") || s == "***"
 }

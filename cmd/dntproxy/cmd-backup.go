@@ -17,20 +17,17 @@ func buildBackupCmd() *cobra.Command {
 
 	exportCmd := &cobra.Command{
 		Use:   "export [file]",
-		Short: "Export dntproxy configuration to a JSON file",
+		Short: "Export all dntproxy configuration to a JSON file",
 		Args:  cobra.MaximumNArgs(1),
 		RunE:  runExport,
 	}
-	exportCmd.Flags().Bool("mask", false, "Mask sensitive data (tokens, API keys)")
-	exportCmd.Flags().Bool("skip-registry", false, "Skip model registry in backup")
 
 	importCmd := &cobra.Command{
 		Use:   "import <file>",
-		Short: "Import dntproxy configuration from a JSON file",
+		Short: "Import dntproxy configuration (replaces all existing data)",
 		Args:  cobra.ExactArgs(1),
 		RunE:  runImport,
 	}
-	importCmd.Flags().String("mode", "merge", "Import mode: 'replace' (replace all) or 'merge' (add to existing)")
 
 	backupCmd.AddCommand(exportCmd)
 	backupCmd.AddCommand(importCmd)
@@ -44,13 +41,7 @@ func runExport(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to open store: %w", err)
 	}
 
-	maskTokens, _ := cmd.Flags().GetBool("mask")
-	skipRegistry, _ := cmd.Flags().GetBool("skip-registry")
-
-	data, err := backup.Export(store,
-		backup.WithMask(maskTokens),
-		backup.WithSkipRegistry(skipRegistry),
-	)
+	data, err := backup.Export(store)
 	if err != nil {
 		return fmt.Errorf("failed to export backup: %w", err)
 	}
@@ -91,13 +82,11 @@ func runImport(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to open store: %w", err)
 	}
 
-	mode, _ := cmd.Flags().GetString("mode")
-
-	result, err := backup.Import(store, &backupData, mode)
+	result, err := backup.Import(store, &backupData)
 	if err != nil {
 		return fmt.Errorf("import failed: %w", err)
 	}
 
-	fmt.Printf("Backup imported: %d items imported, %d skipped (mode=%s)\n", result.Imported, result.Skipped, mode)
+	fmt.Printf("Backup imported: %d items (full override)\n", result.Imported)
 	return nil
 }

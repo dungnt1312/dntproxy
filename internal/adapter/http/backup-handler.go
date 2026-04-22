@@ -3,7 +3,6 @@ package http
 import (
 	"fmt"
 	"log"
-	"strings"
 	"time"
 
 	"github.com/dungnt/dntproxy/internal/domain"
@@ -16,13 +15,7 @@ import (
 
 func apiExportBackup(store port.CredentialStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		maskTokens := c.Query("mask") != "false"
-		skipRegistry := c.Query("registry") == "false"
-
-		data, err := backup.Export(store,
-			backup.WithMask(maskTokens),
-			backup.WithSkipRegistry(skipRegistry),
-		)
+		data, err := backup.Export(store)
 		if err != nil {
 			c.JSON(500, gin.H{"error": err.Error()})
 			return
@@ -39,7 +32,6 @@ func apiExportBackup(store port.CredentialStore) gin.HandlerFunc {
 func apiImportBackup(store port.CredentialStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req struct {
-			Mode                string                      `json:"mode"`
 			Version             string                      `json:"version"`
 			ExportedAt          string                      `json:"exportedAt"`
 			ProviderConnections []domain.ProviderConnection `json:"providerConnections"`
@@ -54,11 +46,6 @@ func apiImportBackup(store port.CredentialStore) gin.HandlerFunc {
 			return
 		}
 
-		mode := req.Mode
-		if mode == "" {
-			mode = "merge"
-		}
-
 		backupData := backup.BackupData{
 			Version:             req.Version,
 			ExportedAt:          req.ExportedAt,
@@ -70,24 +57,17 @@ func apiImportBackup(store port.CredentialStore) gin.HandlerFunc {
 			ModelRegistry:       req.ModelRegistry,
 		}
 
-		result, err := backup.Import(store, &backupData, mode)
+		result, err := backup.Import(store, &backupData)
 		if err != nil {
 			c.JSON(400, gin.H{"error": "Import failed: " + err.Error()})
 			return
 		}
 
-		log.Printf("[BACKUP] Imported %d items (%d skipped) in mode=%s", result.Imported, result.Skipped, mode)
+		log.Printf("[BACKUP] Imported %d items (full override)", result.Imported)
 
 		c.JSON(200, gin.H{
 			"ok":       true,
 			"imported": result.Imported,
-			"skipped":  result.Skipped,
-			"mode":     mode,
 		})
 	}
-}
-
-// IsMasked is exposed here for any handler that needs it.
-func IsMasked(s string) bool {
-	return s == "" || strings.HasSuffix(s, "...") || s == "***"
 }

@@ -340,8 +340,5 @@ func killProcess(pid int) {
 
 // sysProcAttrs returns platform-specific process attributes.
 func sysProcAttrs() *syscall.SysProcAttr {
-	if runtime.GOOS == "windows" {
-		return &syscall.SysProcAttr{HideWindow: true}
-	}
-	return nil
+	return getSysProcAttr()
 }

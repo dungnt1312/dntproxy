@@ -9,7 +9,7 @@ import { Toaster } from '@/components/ui/toaster'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <BrowserRouter>
+    <BrowserRouter basename="/dashboard">
       <ThemeProvider attribute="class" defaultTheme="dark" enableSystem disableTransitionOnChange>
         <TooltipProvider>
           <App />

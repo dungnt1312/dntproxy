@@ -10,6 +10,7 @@ export default defineConfig({
             '@': path.resolve(__dirname, './src'),
         },
     },
+    base: '/dashboard/',
     server: {
         port: 5173,
         proxy: {

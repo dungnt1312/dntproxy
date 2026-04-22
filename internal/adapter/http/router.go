@@ -86,10 +86,18 @@ func serveStaticUI(r *gin.Engine) {
 
 	log.Printf("[dntproxy] Serving UI from %s", distDir)
 
-	// Serve static assets
-	r.Static("/assets", filepath.Join(distDir, "assets"))
+	// Serve static assets under /dashboard
+	r.Static("/dashboard/assets", filepath.Join(distDir, "assets"))
 
-	// SPA fallback: serve index.html for all non-API, non-asset routes
+	// Serve index.html at /dashboard root
+	r.GET("/dashboard", func(c *gin.Context) {
+		c.File(filepath.Join(distDir, "index.html"))
+	})
+	r.GET("/dashboard/", func(c *gin.Context) {
+		c.File(filepath.Join(distDir, "index.html"))
+	})
+
+	// SPA fallback: serve index.html for all /dashboard/* routes
 	r.NoRoute(func(c *gin.Context) {
 		path := c.Request.URL.Path
 
@@ -99,15 +107,34 @@ func serveStaticUI(r *gin.Engine) {
 			return
 		}
 
-		// Try to serve the exact file first
-		filePath := filepath.Join(distDir, path)
-		if info, err := os.Stat(filePath); err == nil && !info.IsDir() {
-			c.File(filePath)
+		// Serve UI for /dashboard/* routes
+		if strings.HasPrefix(path, "/dashboard/") {
+			// Try to serve the exact file first (remove /dashboard prefix)
+			relativePath := strings.TrimPrefix(path, "/dashboard")
+			filePath := filepath.Join(distDir, relativePath)
+			if info, err := os.Stat(filePath); err == nil && !info.IsDir() {
+				c.File(filePath)
+				return
+			}
+
+			// SPA fallback — serve index.html
+			c.File(filepath.Join(distDir, "index.html"))
 			return
 		}
 
-		// SPA fallback — serve index.html
-		c.File(filepath.Join(distDir, "index.html"))
+		// Root path - show API info
+		if path == "/" {
+			c.JSON(http.StatusOK, gin.H{
+				"name":      "dntproxy",
+				"version":   "0.1.0",
+				"status":    "running",
+				"dashboard": "/dashboard",
+			})
+			return
+		}
+
+		// Other routes - 404
+		c.JSON(404, gin.H{"error": "Not found"})
 	})
 }
 

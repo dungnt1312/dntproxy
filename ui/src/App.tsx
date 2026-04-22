@@ -191,10 +191,14 @@ export default function App() {
   const NavButton = ({ item }: { item: NavItem }) => {
     const Icon = item.icon;
     const active = isActive(item.path);
-    const button = (
-      <button
+    const link = (
+      <a
         key={item.path}
-        onClick={() => handlePageSelect(item.path)}
+        href={`/dashboard${item.path}`}
+        onClick={(e) => {
+          e.preventDefault();
+          handlePageSelect(item.path);
+        }}
         className={cn(
           "flex items-center gap-3 w-full px-3 py-2 mx-2 rounded-lg text-sm font-medium transition-colors",
           active
@@ -204,13 +208,13 @@ export default function App() {
       >
         <Icon className="w-4 h-4 shrink-0" />
         {sidebarOpen && <span className="truncate">{item.label}</span>}
-      </button>
+      </a>
     );
 
     if (!sidebarOpen) {
       return (
         <Tooltip key={item.path} delayDuration={0}>
-          <TooltipTrigger asChild>{button}</TooltipTrigger>
+          <TooltipTrigger asChild>{link}</TooltipTrigger>
           <TooltipContent side="right" sideOffset={8}>
             {item.label}
           </TooltipContent>
@@ -218,7 +222,7 @@ export default function App() {
       );
     }
 
-    return button;
+    return link;
   };
 
   return (

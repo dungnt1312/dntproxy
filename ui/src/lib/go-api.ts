@@ -57,6 +57,61 @@ async function goRequest<T = unknown>(
   return res.json();
 }
 
+// Raw fetch with auth + 401 handling (for non-JSON or streaming responses)
+export async function goFetch(
+  path: string,
+  options?: RequestInit,
+): Promise<Response> {
+  const apiKey = getStoredApiKey();
+  const headers: Record<string, string> = {
+    ...(options?.headers as Record<string, string>),
+  };
+  if (apiKey) {
+    headers["Authorization"] = `Bearer ${apiKey}`;
+  }
+
+  const res = await fetch(`${GO_API_BASE}${path}`, {
+    ...options,
+    headers,
+  });
+
+  if (res.status === 401) {
+    on401Callback?.();
+    throw new Error("Unauthorized");
+  }
+
+  return res;
+}
+
+// Streaming fetch for SSE endpoints (e.g. /v1/chat/completions)
+export async function goStreamFetch(
+  path: string,
+  options?: RequestInit,
+): Promise<Response> {
+  const apiKey = getStoredApiKey();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(options?.headers as Record<string, string>),
+  };
+  if (apiKey) {
+    headers["Authorization"] = `Bearer ${apiKey}`;
+  }
+
+  // Stream endpoints are under root, not /api
+  const base = GO_API_BASE.replace(/\/api$/, "");
+  const res = await fetch(`${base}${path}`, {
+    ...options,
+    headers,
+  });
+
+  if (res.status === 401) {
+    on401Callback?.();
+    throw new Error("Unauthorized");
+  }
+
+  return res;
+}
+
 function toSearchParams(filters?: Record<string, unknown>) {
   const params = new URLSearchParams();
   if (!filters) return params;

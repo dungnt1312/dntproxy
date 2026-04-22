@@ -46,7 +46,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { goApi } from "@/lib/go-api";
+import { goApi, goStreamFetch } from "@/lib/go-api";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -68,8 +68,6 @@ type ChatApiMessage = {
 };
 
 // ─── Constants ───────────────────────────────────────────────────────────────
-
-const GO_API_BASE = import.meta.env.VITE_GO_API_URL || "";
 
 const DEFAULT_PARAMS: ChatParams = {
   temperature: 1,
@@ -377,12 +375,8 @@ export default function PlaygroundScreen() {
     const startTime = Date.now();
 
     try {
-      const response = await fetch(`${GO_API_BASE}/v1/chat/completions`, {
+      const response = await goStreamFetch("/v1/chat/completions", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...goApi.getAuthHeaders(),
-        },
         body: JSON.stringify(requestBody),
         signal: controller.signal,
       });

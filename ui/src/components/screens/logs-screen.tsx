@@ -17,7 +17,7 @@ import {
   ChevronDown
 } from "lucide-react";
 import { toast } from "sonner";
-import { goApi } from "@/lib/go-api";
+import { goApi, getStoredApiKey } from "@/lib/go-api";
 import { StatusBadge, formatDateTime, formatLatency } from "./logs/helpers";
 import { PayloadViewer } from "./logs/PayloadViewer";
 import { cn } from "@/lib/utils";
@@ -242,6 +242,8 @@ export default function LogsScreen({
       const params = buildFilterParams(debouncedFilters);
       // Ensure range is 1h for stream to avoid pulling massive history if they select 30d
       params.set("range", "1h");
+      const apiKey = getStoredApiKey();
+      if (apiKey) params.set("key", apiKey);
       const url = `${SSE_BASE}/logs/stream?${params.toString()}`;
 
       const sse = new EventSource(url);

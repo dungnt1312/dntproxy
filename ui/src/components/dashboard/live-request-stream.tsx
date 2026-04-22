@@ -7,6 +7,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { ProviderLogo } from '@/components/connections/ProviderLogo'
 import { cn } from '@/lib/utils'
+import { getStoredApiKey } from '@/lib/go-api'
 import type { LogEntry } from '@/types/logs'
 
 const SSE_BASE = import.meta.env.VITE_GO_API_URL || '/api'
@@ -38,7 +39,9 @@ export function LiveRequestStream() {
       esRef.current = null
     }
 
-    const es = new EventSource(`${SSE_BASE}/logs/stream?range=1h&limit=${MAX_ENTRIES}`)
+    const apiKey = getStoredApiKey()
+    const keyParam = apiKey ? `&key=${encodeURIComponent(apiKey)}` : ''
+    const es = new EventSource(`${SSE_BASE}/logs/stream?range=1h&limit=${MAX_ENTRIES}${keyParam}`)
     esRef.current = es
 
     es.onmessage = (e) => {

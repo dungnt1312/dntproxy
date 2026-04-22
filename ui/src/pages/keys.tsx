@@ -5,7 +5,7 @@ import { Plus, Trash2, Copy, Check, KeyRound, X } from 'lucide-react'
 interface APIKeyItem {
   id: string
   name: string
-  keyMasked: string
+  key: string
   isActive: boolean
   createdAt: string
 }
@@ -99,7 +99,7 @@ export default function Keys() {
             <div key={k.id} className="glass-sm px-4 py-3 flex items-center justify-between hover:border-[var(--border-hover)] transition-all group">
               <div className="flex items-center gap-3">
                 <span className="font-medium text-sm">{k.name}</span>
-                <code className="text-[11px] text-[var(--text-dim)] bg-white/[0.03] px-2 py-0.5 rounded font-mono">{k.keyMasked}</code>
+                <code className="text-[11px] text-[var(--text-dim)] bg-white/[0.03] px-2 py-0.5 rounded font-mono">{k.key}</code>
                 <span className={`chip text-[10px] ${k.isActive ? 'chip-success' : 'chip-danger'}`}>
                   {k.isActive ? 'active' : 'disabled'}
                 </span>

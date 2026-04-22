@@ -227,7 +227,6 @@ export const goApi: any = {
     goRequest<any[]>("/keys").then((keys) =>
       (Array.isArray(keys) ? keys : []).map((key) => ({
         ...key,
-        keyMasked: key.keyMasked || "",
         updatedAt: key.updatedAt || key.createdAt || new Date().toISOString(),
       })),
     ),

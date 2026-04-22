@@ -294,7 +294,7 @@ export default function ConnectionCard({
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-48 shadow-lg">
-                {(c.authType === "apikey" || c.hasApiKey) &&
+                {(c.authType === "apikey" || c.apiKey) &&
                   onEditConnection && (
                     <DropdownMenuItem
                       onClick={() => onEditConnection(c)}

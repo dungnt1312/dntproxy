@@ -12,6 +12,9 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// serverPortKey is the context key for storing actual server port
+const serverPortKey = "server_port"
+
 // NewRouter creates and configures the Gin router.
 func NewRouter(store port.CredentialStore, providers port.ProviderRegistry, tunnelMgr port.TunnelManager) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
@@ -51,6 +54,26 @@ func NewRouter(store port.CredentialStore, providers port.ProviderRegistry, tunn
 	serveStaticUI(r)
 
 	return r
+}
+
+// SetServerPort stores the actual server port in the router context.
+// This should be called from main.go after determining the final port.
+func SetServerPort(r *gin.Engine, port int) {
+	// Store in a middleware that sets it in every request context
+	r.Use(func(c *gin.Context) {
+		c.Set(serverPortKey, port)
+		c.Next()
+	})
+}
+
+// GetServerPort retrieves the actual server port from context.
+func GetServerPort(c *gin.Context) int {
+	if port, exists := c.Get(serverPortKey); exists {
+		if p, ok := port.(int); ok {
+			return p
+		}
+	}
+	return 20199 // fallback
 }
 
 // serveStaticUI serves the built frontend from ui/dist/ if it exists.
@@ -176,6 +199,18 @@ func apiKeyMiddleware(store port.CredentialStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		settings, err := store.GetSettings()
 		if err != nil || !settings.RequireAPIKey {
+			c.Next()
+			return
+		}
+
+		// Exempt endpoints needed for UI auth bootstrap
+		path := c.Request.URL.Path
+		method := c.Request.Method
+		if method == "GET" && path == "/api/settings" {
+			c.Next()
+			return
+		}
+		if method == "POST" && path == "/api/auth/validate-key" {
 			c.Next()
 			return
 		}

@@ -128,9 +128,9 @@ export function getProviderInfo(provider: string) {
 // ─── Small UI Components ──────────────────────────────────────────────────────
 
 export function TokenBar({ conn }: { conn: any }) {
-    if (!conn.expiresAt && !conn.hasApiKey) return null;
+    if (!conn.expiresAt && !conn.apiKey) return null;
 
-    if (conn.hasApiKey) {
+    if (conn.apiKey) {
         return (
             <Badge
                 variant="outline"

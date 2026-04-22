@@ -20,30 +20,7 @@ func apiListKeys(store port.CredentialStore) gin.HandlerFunc {
 			c.JSON(500, gin.H{"error": err.Error()})
 			return
 		}
-
-		type safeKey struct {
-			ID        string `json:"id"`
-			Name      string `json:"name"`
-			KeyMasked string `json:"keyMasked"`
-			IsActive  bool   `json:"isActive"`
-			CreatedAt string `json:"createdAt"`
-		}
-
-		var keys []safeKey
-		for _, k := range cfg.APIKeys {
-			masked := k.Key
-			if len(masked) > 14 {
-				masked = masked[:10] + "..." + masked[len(masked)-4:]
-			}
-			keys = append(keys, safeKey{
-				ID:        k.ID,
-				Name:      k.Name,
-				KeyMasked: masked,
-				IsActive:  k.IsActive,
-				CreatedAt: k.CreatedAt,
-			})
-		}
-		c.JSON(200, keys)
+		c.JSON(200, cfg.APIKeys)
 	}
 }
 
@@ -114,5 +91,22 @@ func apiDeleteKey(store port.CredentialStore) gin.HandlerFunc {
 			return
 		}
 		c.JSON(200, gin.H{"ok": true})
+	}
+}
+
+func apiValidateKey(store port.CredentialStore) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req struct {
+			Key string `json:"key"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil || req.Key == "" {
+			c.JSON(400, gin.H{"valid": false, "error": "key is required"})
+			return
+		}
+		if store.ValidateAPIKey(req.Key) {
+			c.JSON(200, gin.H{"valid": true})
+		} else {
+			c.JSON(200, gin.H{"valid": false})
+		}
 	}
 }

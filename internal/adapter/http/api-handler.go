@@ -94,6 +94,9 @@ func RegisterAPIRoutes(r *gin.Engine, store port.CredentialStore, providers port
 
 		// Profiles
 		RegisterProfileRoutes(api, store)
+
+		// Auth validation (exempt from middleware, used by UI to verify stored key)
+		api.POST("/auth/validate-key", apiValidateKey(store))
 	}
 }
 

@@ -33,69 +33,7 @@ func apiListConnections(store port.CredentialStore) gin.HandlerFunc {
 			c.JSON(500, gin.H{"error": "Failed to load config"})
 			return
 		}
-
-		// Mask tokens before returning
-		type safeConn struct {
-			ID              string            `json:"id"`
-			Provider        string            `json:"provider"`
-			AuthType        string            `json:"authType"`
-			Name            string            `json:"name"`
-			Weight          int               `json:"weight"`
-			IsActive        bool              `json:"isActive"`
-			Email           string            `json:"email,omitempty"`
-			ExpiresAt       string            `json:"expiresAt,omitempty"`
-			TestStatus      string            `json:"testStatus,omitempty"`
-			LastError       string            `json:"lastError,omitempty"`
-			LastErrorAt     string            `json:"lastErrorAt,omitempty"`
-			RateLimited     string            `json:"rateLimitedUntil,omitempty"`
-			BackoffLevel    int               `json:"backoffLevel"`
-			AuthMethod      string            `json:"authMethod,omitempty"`
-			ProviderName    string            `json:"providerName,omitempty"`
-			ModelLocks      map[string]string `json:"modelLocks,omitempty"`
-			SupportedModels []string          `json:"supportedModels,omitempty"`
-			BaseURL         string            `json:"baseUrl,omitempty"`
-			CreatedAt       string            `json:"createdAt,omitempty"`
-			HasToken        bool              `json:"hasToken"`
-			HasAPIKey       bool              `json:"hasApiKey"`
-			ExpiresIn       int               `json:"expiresIn,omitempty"`
-		}
-
-		var result []safeConn
-		for _, conn := range cfg.ProviderConnections {
-			sc := safeConn{
-				ID:              conn.ID,
-				Provider:        conn.Provider,
-				AuthType:        conn.AuthType,
-				Name:            conn.Name,
-				Weight:          conn.Weight,
-				IsActive:        conn.IsActive,
-				Email:           conn.Email,
-				ExpiresAt:       conn.ExpiresAt,
-				TestStatus:      conn.TestStatus,
-				LastError:       conn.LastError,
-				LastErrorAt:     conn.LastErrorAt,
-				RateLimited:     conn.RateLimitedUntil,
-				BackoffLevel:    conn.BackoffLevel,
-				ModelLocks:      conn.ModelLocks,
-				SupportedModels: conn.SupportedModels,
-				BaseURL:         conn.BaseURL,
-				CreatedAt:       conn.CreatedAt,
-				HasToken:        conn.AccessToken != "",
-				HasAPIKey:       conn.APIKey != "",
-				ExpiresIn:       conn.ExpiresIn,
-			}
-			if conn.ProviderSpecificData != nil {
-				if m, ok := conn.ProviderSpecificData["authMethod"].(string); ok {
-					sc.AuthMethod = m
-				}
-				if p, ok := conn.ProviderSpecificData["provider"].(string); ok {
-					sc.ProviderName = p
-				}
-			}
-			result = append(result, sc)
-		}
-
-		c.JSON(200, result)
+		c.JSON(200, cfg.ProviderConnections)
 	}
 }
 
@@ -910,14 +848,6 @@ func apiTestModel(store port.CredentialStore, providers port.ProviderRegistry) g
 			"model":  modelName,
 		})
 	}
-}
-
-// maskString masks a string, showing first n and last m characters.
-func maskString(s string, first, last int) string {
-	if len(s) <= first+last {
-		return strings.Repeat("*", len(s))
-	}
-	return s[:first] + "..." + s[len(s)-last:]
 }
 
 // findConnectionByID is a helper to find a connection by ID in a config.

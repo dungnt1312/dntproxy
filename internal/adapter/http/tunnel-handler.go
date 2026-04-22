@@ -33,11 +33,8 @@ func enableTunnel(c *gin.Context, tunnelMgr port.TunnelManager, store port.Crede
 		return
 	}
 
-	// Read port from settings dynamically
-	localPort := 20199
-	if settings, err := store.GetSettings(); err == nil && settings.Port > 0 {
-		localPort = settings.Port
-	}
+	// Get actual server port from context (set by main.go)
+	localPort := GetServerPort(c)
 
 	// Start tunnel in background
 	go func() {

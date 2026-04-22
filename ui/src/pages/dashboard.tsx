@@ -87,7 +87,7 @@ export default function Dashboard() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  {c.hasToken && <span className="w-2 h-2 rounded-full bg-[var(--success)]" />}
+                  {c.accessToken && <span className="w-2 h-2 rounded-full bg-[var(--success)]" />}
                   <span className={`chip text-[10px] ${
                     isRL ? 'chip-warning' : c.isActive ? 'chip-success' : 'chip-muted'
                   }`}>

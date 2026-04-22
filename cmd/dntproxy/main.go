@@ -134,6 +134,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	router := httpAdapter.NewRouter(store, providers, tunnelService)
+	
+	// Set actual server port in router context
+	httpAdapter.SetServerPort(router, port)
 
 	// Auto-restart tunnel if it was enabled
 	if tunnelService != nil && cfg.Settings.TunnelEnabled {

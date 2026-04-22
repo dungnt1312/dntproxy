@@ -2,7 +2,6 @@ package backup
 
 import (
 	"fmt"
-	"strings"
 )
 
 // ValidateBackup checks backup data for correctness before import.
@@ -65,8 +64,8 @@ func ValidateBackup(b *BackupData) error {
 		if k.Name == "" {
 			return fmt.Errorf("apiKeys[%d]: missing name", i)
 		}
-		// Skip validation for masked keys (they end with "...")
-		if k.Key != "" && !strings.HasSuffix(k.Key, "...") {
+		// Check for duplicate key values
+		if k.Key != "" {
 			if prev, ok := seenKeyValues[k.Key]; ok {
 				return fmt.Errorf("apiKeys[%d]: duplicate key value (also at index %d)", i, prev)
 			}

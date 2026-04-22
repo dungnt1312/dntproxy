@@ -1,4 +1,4 @@
-import React, { useState, useSyncExternalStore } from "react";
+import React, { useState, useEffect, useCallback, useSyncExternalStore } from "react";
 import {
   Routes,
   Route,
@@ -45,6 +45,7 @@ import {
 import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/stores/app-store";
+import { getStoredApiKey, setStoredApiKey, onUnauthorized } from "@/lib/go-api";
 
 import DashboardScreen from "@/components/screens/dashboard-screen";
 import ConnectionsScreen from "@/components/screens/connections-screen";
@@ -57,6 +58,7 @@ import BackupScreen from "@/components/screens/backup-screen";
 import TunnelScreen from "@/components/screens/tunnel-screen";
 import ProfilesScreen from "@/components/screens/profiles-screen";
 import AddConnectionPage from "@/components/pages/add-connection-page";
+import LoginScreen from "@/components/screens/login-screen";
 
 interface NavItem {
   path: string;
@@ -116,6 +118,50 @@ export default function App() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
+
+  // Auth gate: check if requireApiKey is enabled
+  const [authRequired, setAuthRequired] = useState<boolean | null>(null);
+  const [authenticated, setAuthenticated] = useState(false);
+
+  const showLogin = useCallback(() => {
+    setAuthenticated(false);
+  }, []);
+
+  useEffect(() => {
+    onUnauthorized(showLogin);
+  }, [showLogin]);
+
+  useEffect(() => {
+    fetch((import.meta.env.VITE_GO_API_URL || "/api") + "/settings")
+      .then((r) => r.json())
+      .then((s) => {
+        const required = Boolean(s.requireApiKey);
+        setAuthRequired(required);
+        if (!required) {
+          setAuthenticated(true);
+        } else if (getStoredApiKey()) {
+          setAuthenticated(true);
+        }
+      })
+      .catch(() => {
+        setAuthRequired(false);
+        setAuthenticated(true);
+      });
+  }, []);
+
+  // Still loading settings
+  if (authRequired === null) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="animate-pulse text-muted-foreground text-sm">Loading...</div>
+      </div>
+    );
+  }
+
+  // Need login
+  if (authRequired && !authenticated) {
+    return <LoginScreen onSuccess={() => setAuthenticated(true)} />;
+  }
 
   const currentNavItem = navItems.find((item) =>
     item.path === "/"

@@ -2,14 +2,48 @@ const GO_API_BASE = import.meta.env.VITE_GO_API_URL || "/api";
 
 type AliasMap = Record<string, string>;
 
+const AUTH_KEY = "dntproxy_api_key";
+
+export function getStoredApiKey(): string {
+  return localStorage.getItem(AUTH_KEY) || "";
+}
+
+export function setStoredApiKey(key: string) {
+  if (key) {
+    localStorage.setItem(AUTH_KEY, key);
+  } else {
+    localStorage.removeItem(AUTH_KEY);
+  }
+}
+
+let on401Callback: (() => void) | null = null;
+
+export function onUnauthorized(cb: () => void) {
+  on401Callback = cb;
+}
+
 async function goRequest<T = unknown>(
   path: string,
   options?: RequestInit,
 ): Promise<T> {
+  const apiKey = getStoredApiKey();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(options?.headers as Record<string, string>),
+  };
+  if (apiKey) {
+    headers["Authorization"] = `Bearer ${apiKey}`;
+  }
+
   const res = await fetch(`${GO_API_BASE}${path}`, {
-    headers: { "Content-Type": "application/json" },
     ...options,
+    headers,
   });
+
+  if (res.status === 401) {
+    on401Callback?.();
+    throw new Error("Unauthorized");
+  }
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
@@ -392,4 +426,11 @@ export const goApi: any = {
   deactivateProfile: () =>
     goRequest("/profiles/deactivate", { method: "POST" }),
   getActiveProfile: () => goRequest("/profiles/active"),
+
+  // Auth
+  validateKey: (key: string) =>
+    goRequest<{ valid: boolean }>("/auth/validate-key", {
+      method: "POST",
+      body: JSON.stringify({ key }),
+    }),
 };

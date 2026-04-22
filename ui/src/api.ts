@@ -1,12 +1,32 @@
 import type { LogFilters } from './types/logs';
+import { getStoredApiKey, onUnauthorized } from './lib/go-api';
 
 const BASE = '/api';
 
+let on401Cb: (() => void) | null = null;
+
+export function onLegacyUnauthorized(cb: () => void) {
+  on401Cb = cb;
+}
+
 async function request(path: string, options?: RequestInit) {
+  const apiKey = getStoredApiKey();
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(options?.headers as Record<string, string>),
+  };
+  if (apiKey) {
+    headers['Authorization'] = `Bearer ${apiKey}`;
+  }
+
   const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
     ...options,
+    headers,
   });
+  if (res.status === 401) {
+    on401Cb?.();
+    throw new Error('Unauthorized');
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error(err.error || err.message || res.statusText);
@@ -104,19 +124,46 @@ export const api = {
   getModels: () => request('/models'),
 
   // Logs
-  getLogs: (filters?: Partial<LogFilters>) => fetch(`/api/logs${logQuery(filters)}`).then(r => r.json()),
-  getLogSummary: (filters?: Partial<LogFilters>) => fetch(`/api/logs/summary${logQuery(filters)}`).then(r => r.json()),
-  getLogConnections: (filters?: Partial<LogFilters>) => fetch(`/api/logs/connections${logQuery(filters)}`).then(r => r.json()),
-  getLogPrices: () => fetch('/api/logs/prices').then(r => r.json()),
-  clearLogs: () => fetch('/api/logs/clear', { method: 'POST' }),
+  getLogs: (filters?: Partial<LogFilters>) => {
+    const apiKey = getStoredApiKey();
+    const headers: Record<string, string> = {};
+    if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+    return fetch(`/api/logs${logQuery(filters)}`, { headers }).then(r => r.json());
+  },
+  getLogSummary: (filters?: Partial<LogFilters>) => {
+    const apiKey = getStoredApiKey();
+    const headers: Record<string, string> = {};
+    if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+    return fetch(`/api/logs/summary${logQuery(filters)}`, { headers }).then(r => r.json());
+  },
+  getLogConnections: (filters?: Partial<LogFilters>) => {
+    const apiKey = getStoredApiKey();
+    const headers: Record<string, string> = {};
+    if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+    return fetch(`/api/logs/connections${logQuery(filters)}`, { headers }).then(r => r.json());
+  },
+  getLogPrices: () => {
+    const apiKey = getStoredApiKey();
+    const headers: Record<string, string> = {};
+    if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+    return fetch('/api/logs/prices', { headers }).then(r => r.json());
+  },
+  clearLogs: () => {
+    const apiKey = getStoredApiKey();
+    const headers: Record<string, string> = {};
+    if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+    return fetch('/api/logs/clear', { method: 'POST', headers });
+  },
 
   // Backup
-  exportBackup: (mask?: boolean) => {
-    const url = mask ? '/api/backup/export?mask=true' : '/api/backup/export'
-    return fetch(url).then(async r => {
-      if (!r.ok) throw new Error('Export failed')
-      return r.json()
-    })
+  exportBackup: () => {
+    const apiKey = getStoredApiKey();
+    const headers: Record<string, string> = {};
+    if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+    return fetch('/api/backup/export', { headers }).then(async r => {
+      if (!r.ok) throw new Error('Export failed');
+      return r.json();
+    });
   },
   importBackup: (data: unknown, mode: string, sections?: string[]) =>
     request('/backup/import', { method: 'POST', body: JSON.stringify({ ...data as object, mode, sections: sections || [] }) }),

@@ -24,11 +24,13 @@ func buildKeyCmd() *cobra.Command {
 		RunE:  runKeyGenerate,
 	})
 
-	keyCmd.AddCommand(&cobra.Command{
+	listCmd := &cobra.Command{
 		Use:   "list",
 		Short: "List API keys",
 		RunE:  runKeyList,
-	})
+	}
+	listCmd.Flags().Bool("show-keys", false, "Show full API keys (default: masked)")
+	keyCmd.AddCommand(listCmd)
 
 	keyCmd.AddCommand(&cobra.Command{
 		Use:   "remove [id]",
@@ -96,14 +98,28 @@ func runKeyList(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	fmt.Printf("%-36s  %-20s  %-20s  %-8s\n", "ID", "NAME", "KEY (masked)", "ACTIVE")
-	for _, k := range cfg.APIKeys {
-		masked := k.Key[:10] + "..." + k.Key[len(k.Key)-4:]
-		active := "yes"
-		if !k.IsActive {
-			active = "no"
+	showKeys, _ := cmd.Flags().GetBool("show-keys")
+
+	if showKeys {
+		fmt.Printf("%-36s  %-20s  %-60s  %-8s\n", "ID", "NAME", "KEY", "ACTIVE")
+		for _, k := range cfg.APIKeys {
+			active := "yes"
+			if !k.IsActive {
+				active = "no"
+			}
+			fmt.Printf("%-36s  %-20s  %-60s  %-8s\n", k.ID, k.Name, k.Key, active)
 		}
-		fmt.Printf("%-36s  %-20s  %-20s  %-8s\n", k.ID, k.Name, masked, active)
+	} else {
+		fmt.Printf("%-36s  %-20s  %-20s  %-8s\n", "ID", "NAME", "KEY (masked)", "ACTIVE")
+		for _, k := range cfg.APIKeys {
+			masked := k.Key[:10] + "..." + k.Key[len(k.Key)-4:]
+			active := "yes"
+			if !k.IsActive {
+				active = "no"
+			}
+			fmt.Printf("%-36s  %-20s  %-20s  %-8s\n", k.ID, k.Name, masked, active)
+		}
+		fmt.Println("\nTip: Use --show-keys to display full API keys")
 	}
 	return nil
 }

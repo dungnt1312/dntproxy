@@ -115,7 +115,7 @@ export function ProviderLogo({ provider, size = 24, className = '' }: ProviderLo
 
   return (
     <img
-      src={`/providers/${logoFile}`}
+      src={`/dashboard/providers/${logoFile}`}
       alt={provider}
       width={size}
       height={size}

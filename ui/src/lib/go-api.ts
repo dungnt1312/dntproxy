@@ -158,6 +158,16 @@ function mapSettings(go: any) {
 }
 
 export const goApi: any = {
+  // Auth helpers
+  getAuthHeaders: () => {
+    const apiKey = getStoredApiKey();
+    const headers: Record<string, string> = {};
+    if (apiKey) {
+      headers['Authorization'] = `Bearer ${apiKey}`;
+    }
+    return headers;
+  },
+
   // Connections
   getConnections: () =>
     goRequest<any[]>("/connections").then((conns) =>

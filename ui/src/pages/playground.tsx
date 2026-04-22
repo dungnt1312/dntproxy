@@ -3,6 +3,7 @@ import { api } from '../api';
 import { Send, Bot, User, Loader2, Trash2, ChevronDown } from 'lucide-react';
 import { getModelName, PROVIDER_CONFIGS, getProviderFromModelId } from '../models-config';
 import { ProviderLogoIcon } from '../components/connections/helpers';
+import { getStoredApiKey } from '../lib/go-api';
 
 function ModelIcon({ provider }: { provider: string }) {
     const cfg = PROVIDER_CONFIGS[provider];
@@ -67,9 +68,17 @@ export default function Playground() {
         setMessages((prev) => [...prev, { role: 'assistant', content: '', streaming: true }]);
 
         try {
+            const apiKey = getStoredApiKey();
+            const headers: Record<string, string> = {
+                'Content-Type': 'application/json',
+            };
+            if (apiKey) {
+                headers['Authorization'] = `Bearer ${apiKey}`;
+            }
+
             const response = await fetch('/v1/chat/completions', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers,
                 body: JSON.stringify({
                     model: selectedModel,
                     messages: messages

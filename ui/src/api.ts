@@ -124,47 +124,14 @@ export const api = {
   getModels: () => request('/models'),
 
   // Logs
-  getLogs: (filters?: Partial<LogFilters>) => {
-    const apiKey = getStoredApiKey();
-    const headers: Record<string, string> = {};
-    if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
-    return fetch(`/api/logs${logQuery(filters)}`, { headers }).then(r => r.json());
-  },
-  getLogSummary: (filters?: Partial<LogFilters>) => {
-    const apiKey = getStoredApiKey();
-    const headers: Record<string, string> = {};
-    if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
-    return fetch(`/api/logs/summary${logQuery(filters)}`, { headers }).then(r => r.json());
-  },
-  getLogConnections: (filters?: Partial<LogFilters>) => {
-    const apiKey = getStoredApiKey();
-    const headers: Record<string, string> = {};
-    if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
-    return fetch(`/api/logs/connections${logQuery(filters)}`, { headers }).then(r => r.json());
-  },
-  getLogPrices: () => {
-    const apiKey = getStoredApiKey();
-    const headers: Record<string, string> = {};
-    if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
-    return fetch('/api/logs/prices', { headers }).then(r => r.json());
-  },
-  clearLogs: () => {
-    const apiKey = getStoredApiKey();
-    const headers: Record<string, string> = {};
-    if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
-    return fetch('/api/logs/clear', { method: 'POST', headers });
-  },
+  getLogs: (filters?: Partial<LogFilters>) => request(`/logs${logQuery(filters)}`),
+  getLogSummary: (filters?: Partial<LogFilters>) => request(`/logs/summary${logQuery(filters)}`),
+  getLogConnections: (filters?: Partial<LogFilters>) => request(`/logs/connections${logQuery(filters)}`),
+  getLogPrices: () => request('/logs/prices'),
+  clearLogs: () => request('/logs/clear', { method: 'POST' }),
 
   // Backup
-  exportBackup: () => {
-    const apiKey = getStoredApiKey();
-    const headers: Record<string, string> = {};
-    if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
-    return fetch('/api/backup/export', { headers }).then(async r => {
-      if (!r.ok) throw new Error('Export failed');
-      return r.json();
-    });
-  },
+  exportBackup: () => request('/backup/export'),
   importBackup: (data: unknown, mode: string, sections?: string[]) =>
     request('/backup/import', { method: 'POST', body: JSON.stringify({ ...data as object, mode, sections: sections || [] }) }),
 

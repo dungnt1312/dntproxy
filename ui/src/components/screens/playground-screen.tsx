@@ -379,7 +379,10 @@ export default function PlaygroundScreen() {
     try {
       const response = await fetch(`${GO_API_BASE}/v1/chat/completions`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...goApi.getAuthHeaders(),
+        },
         body: JSON.stringify(requestBody),
         signal: controller.signal,
       });

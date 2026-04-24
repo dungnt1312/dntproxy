@@ -27,12 +27,12 @@
 
 **Linux/macOS:**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/dungnt1312/dntproxy/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/dungnt1312/dntproxy/master/install.sh | bash
 ```
 
 **Windows (PowerShell):**
 ```powershell
-irm https://raw.githubusercontent.com/dungnt1312/dntproxy/main/install.ps1 -OutFile "$env:TEMP\install.ps1"; & "$env:TEMP\install.ps1"
+irm https://raw.githubusercontent.com/dungnt1312/dntproxy/master/install.ps1 -OutFile "$env:TEMP\install.ps1"; & "$env:TEMP\install.ps1"
 ```
 
 Or download binaries directly from [Releases](https://github.com/dungnt1312/dntproxy/releases).

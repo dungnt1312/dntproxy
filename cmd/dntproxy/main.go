@@ -19,10 +19,9 @@ import (
 	"github.com/dungnt/dntproxy/internal/adapter/storage"
 	"github.com/dungnt/dntproxy/internal/logger"
 	"github.com/dungnt/dntproxy/internal/service"
+	appversion "github.com/dungnt/dntproxy/internal/version"
 	"github.com/spf13/cobra"
 )
-
-var version = "0.1.0"
 
 var dbFlag string
 
@@ -51,7 +50,7 @@ func main() {
 		Use:   "version",
 		Short: "Print version",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Printf("dntproxy %s\n", version)
+			fmt.Printf("dntproxy %s\n", appversion.Version)
 		},
 	})
 
@@ -75,6 +74,9 @@ func main() {
 
 	// Profile commands
 	rootCmd.AddCommand(buildProfileCmd())
+
+	// Update command
+	rootCmd.AddCommand(buildUpdateCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
@@ -151,7 +153,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	addr := fmt.Sprintf(":%d", port)
-	log.Printf("[dntproxy] v%s starting on http://localhost%s", version, addr)
+	log.Printf("[dntproxy] v%s starting on http://localhost%s", appversion.Version, addr)
 	log.Printf("[dntproxy] OpenAI-compatible API: http://localhost%s/v1/chat/completions", addr)
 	log.Printf("[dntproxy] Anthropic Messages API: http://localhost%s/v1/messages", addr)
 

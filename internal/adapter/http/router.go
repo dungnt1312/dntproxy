@@ -10,6 +10,7 @@ import (
 
 	"github.com/dungnt/dntproxy/internal/port"
 	"github.com/dungnt/dntproxy/internal/service"
+	"github.com/dungnt/dntproxy/internal/version"
 	"github.com/dungnt/dntproxy/ui"
 	"github.com/gin-gonic/gin"
 )
@@ -49,7 +50,7 @@ func NewRouter(store port.CredentialStore, providers port.ProviderRegistry, tunn
 
 	// Health check
 	r.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+		c.JSON(http.StatusOK, gin.H{"status": "ok", "version": version.Version})
 	})
 
 	// Serve static UI files (production: ui/dist/)
@@ -157,7 +158,7 @@ func serveStaticUI(r *gin.Engine) {
 		if path == "/" {
 			c.JSON(http.StatusOK, gin.H{
 				"name":      "dntproxy",
-				"version":   "0.1.0",
+				"version":   version.Version,
 				"status":    "running",
 				"dashboard": "/dashboard",
 			})
@@ -172,7 +173,7 @@ func serveNoUI(r *gin.Engine) {
 	r.GET("/", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"name":    "dntproxy",
-			"version": "0.1.0",
+			"version": version.Version,
 			"status":  "running",
 			"ui":      "not available",
 		})

@@ -1,4 +1,5 @@
 import { Outlet, NavLink } from 'react-router-dom'
+import { useState, useEffect } from 'react'
 import {
   LayoutDashboard, Link2, Layers, Box, KeyRound,
   Settings, Terminal, Database, Play, Zap
@@ -17,6 +18,12 @@ const nav = [
 ]
 
 export default function Layout() {
+  const [ver, setVer] = useState('')
+
+  useEffect(() => {
+    fetch('/health').then(r => r.json()).then(d => setVer(d.version || '')).catch(() => {})
+  }, [])
+
   return (
     <div className="flex min-h-dvh flex-col md:flex-row relative">
       {/* Animated background mesh */}
@@ -67,7 +74,7 @@ export default function Layout() {
 
         {/* Version */}
         <div className="hidden md:flex items-center px-5 py-3 border-t border-[var(--border)]">
-          <span className="chip chip-muted text-[10px]">v0.1.0</span>
+          <span className="chip chip-muted text-[10px]">{ver ? `v${ver}` : '...'}</span>
         </div>
       </aside>
 

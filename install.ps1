@@ -11,11 +11,24 @@ function Write-Ok($Message) { Write-Host "[OK] $Message" -ForegroundColor Green 
 function Write-Err($Message) { Write-Host "[ERR] $Message" -ForegroundColor Red }
 
 function Get-TargetArch {
-    $arch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
-    switch ($arch) {
-        "X64" { return "amd64" }
-        "Arm64" { return "arm64" }
-        default { throw "Unsupported architecture: $arch (supported: X64, Arm64)" }
+    # Try RuntimeInformation first
+    try {
+        $arch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
+        if ($arch) {
+            switch ($arch) {
+                "X64" { return "amd64" }
+                "Arm64" { return "arm64" }
+            }
+        }
+    } catch {}
+    
+    # Fallback to environment variable
+    $procArch = $env:PROCESSOR_ARCHITECTURE
+    switch ($procArch) {
+        "AMD64" { return "amd64" }
+        "ARM64" { return "arm64" }
+        "x86" { throw "32-bit Windows is not supported" }
+        default { throw "Unsupported architecture: $procArch (supported: AMD64, ARM64)" }
     }
 }
 

@@ -24,6 +24,7 @@ import {
   Menu,
   Globe,
   UserCircle,
+  Wrench,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 
@@ -57,6 +58,7 @@ import ApiKeysScreen from "@/components/screens/api-keys-screen";
 import BackupScreen from "@/components/screens/backup-screen";
 import TunnelScreen from "@/components/screens/tunnel-screen";
 import ProfilesScreen from "@/components/screens/profiles-screen";
+import CliToolsScreen from "@/components/screens/cli-tools-screen";
 import AddConnectionPage from "@/components/pages/add-connection-page";
 import LoginScreen from "@/components/screens/login-screen";
 
@@ -89,6 +91,7 @@ const navItems: NavItem[] = [
   },
   { path: "/profiles", label: "Profiles", icon: UserCircle, group: "Management" },
   { path: "/api-keys", label: "API Keys", icon: Key, group: "Security" },
+  { path: "/cli-tools", label: "CLI Tools", icon: Wrench, group: "Security" },
   { path: "/tunnel", label: "Tunnel", icon: Globe, group: "Network" },
   { path: "/logs", label: "Logs", icon: ScrollText, group: "Monitoring" },
   { path: "/settings", label: "Settings", icon: SettingsIcon, group: "System" },
@@ -399,6 +402,7 @@ export default function App() {
             <Route path="/logs" element={<LogsScreen />} />
             <Route path="/settings" element={<SettingsScreen />} />
             <Route path="/api-keys" element={<ApiKeysScreen />} />
+            <Route path="/cli-tools" element={<CliToolsScreen />} />
             <Route path="/tunnel" element={<TunnelScreen />} />
             <Route path="/backup" element={<BackupScreen />} />
             <Route path="*" element={<Navigate to="/" replace />} />

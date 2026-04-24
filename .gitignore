@@ -29,3 +29,12 @@ temp
 .worktrees/
 logs/
 rewrite
+
+# AI Agent configs
+.claude/
+.agents/
+.cursor/
+.continue/
+.aider/
+.codeium/
+.qwen

@@ -19,10 +19,13 @@ import (
 //   - model-api-handler.go   — model list + registry CRUD
 //   - quota-handler.go       — quota check + Codex probing
 //   - backup-handler.go      — backup export/import
-func RegisterAPIRoutes(r *gin.Engine, store port.CredentialStore, providers port.ProviderRegistry, onComboDelete func(string)) {
+func RegisterAPIRoutes(r *gin.Engine, store port.CredentialStore, providers port.ProviderRegistry, onComboDelete func(string), tunnelMgr port.TunnelManager) {
 	api := r.Group("/api")
 	api.Use(apiKeyMiddleware(store))
 	{
+		// Server info (resolved URLs, version, port)
+		RegisterInfoRoute(api, store, tunnelMgr)
+
 		// Debug endpoint
 		api.GET("/debug/providers", apiDebugProviders(store))
 		api.GET("/debug/accounts/:provider", apiDebugAccounts(store))
@@ -91,6 +94,9 @@ func RegisterAPIRoutes(r *gin.Engine, store port.CredentialStore, providers port
 		// Backup
 		api.GET("/backup/export", apiExportBackup(store))
 		api.POST("/backup/import", apiImportBackup(store))
+
+		// CLI tool config sync
+		RegisterCLIToolRoutes(api, store)
 
 		// Profiles
 		RegisterProfileRoutes(api, store)

@@ -465,10 +465,49 @@ export const goApi: any = {
   // Usage
   getUsage: (connectionId: string) => goRequest(`/usage/${connectionId}`),
 
+  // Server info (resolved URLs, version, port)
+  getInfo: () =>
+    goRequest<{
+      version: string;
+      port: number;
+      localUrl: string;
+      tunnelUrl: string;
+      tunnelRunning: boolean;
+      baseUrl: string;
+    }>("/info"),
+
   // Tunnel
   enableTunnel: () => goRequest("/tunnel/enable", { method: "POST" }),
   disableTunnel: () => goRequest("/tunnel/disable", { method: "POST" }),
   getTunnelStatus: () => goRequest("/tunnel/status"),
+
+  // CLI tool config sync
+  getCliToolConfigs: () => goRequest("/cli-tools/configs"),
+  previewCliToolConfigs: (data: {
+    endpoint: string;
+    apiKey: string;
+    models: Record<string, string>;
+    tools: string[];
+  }) =>
+    goRequest("/cli-tools/configs/preview", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  applyCliToolConfigs: (data: {
+    endpoint: string;
+    apiKey: string;
+    models: Record<string, string>;
+    tools: string[];
+  }) =>
+    goRequest("/cli-tools/configs/apply", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  restoreCliToolConfigs: (tools: string[]) =>
+    goRequest("/cli-tools/configs/restore", {
+      method: "POST",
+      body: JSON.stringify({ tools }),
+    }),
 
   // Profiles
   getProfiles: () => goRequest<any>("/profiles"),

@@ -136,7 +136,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	router := httpAdapter.NewRouter(store, providers, tunnelService)
-	
+
 	// Set actual server port in router context
 	httpAdapter.SetServerPort(router, port)
 
@@ -154,6 +154,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	addr := fmt.Sprintf(":%d", port)
 	log.Printf("[dntproxy] v%s starting on http://localhost%s", appversion.Version, addr)
+	log.Printf("[dntproxy] Dashboard: http://localhost%s/dashboard", addr)
 	log.Printf("[dntproxy] OpenAI-compatible API: http://localhost%s/v1/chat/completions", addr)
 	log.Printf("[dntproxy] Anthropic Messages API: http://localhost%s/v1/messages", addr)
 

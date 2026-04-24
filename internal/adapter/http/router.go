@@ -38,7 +38,7 @@ func NewRouter(store port.CredentialStore, providers port.ProviderRegistry, tunn
 	}
 
 	// Dashboard API endpoints
-	RegisterAPIRoutes(r, store, providers, chatService.ClearComboRotation)
+	RegisterAPIRoutes(r, store, providers, chatService.ClearComboRotation, tunnelMgr)
 
 	// Auth flow endpoints (Builder ID, IDC, Social Login, Fetch Models)
 	RegisterAuthRoutes(r, store)

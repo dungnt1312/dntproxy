@@ -50,6 +50,7 @@ This roadmap captures the progress and next milestones for `dntproxy`.
 - [x] **Enhanced Connections UI**: Collapsible provider groups, inline editing, quota panel, logs viewer, provider logos.
 
 ## Phase 8: Polish & Production (🚧 In Progress)
+- [x] **CLI Tool Config Sync**: Dashboard flow to preview, backup, apply, and restore Claude Code, OpenCode, and Codex CLI configs for dntproxy routing.
 - [ ] **Graceful Shutdown**: Listen for SIGTERM / SIGINT and handle open persistent SSE connections gracefully.
 - [ ] **Cross-Platform Delivery**: Enhance build configuration (Makefiles, CI, Goreleaser).
 - [ ] **Dockerization**: Provide an official `Dockerfile` and `docker-compose.yml` pattern.

@@ -1,6 +1,7 @@
 package http
 
 import (
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/dungnt/dntproxy/internal/port"
 	"github.com/dungnt/dntproxy/internal/service"
+	"github.com/dungnt/dntproxy/ui"
 	"github.com/gin-gonic/gin"
 )
 
@@ -76,76 +78,82 @@ func GetServerPort(c *gin.Context) int {
 	return 20199 // fallback
 }
 
-// serveStaticUI serves the built frontend from ui/dist/ if it exists.
+// serveStaticUI serves the built frontend. Priority: filesystem > embedded.
 func serveStaticUI(r *gin.Engine) {
-	// Try to find ui/dist relative to executable or cwd
-	candidates := []string{"ui/dist", "../ui/dist"}
+	var uiFS http.FileSystem
 
-	// Also check relative to executable path
+	// 1. Try filesystem (for development)
+	candidates := []string{"ui/dist", "../ui/dist"}
 	if exe, err := os.Executable(); err == nil {
 		candidates = append(candidates, filepath.Join(filepath.Dir(exe), "ui", "dist"))
 	}
-
-	var distDir string
 	for _, dir := range candidates {
 		if info, err := os.Stat(dir); err == nil && info.IsDir() {
-			distDir = dir
+			log.Printf("[dntproxy] Serving UI from filesystem: %s", dir)
+			uiFS = http.Dir(dir)
 			break
 		}
 	}
 
-	if distDir == "" {
-		// No built UI — serve a simple JSON at root
-		r.GET("/", func(c *gin.Context) {
-			c.JSON(http.StatusOK, gin.H{
-				"name":    "dntproxy",
-				"version": "0.1.0",
-				"status":  "running",
-				"ui":      "not built — run 'cd ui && bun run build'",
-			})
-		})
-		return
+	// 2. Fallback to embedded FS
+	if uiFS == nil {
+		sub, err := fs.Sub(ui.DistFS, "dist")
+		if err != nil {
+			log.Printf("[dntproxy] No embedded UI available: %v", err)
+			serveNoUI(r)
+			return
+		}
+		// Check if embedded FS has content
+		if entries, err := fs.ReadDir(sub.(fs.ReadDirFS), "."); err != nil || len(entries) == 0 {
+			log.Printf("[dntproxy] Embedded UI is empty")
+			serveNoUI(r)
+			return
+		}
+		log.Printf("[dntproxy] Serving UI from embedded binary")
+		uiFS = http.FS(sub)
 	}
 
-	log.Printf("[dntproxy] Serving UI from %s", distDir)
-
 	// Serve static assets under /dashboard
-	r.Static("/dashboard/assets", filepath.Join(distDir, "assets"))
+	r.StaticFS("/dashboard/assets", newPrefixFS(uiFS, "assets"))
 
 	// Serve index.html at /dashboard root
-	r.GET("/dashboard", func(c *gin.Context) {
-		c.File(filepath.Join(distDir, "index.html"))
-	})
-	r.GET("/dashboard/", func(c *gin.Context) {
-		c.File(filepath.Join(distDir, "index.html"))
-	})
+	serveIndex := func(c *gin.Context) {
+		f, err := uiFS.Open("index.html")
+		if err != nil {
+			c.JSON(500, gin.H{"error": "UI index.html not found"})
+			return
+		}
+		defer f.Close()
+		stat, _ := f.Stat()
+		http.ServeContent(c.Writer, c.Request, "index.html", stat.ModTime(), f.(readSeeker))
+	}
+	r.GET("/dashboard", serveIndex)
+	r.GET("/dashboard/", serveIndex)
 
-	// SPA fallback: serve index.html for all /dashboard/* routes
+	// SPA fallback
 	r.NoRoute(func(c *gin.Context) {
 		path := c.Request.URL.Path
 
-		// Don't serve UI for API/v1 routes
 		if strings.HasPrefix(path, "/api/") || strings.HasPrefix(path, "/v1/") || path == "/health" {
 			c.JSON(404, gin.H{"error": "Not found"})
 			return
 		}
 
-		// Serve UI for /dashboard/* routes
 		if strings.HasPrefix(path, "/dashboard/") {
-			// Try to serve the exact file first (remove /dashboard prefix)
-			relativePath := strings.TrimPrefix(path, "/dashboard")
-			filePath := filepath.Join(distDir, relativePath)
-			if info, err := os.Stat(filePath); err == nil && !info.IsDir() {
-				c.File(filePath)
-				return
+			relativePath := strings.TrimPrefix(path, "/dashboard/")
+			if f, err := uiFS.Open(relativePath); err == nil {
+				stat, _ := f.Stat()
+				if !stat.IsDir() {
+					http.ServeContent(c.Writer, c.Request, relativePath, stat.ModTime(), f.(readSeeker))
+					f.Close()
+					return
+				}
+				f.Close()
 			}
-
-			// SPA fallback — serve index.html
-			c.File(filepath.Join(distDir, "index.html"))
+			serveIndex(c)
 			return
 		}
 
-		// Root path - show API info
 		if path == "/" {
 			c.JSON(http.StatusOK, gin.H{
 				"name":      "dntproxy",
@@ -156,9 +164,39 @@ func serveStaticUI(r *gin.Engine) {
 			return
 		}
 
-		// Other routes - 404
 		c.JSON(404, gin.H{"error": "Not found"})
 	})
+}
+
+func serveNoUI(r *gin.Engine) {
+	r.GET("/", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"name":    "dntproxy",
+			"version": "0.1.0",
+			"status":  "running",
+			"ui":      "not available",
+		})
+	})
+}
+
+// readSeeker combines io.ReadSeeker for http.ServeContent
+type readSeeker interface {
+	Read(p []byte) (n int, err error)
+	Seek(offset int64, whence int) (int64, error)
+}
+
+// prefixFS wraps http.FileSystem to serve from a subdirectory
+type prefixFS struct {
+	fs     http.FileSystem
+	prefix string
+}
+
+func newPrefixFS(fsys http.FileSystem, prefix string) http.FileSystem {
+	return &prefixFS{fs: fsys, prefix: prefix}
+}
+
+func (p *prefixFS) Open(name string) (http.File, error) {
+	return p.fs.Open(p.prefix + "/" + strings.TrimPrefix(name, "/"))
 }
 
 func corsMiddleware() gin.HandlerFunc {

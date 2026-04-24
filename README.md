@@ -21,70 +21,90 @@
 | **Qwen** (Alibaba) | API Key, OAuth | Qwen Coder, Coder-Plus, Plus, Turbo |
 | **Anthropic** | API Key | Claude models (adapter TODO) |
 
-## Installation (Release Binaries)
-
-### Linux/macOS
-Install latest release:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/dungnt/dntproxy/main/install.sh | bash
-```
-
-Install a specific version:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/dungnt/dntproxy/main/install.sh | bash -s -- --version v0.1.0
-```
-
-### Windows (PowerShell)
-Install latest release:
-
-```powershell
-$script = Join-Path $env:TEMP "dntproxy-install.ps1"
-Invoke-WebRequest https://raw.githubusercontent.com/dungnt/dntproxy/main/install.ps1 -OutFile $script
-& $script
-```
-
-Install a specific version:
-
-```powershell
-$script = Join-Path $env:TEMP "dntproxy-install.ps1"
-Invoke-WebRequest https://raw.githubusercontent.com/dungnt/dntproxy/main/install.ps1 -OutFile $script
-& $script -Version v0.1.0
-```
-
-### Expected release asset names
-- `dntproxy-linux-amd64.tar.gz`
-- `dntproxy-linux-arm64.tar.gz`
-- `dntproxy-darwin-amd64.tar.gz`
-- `dntproxy-darwin-arm64.tar.gz`
-- `dntproxy-windows-amd64.zip`
-- `dntproxy-windows-arm64.zip`
-
 ## Quick Start
-After install:
 
+### 1. Download Binary
+Download the latest release from [Releases](https://github.com/dungnt1312/dntproxy/releases):
+- **Windows**: `dntproxy.exe`
+- **Linux/macOS**: Build from source (see Development section)
+
+The binary includes the web UI — no extra files needed. Just download and run.
+
+### 2. Run the Server
 ```bash
-dntproxy auth add
-dntproxy serve
+# Windows
+dntproxy.exe
+
+# Linux/macOS
+./dntproxy
 ```
 
-Health check:
+The server starts on `http://127.0.0.1:20199` by default.
 
+### 3. Configure Providers
+Open the web UI at `http://127.0.0.1:20199/dashboard` to manage connections, combos, aliases, and settings.
+
+### 4. Make Requests
+Use the OpenAI-compatible endpoint:
+
+```bash
+curl http://127.0.0.1:20199/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "oai/gpt-4o",
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'
+```
+
+### 5. Health Check
 ```bash
 curl http://127.0.0.1:20199/health
 ```
 
-## Local Development
-Prerequisites:
-- Go 1.25+
-- Bun (for UI)
-
-Run locally:
+## CLI Helper Commands
+The CLI provides optional helper commands for configuration:
 
 ```bash
+# Add authentication (interactive)
+dntproxy auth add
+
+# List connections
+dntproxy auth list
+
+# Create model combo
+dntproxy combo add my-combo kr/claude-sonnet-4.5 oai/gpt-4o
+
+# Set model alias
+dntproxy alias set sonnet kr/claude-sonnet-4.5
+
+# Start server with custom port
+dntproxy serve --port 8080
+```
+
+## Development
+
+### Prerequisites
+- Go 1.25+
+- Bun (for UI development)
+
+### Build from Source (with embedded UI)
+```bash
+git clone https://github.com/dungnt1312/dntproxy.git
+cd dntproxy
+
+# Build UI first
+cd ui && bun install && bun run build && cd ..
+
+# Build binary (UI is embedded automatically)
 go build -o dntproxy ./cmd/dntproxy/
-./dntproxy serve
+./dntproxy
+```
+
+### Run UI Development Server
+```bash
+cd ui
+bun install
+bun run dev
 ```
 
 ## Features

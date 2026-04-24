@@ -23,20 +23,25 @@
 
 ## Quick Start
 
-### 1. Download Binary
-Download the latest release from [Releases](https://github.com/dungnt1312/dntproxy/releases):
-- **Windows**: `dntproxy.exe`
-- **Linux/macOS**: Build from source (see Development section)
+### 1. Install
+
+**Linux/macOS:**
+```bash
+curl -fsSL https://raw.githubusercontent.com/dungnt1312/dntproxy/main/install.sh | bash
+```
+
+**Windows (PowerShell):**
+```powershell
+irm https://raw.githubusercontent.com/dungnt1312/dntproxy/main/install.ps1 -OutFile "$env:TEMP\install.ps1"; & "$env:TEMP\install.ps1"
+```
+
+Or download binaries directly from [Releases](https://github.com/dungnt1312/dntproxy/releases).
 
 The binary includes the web UI — no extra files needed. Just download and run.
 
 ### 2. Run the Server
 ```bash
-# Windows
-dntproxy.exe
-
-# Linux/macOS
-./dntproxy
+dntproxy
 ```
 
 The server starts on `http://127.0.0.1:20199` by default.

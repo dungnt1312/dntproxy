@@ -2,7 +2,7 @@
 set -euo pipefail
 
 APP_NAME="dntproxy"
-REPO="${DNTPROXY_REPO:-dungnt/dntproxy}"
+REPO="${DNTPROXY_REPO:-dungnt1312/dntproxy}"
 VERSION="${DNTPROXY_VERSION:-latest}"
 INSTALL_DIR="${DNTPROXY_INSTALL_DIR:-$HOME/.local/bin}"
 CONFIG_DIR="${DNTPROXY_CONFIG_DIR:-$HOME/.dntproxy}"

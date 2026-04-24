@@ -1,7 +1,7 @@
 param(
     [string]$Version = "latest",
     [string]$InstallDir = "$env:LOCALAPPDATA\dntproxy\bin",
-    [string]$Repo = "dungnt/dntproxy"
+    [string]$Repo = "dungnt1312/dntproxy"
 )
 
 $ErrorActionPreference = "Stop"

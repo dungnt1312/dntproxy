@@ -35,6 +35,11 @@ curl -fsSL https://raw.githubusercontent.com/dungnt1312/dntproxy/master/install.
 irm https://raw.githubusercontent.com/dungnt1312/dntproxy/master/install.ps1 -OutFile "$env:TEMP\install.ps1"; & "$env:TEMP\install.ps1"
 ```
 
+**Windows (Bash/Git Bash):**
+```bash
+curl -fsSL https://raw.githubusercontent.com/dungnt1312/dntproxy/master/install.sh | bash
+```
+
 Or download binaries directly from [Releases](https://github.com/dungnt1312/dntproxy/releases).
 
 The binary includes the web UI — no extra files needed. Just download and run.

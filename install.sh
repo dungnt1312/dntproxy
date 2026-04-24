@@ -53,8 +53,9 @@ detect_target() {
     case "$os" in
         Linux) os="linux" ;;
         Darwin) os="darwin" ;;
+        MINGW*|MSYS*|CYGWIN*) os="windows" ;;
         *)
-            log_err "Unsupported OS: $os (supported: Linux, Darwin)"
+            log_err "Unsupported OS: $os (supported: Linux, Darwin, Windows/MINGW/MSYS)"
             exit 1
             ;;
     esac
@@ -73,7 +74,11 @@ detect_target() {
 
 asset_url() {
     local target="$1"
-    local file="${APP_NAME}-${target}.tar.gz"
+    local ext="tar.gz"
+    case "$target" in
+        windows-*) ext="zip" ;;
+    esac
+    local file="${APP_NAME}-${target}.${ext}"
     if [ "$VERSION" = "latest" ]; then
         printf 'https://github.com/%s/releases/latest/download/%s' "$REPO" "$file"
         return
@@ -136,24 +141,45 @@ main() {
 
     TMP_DIR="$(mktemp -d)"
     trap cleanup EXIT
-    archive="${TMP_DIR}/${APP_NAME}.tar.gz"
+
+    local is_windows=false
+    case "$target" in
+        windows-*) is_windows=true ;;
+    esac
 
     log_info "Downloading ${APP_NAME} (${target}) from ${url}"
-    if ! download_file "$downloader" "$url" "$archive"; then
-        log_err "Download failed. Ensure release asset exists for target ${target}."
-        exit 1
+
+    if [ "$is_windows" = true ]; then
+        archive="${TMP_DIR}/${APP_NAME}.zip"
+        if ! download_file "$downloader" "$url" "$archive"; then
+            log_err "Download failed. Ensure release asset exists for target ${target}."
+            exit 1
+        fi
+        unzip -q "$archive" -d "$TMP_DIR"
+        extracted_bin="$(find "$TMP_DIR" -type f -name "${APP_NAME}.exe" | head -n 1)"
+    else
+        archive="${TMP_DIR}/${APP_NAME}.tar.gz"
+        if ! download_file "$downloader" "$url" "$archive"; then
+            log_err "Download failed. Ensure release asset exists for target ${target}."
+            exit 1
+        fi
+        tar -xzf "$archive" -C "$TMP_DIR"
+        extracted_bin="$(find "$TMP_DIR" -type f -name "$APP_NAME" | head -n 1)"
     fi
 
-    tar -xzf "$archive" -C "$TMP_DIR"
-    extracted_bin="$(find "$TMP_DIR" -type f -name "$APP_NAME" | head -n 1)"
     if [ -z "$extracted_bin" ]; then
         log_err "Binary not found in release archive."
         exit 1
     fi
 
     mkdir -p "$INSTALL_DIR"
-    bin_path="${INSTALL_DIR}/${APP_NAME}"
-    install -m 0755 "$extracted_bin" "$bin_path"
+    if [ "$is_windows" = true ]; then
+        bin_path="${INSTALL_DIR}/${APP_NAME}.exe"
+        cp "$extracted_bin" "$bin_path"
+    else
+        bin_path="${INSTALL_DIR}/${APP_NAME}"
+        install -m 0755 "$extracted_bin" "$bin_path"
+    fi
 
     config_example="$(find "$TMP_DIR" -type f -name "config.example.json" | head -n 1)"
     if [ -n "$config_example" ] && [ ! -f "${CONFIG_DIR}/db.json" ]; then

@@ -301,30 +301,28 @@ func (c *Cloudflared) IsRunning() bool {
 		return isProcessRunning(c.cmd.Process.Pid)
 	}
 
-	// Check via PID file
-	pid := c.state.ReadPID()
-	if pid > 0 {
-		return isProcessRunning(pid)
-	}
-
 	return false
 }
 
 func isProcessRunning(pid int) bool {
 	if runtime.GOOS == "windows" {
-		cmd := exec.Command("tasklist", "/FI", fmt.Sprintf("PID eq %d", pid))
+		cmd := exec.Command("tasklist", "/FI", fmt.Sprintf("PID eq %d", pid), "/NH", "/FO", "CSV")
 		out, err := cmd.Output()
 		if err != nil {
 			return false
 		}
-		return strings.Contains(string(out), fmt.Sprintf("%d", pid))
+		line := strings.TrimSpace(string(out))
+		if line == "" || strings.Contains(line, "No tasks") || strings.Contains(line, "INFO:") {
+			return false
+		}
+		return strings.Contains(line, fmt.Sprintf("%d", pid))
 	}
 
 	proc, err := os.FindProcess(pid)
 	if err != nil {
 		return false
 	}
-	return proc.Signal(os.Signal(nil)) == nil
+	return proc.Signal(syscall.Signal(0)) == nil
 }
 
 func killProcess(pid int) {

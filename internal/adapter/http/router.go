@@ -203,11 +203,11 @@ func (p *prefixFS) Open(name string) (http.File, error) {
 func corsMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		origin := c.Request.Header.Get("Origin")
-		// Only allow localhost origins (any port)
-		if strings.HasPrefix(origin, "http://localhost") ||
+		// Allow localhost origins (any port) and Cloudflare tunnel origins
+		if origin != "" && (strings.HasPrefix(origin, "http://localhost") ||
 			strings.HasPrefix(origin, "http://127.0.0.1") ||
 			strings.HasPrefix(origin, "http://[::1]") ||
-			origin == "" {
+			strings.HasSuffix(origin, ".trycloudflare.com")) {
 			c.Header("Access-Control-Allow-Origin", origin)
 		}
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
@@ -225,12 +225,6 @@ func requestLogger() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		log.Printf("[%s] %s", c.Request.Method, c.Request.URL.Path)
 		c.Next()
-	}
-}
-
-func optionsHandler() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		c.Status(http.StatusNoContent)
 	}
 }
 

@@ -120,11 +120,14 @@ func (ch *ComboHandler) getRotatedModels(models []string, comboName string, stra
 	val, _ := ch.rotationState.LoadOrStore(comboName, new(int32))
 	counter := val.(*int32)
 
-	currentIndex := atomic.LoadInt32(counter)
+	currentIndex := int(atomic.LoadInt32(counter))
+	n := len(models)
+	// Ensure non-negative modulo even if counter wraps
+	offset := ((currentIndex % n) + n) % n
 
-	rotated := make([]string, len(models))
+	rotated := make([]string, n)
 	for i := range models {
-		rotated[i] = models[(int(currentIndex)+i)%len(models)]
+		rotated[i] = models[(offset+i)%n]
 	}
 
 	return rotated
@@ -142,9 +145,7 @@ func (ch *ComboHandler) advanceRotation(comboName string, strategy string) {
 	}
 
 	counter := val.(*int32)
-	currentIndex := atomic.LoadInt32(counter)
-	newIndex := (currentIndex + 1) % 1000 // Prevent overflow
-	atomic.StoreInt32(counter, newIndex)
+	atomic.AddInt32(counter, 1)
 }
 
 func (ch *ComboHandler) ClearRotation(comboName string) {

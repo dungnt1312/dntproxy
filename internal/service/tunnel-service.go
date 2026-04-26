@@ -224,7 +224,7 @@ func (s *TunnelService) Status() port.TunnelStatus {
 	}
 
 	return port.TunnelStatus{
-		Enabled:   settings.TunnelEnabled,
+		Enabled:   running,
 		Running:   running,
 		Starting:  starting,
 		Provider:  settings.TunnelProvider,

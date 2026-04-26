@@ -330,7 +330,7 @@ func weightedRandomSelect(available []domain.ProviderConnection) *domain.Provide
 
 // MarkUnavailable marks a connection as unavailable with cooldown.
 func (s *AccountSelector) MarkUnavailable(connectionID string, status int, errorText string, model string) error {
-	var result *domain.FallbackResult
+	connFound := false
 	err := s.store.Update(func(cfg *domain.AppConfig) {
 		var conn *domain.ProviderConnection
 		for i := range cfg.ProviderConnections {
@@ -342,12 +342,12 @@ func (s *AccountSelector) MarkUnavailable(connectionID string, status int, error
 		if conn == nil {
 			return
 		}
+		connFound = true
 
 		fb := domain.CheckFallbackError(status, errorText, conn.BackoffLevel)
 		if !fb.ShouldFallback {
 			return
 		}
-		result = &fb
 
 		if fb.CooldownMs > 0 {
 			conn.RateLimitedUntil = domain.CooldownUntil(fb.CooldownMs)
@@ -366,7 +366,7 @@ func (s *AccountSelector) MarkUnavailable(connectionID string, status int, error
 	if err != nil {
 		return err
 	}
-	if result == nil {
+	if !connFound {
 		return fmt.Errorf("connection not found: %s", connectionID)
 	}
 	return nil

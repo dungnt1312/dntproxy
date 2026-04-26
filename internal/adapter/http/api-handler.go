@@ -1,7 +1,6 @@
 package http
 
 import (
-	"fmt"
 	"log"
 
 	"github.com/dungnt/dntproxy/internal/domain"
@@ -129,7 +128,7 @@ func apiDebugProviders(store port.CredentialStore) gin.HandlerFunc {
 	}
 }
 
-// apiDebugAccounts dumps raw account selection state for debugging.
+// apiDebugAccounts dumps account selection state for debugging (credentials masked).
 func apiDebugAccounts(store port.CredentialStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		provider := c.Param("provider")
@@ -139,15 +138,41 @@ func apiDebugAccounts(store port.CredentialStore) gin.HandlerFunc {
 			return
 		}
 		log.Printf("[DEBUG] GetActiveConnections(%s) -> %d connections", provider, len(connections))
+
+		type safeDebugConn struct {
+			ID              string            `json:"id"`
+			Name            string            `json:"name"`
+			IsActive        bool              `json:"isActive"`
+			Weight          int               `json:"weight"`
+			SupportedModels []string          `json:"supportedModels"`
+			RateLimitedUntil string           `json:"rateLimitedUntil"`
+			ModelLocks      map[string]string `json:"modelLocks"`
+			BackoffLevel    int               `json:"backoffLevel"`
+			HasToken        bool              `json:"hasToken"`
+			HasAPIKey       bool              `json:"hasApiKey"`
+		}
+
+		var safe []safeDebugConn
 		for i, conn := range connections {
 			log.Printf("[DEBUG]   [%d] id=%s name=%s isActive=%v supportedModels=%v rateLimitedUntil=%s modelLocks=%v",
 				i, conn.ID, conn.Name, conn.IsActive, conn.SupportedModels, conn.RateLimitedUntil, conn.ModelLocks)
+			safe = append(safe, safeDebugConn{
+				ID:               conn.ID,
+				Name:             conn.Name,
+				IsActive:         conn.IsActive,
+				Weight:           conn.Weight,
+				SupportedModels:  conn.SupportedModels,
+				RateLimitedUntil: conn.RateLimitedUntil,
+				ModelLocks:       conn.ModelLocks,
+				BackoffLevel:     conn.BackoffLevel,
+				HasToken:         conn.AccessToken != "",
+				HasAPIKey:        conn.APIKey != "",
+			})
 		}
 		c.JSON(200, gin.H{
 			"provider":    provider,
 			"count":       len(connections),
-			"connections": connections,
-			"error":       fmt.Sprintf("%v", err),
+			"connections": safe,
 		})
 	}
 }

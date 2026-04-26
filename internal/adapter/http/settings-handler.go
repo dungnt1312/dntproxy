@@ -34,27 +34,23 @@ func apiUpdateSettings(store port.CredentialStore) gin.HandlerFunc {
 			return
 		}
 
-		cfg, err := store.Load()
-		if err != nil {
-			c.JSON(500, gin.H{"error": "Failed to load config"})
-			return
-		}
-
-		if req.Port > 0 {
-			cfg.Settings.Port = req.Port
-		}
-		if req.ComboStrategy != "" {
-			cfg.Settings.ComboStrategy = req.ComboStrategy
-		}
-		cfg.Settings.RequireAPIKey = req.RequireAPIKey
-		if req.ComboStrategies != nil {
-			cfg.Settings.ComboStrategies = req.ComboStrategies
-		}
-
-		if err := store.Save(cfg); err != nil {
+		var updated domain.Settings
+		if err := store.Update(func(cfg *domain.AppConfig) {
+			if req.Port > 0 {
+				cfg.Settings.Port = req.Port
+			}
+			if req.ComboStrategy != "" {
+				cfg.Settings.ComboStrategy = req.ComboStrategy
+			}
+			cfg.Settings.RequireAPIKey = req.RequireAPIKey
+			if req.ComboStrategies != nil {
+				cfg.Settings.ComboStrategies = req.ComboStrategies
+			}
+			updated = cfg.Settings
+		}); err != nil {
 			c.JSON(500, gin.H{"error": "Failed to save config"})
 			return
 		}
-		c.JSON(200, cfg.Settings)
+		c.JSON(200, updated)
 	}
 }

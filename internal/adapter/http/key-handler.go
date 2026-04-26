@@ -34,12 +34,6 @@ func apiCreateKey(store port.CredentialStore) gin.HandlerFunc {
 			return
 		}
 
-		cfg, err := store.Load()
-		if err != nil {
-			c.JSON(500, gin.H{"error": err.Error()})
-			return
-		}
-
 		keyBytes := make([]byte, 24)
 		if _, err := rand.Read(keyBytes); err != nil {
 			c.JSON(500, gin.H{"error": "failed to generate secure API key"})
@@ -54,9 +48,10 @@ func apiCreateKey(store port.CredentialStore) gin.HandlerFunc {
 			IsActive:  true,
 			CreatedAt: time.Now().UTC().Format(time.RFC3339),
 		}
-		cfg.APIKeys = append(cfg.APIKeys, apiKey)
 
-		if err := store.Save(cfg); err != nil {
+		if err := store.Update(func(cfg *domain.AppConfig) {
+			cfg.APIKeys = append(cfg.APIKeys, apiKey)
+		}); err != nil {
 			c.JSON(500, gin.H{"error": err.Error()})
 			return
 		}
@@ -67,27 +62,21 @@ func apiCreateKey(store port.CredentialStore) gin.HandlerFunc {
 func apiDeleteKey(store port.CredentialStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
-		cfg, err := store.Load()
-		if err != nil {
+		found := false
+		if err := store.Update(func(cfg *domain.AppConfig) {
+			for i, k := range cfg.APIKeys {
+				if k.ID == id {
+					cfg.APIKeys = append(cfg.APIKeys[:i], cfg.APIKeys[i+1:]...)
+					found = true
+					break
+				}
+			}
+		}); err != nil {
 			c.JSON(500, gin.H{"error": err.Error()})
 			return
-		}
-
-		found := false
-		for i, k := range cfg.APIKeys {
-			if k.ID == id {
-				cfg.APIKeys = append(cfg.APIKeys[:i], cfg.APIKeys[i+1:]...)
-				found = true
-				break
-			}
 		}
 		if !found {
 			c.JSON(404, gin.H{"error": "Key not found"})
-			return
-		}
-
-		if err := store.Save(cfg); err != nil {
-			c.JSON(500, gin.H{"error": err.Error()})
 			return
 		}
 		c.JSON(200, gin.H{"ok": true})

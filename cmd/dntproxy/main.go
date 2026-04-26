@@ -98,7 +98,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 	defer logStore.Close()
 	logger.Init(logStore)
-	go runLogRetention(logStore)
+	logRetentionDone := make(chan struct{})
+	go runLogRetention(logStore, logRetentionDone)
 
 	cfg, err := store.Load()
 	if err != nil {
@@ -110,7 +111,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 		port = cfg.Settings.Port
 	}
 	if envPort := os.Getenv("PORT"); envPort != "" {
-		fmt.Sscanf(envPort, "%d", &port)
+		if _, err := fmt.Sscanf(envPort, "%d", &port); err != nil {
+			log.Printf("[dntproxy] Invalid PORT env var %q, using default %d", envPort, port)
+		}
 	}
 	if p, _ := cmd.Flags().GetInt("port"); p > 0 {
 		port = p
@@ -136,20 +139,16 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	router := httpAdapter.NewRouter(store, providers, tunnelService)
-	
+
 	// Set actual server port in router context
 	httpAdapter.SetServerPort(router, port)
 
-	// Auto-restart tunnel if it was enabled
+	// Tunnel auto-start is handled by the dashboard UI only.
+	// Reset persisted enabled flag so it doesn't leak across restarts.
 	if tunnelService != nil && cfg.Settings.TunnelEnabled {
-		go func() {
-			if !tunnelService.IsRunning() {
-				log.Printf("[tunnel] Auto-restarting tunnel...")
-				if err := tunnelService.Enable(port); err != nil {
-					log.Printf("[tunnel] Auto-restart failed: %v", err)
-				}
-			}
-		}()
+		cfg.Settings.TunnelEnabled = false
+		_ = store.Save(cfg)
+		log.Printf("[tunnel] Tunnel will not auto-start. Enable via dashboard.")
 	}
 
 	addr := fmt.Sprintf(":%d", port)
@@ -186,6 +185,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 		log.Printf("[dntproxy] Graceful shutdown error: %s", err)
 	}
 
+	close(logRetentionDone)
+
 	// Stop tunnel
 	if tunnelService != nil {
 		tunnelService.Stop()
@@ -195,14 +196,19 @@ func runServe(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runLogRetention(logStore *storage.SQLiteLogStore) {
+func runLogRetention(logStore *storage.SQLiteLogStore, done <-chan struct{}) {
 	ticker := time.NewTicker(24 * time.Hour)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		cutoff := time.Now().AddDate(0, 0, -30).UnixMilli()
-		if err := logStore.PurgeOlderThan(context.Background(), cutoff); err != nil {
-			log.Printf("[LOG] Failed to purge old logs: %s", err)
+	for {
+		select {
+		case <-done:
+			return
+		case <-ticker.C:
+			cutoff := time.Now().AddDate(0, 0, -30).UnixMilli()
+			if err := logStore.PurgeOlderThan(context.Background(), cutoff); err != nil {
+				log.Printf("[LOG] Failed to purge old logs: %s", err)
+			}
 		}
 	}
 }

@@ -14,6 +14,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { RefreshCw, ChevronLeft, ChevronRight, Activity } from "lucide-react";
 import UsageChart from "./usage-chart";
 import UsageStats, { type UsageStatsData } from "./usage-stats";
+import { goApi } from "@/lib/go-api";
+import { Skeleton } from "@/components/ui/skeleton";
 
 function LiveRequestCard() {
   const [recentCount, setRecentCount] = useState(0);
@@ -131,8 +133,8 @@ export default function UsageScreen() {
   const fetchStats = useCallback(async () => {
     setStatsLoading(true);
     try {
-      const res = await fetch(`/api/usage/stats?period=${period}`);
-      if (res.ok) setStats(await res.json());
+      const res = await goApi.getUsageStats({ period });
+      setStats(res as UsageStatsData);
     } catch (e) {
       console.error(e);
     } finally {
@@ -144,14 +146,12 @@ export default function UsageScreen() {
     async (page = 1) => {
       setDetailsLoading(true);
       try {
-        const res = await fetch(
-          `/api/usage/request-details?page=${page}&pageSize=20`
-        );
-        if (res.ok) {
-          const json = await res.json();
-          setDetails(json.details || []);
-          setPagination(json.pagination);
-        }
+        const json = await goApi.getUsageRequestDetails({
+          page: String(page),
+          pageSize: "20",
+        }) as any;
+        setDetails(json.details || []);
+        setPagination(json.pagination);
       } catch (e) {
         console.error(e);
       } finally {
@@ -240,11 +240,13 @@ export default function UsageScreen() {
                 </TableHeader>
                 <TableBody>
                   {detailsLoading ? (
-                    <TableRow>
-                      <TableCell colSpan={7} className="text-center text-muted-foreground py-8 text-sm">
-                        Loading...
-                      </TableCell>
-                    </TableRow>
+                    Array.from({ length: 5 }).map((_, i) => (
+                      <TableRow key={i}>
+                        <TableCell colSpan={7} className="py-2">
+                          <Skeleton className="h-8 w-full" />
+                        </TableCell>
+                      </TableRow>
+                    ))
                   ) : details.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={7} className="text-center text-muted-foreground py-8 text-sm">

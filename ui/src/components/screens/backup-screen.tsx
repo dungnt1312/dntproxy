@@ -3,6 +3,9 @@ import { Download, Upload, AlertTriangle, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { goApi } from '@/lib/go-api'
+import { Button } from '@/components/ui/button'
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
+import { Label } from '@/components/ui/label'
 
 interface BackupStats {
   connections: number
@@ -84,21 +87,22 @@ export default function BackupScreen() {
         <h2 className="text-sm font-semibold">Export</h2>
         <p className="text-xs text-muted-foreground">Download current settings, connections, combos, aliases, and keys.</p>
         <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-          <button
+          <Button
             onClick={() => handleExport(false)}
             disabled={loading}
-            className="inline-flex h-9 items-center justify-center rounded-md bg-primary px-3 text-sm text-primary-foreground"
+            className="h-9"
           >
             {loading ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Download className="mr-1 h-4 w-4" />}
             Export
-          </button>
-          <button
+          </Button>
+          <Button
             onClick={() => handleExport(true)}
             disabled={loading}
-            className="inline-flex h-9 items-center justify-center rounded-md border px-3 text-sm hover:bg-accent"
+            variant="outline"
+            className="h-9"
           >
             <Download className="mr-1 h-4 w-4" /> Export (masked)
-          </button>
+          </Button>
         </div>
 
         {lastExport && (
@@ -112,16 +116,20 @@ export default function BackupScreen() {
         <h2 className="text-sm font-semibold">Import</h2>
         <p className="text-xs text-muted-foreground">Upload a `.json` backup and choose merge or replace mode.</p>
 
-        <div className="flex items-center gap-3 text-sm">
-          <label className="inline-flex items-center gap-2">
-            <input type="radio" checked={importMode === 'merge'} onChange={() => setImportMode('merge')} />
-            Merge
-          </label>
-          <label className="inline-flex items-center gap-2">
-            <input type="radio" checked={importMode === 'replace'} onChange={() => setImportMode('replace')} />
-            Replace
-          </label>
-        </div>
+        <RadioGroup
+          value={importMode}
+          onValueChange={(value) => setImportMode(value as 'merge' | 'replace')}
+          className="flex flex-row items-center gap-4"
+        >
+          <div className="flex items-center space-x-2">
+            <RadioGroupItem value="merge" id="import-merge" />
+            <Label htmlFor="import-merge">Merge</Label>
+          </div>
+          <div className="flex items-center space-x-2">
+            <RadioGroupItem value="replace" id="import-replace" />
+            <Label htmlFor="import-replace">Replace</Label>
+          </div>
+        </RadioGroup>
 
         <label className="inline-flex h-9 cursor-pointer items-center rounded-md border px-3 text-sm hover:bg-accent">
           <Upload className="mr-1 h-4 w-4" /> Select backup file

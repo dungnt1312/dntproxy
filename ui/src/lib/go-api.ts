@@ -477,6 +477,14 @@ export const goApi: any = {
 
   // Usage
   getUsage: (connectionId: string) => goRequest(`/usage/${connectionId}`),
+  getUsageStats: (params?: Record<string, string>) => {
+    const qs = params ? '?' + new URLSearchParams(params).toString() : '';
+    return goRequest(`/usage/stats${qs}`);
+  },
+  getUsageRequestDetails: (params?: Record<string, string>) => {
+    const qs = params ? '?' + new URLSearchParams(params).toString() : '';
+    return goRequest(`/usage/request-details${qs}`);
+  },
 
   // Tunnel
   enableTunnel: () => goRequest("/tunnel/enable", { method: "POST" }),

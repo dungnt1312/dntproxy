@@ -1,33 +1,10 @@
 import { useEffect, useState } from 'react'
-import {
-  UserCircle,
-  Plus,
-  Trash2,
-  Power,
-  PowerOff,
-  ArrowRight,
-  Sparkles,
-  Star,
-  Download,
-  Upload,
-  Pencil,
-} from 'lucide-react'
+import { UserCircle, Plus, Sparkles, Star, PowerOff } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { goApi } from '@/lib/go-api'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Badge } from '@/components/ui/badge'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
+import { Card, CardContent } from '@/components/ui/card'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -38,29 +15,11 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-
-type ProfileData = {
-  id: string
-  name: string
-  description: string
-  aliases: Record<string, string>
-  combos?: Array<{ name: string; models: string[] }>
-  createdAt?: string
-  updatedAt?: string
-}
-
-type PresetData = {
-  name: string
-  description: string
-  aliases: Record<string, string>
-}
+import { ProfileCard } from './profiles/profile-card'
+import { CreateProfileDialog } from './profiles/create-profile-dialog'
+import { EditProfileDialog } from './profiles/edit-profile-dialog'
+import { PresetDialog } from './profiles/preset-dialog'
+import type { ProfileData, PresetData } from './profiles/types'
 
 export default function ProfilesScreen() {
   const [profiles, setProfiles] = useState<ProfileData[]>([])
@@ -73,18 +32,9 @@ export default function ProfilesScreen() {
   const [presetDialogOpen, setPresetDialogOpen] = useState(false)
   const [editDialogOpen, setEditDialogOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<ProfileData | null>(null)
-
-  // Form states
-  const [formName, setFormName] = useState('')
-  const [formDescription, setFormDescription] = useState('')
-  const [formAliases, setFormAliases] = useState<Array<{ alias: string; model: string }>>([
-    { alias: '', model: '' },
-  ])
-  const [selectedPreset, setSelectedPreset] = useState('')
   const [editingProfile, setEditingProfile] = useState<ProfileData | null>(null)
 
   // Loading states
-  const [saving, setSaving] = useState(false)
   const [activating, setActivating] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
 
@@ -109,130 +59,19 @@ export default function ProfilesScreen() {
     load()
   }, [])
 
-  // --- Create Profile ---
   function openCreateDialog() {
-    setFormName('')
-    setFormDescription('')
-    setFormAliases([{ alias: '', model: '' }])
     setCreateDialogOpen(true)
   }
 
-  function addAliasRow() {
-    setFormAliases((prev) => [...prev, { alias: '', model: '' }])
-  }
-
-  function removeAliasRow(index: number) {
-    setFormAliases((prev) => prev.filter((_, i) => i !== index))
-  }
-
-  function updateAliasRow(index: number, field: 'alias' | 'model', value: string) {
-    setFormAliases((prev) => prev.map((row, i) => (i === index ? { ...row, [field]: value } : row)))
-  }
-
-  async function handleCreate() {
-    const name = formName.trim()
-    if (!name) {
-      toast.error('Profile name is required')
-      return
-    }
-
-    const aliases: Record<string, string> = {}
-    for (const row of formAliases) {
-      const a = row.alias.trim()
-      const m = row.model.trim()
-      if (a && m) aliases[a] = m
-    }
-
-    if (Object.keys(aliases).length === 0) {
-      toast.error('At least one alias mapping is required')
-      return
-    }
-
-    setSaving(true)
-    try {
-      await goApi.createProfile({ name, description: formDescription.trim(), aliases })
-      toast.success(`Profile "${name}" created`)
-      setCreateDialogOpen(false)
-      await load()
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to create profile')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  // --- Create from Preset ---
   function openPresetDialog() {
-    setSelectedPreset('')
     setPresetDialogOpen(true)
   }
 
-  async function handleCreateFromPreset() {
-    if (!selectedPreset) {
-      toast.error('Select a preset')
-      return
-    }
-
-    setSaving(true)
-    try {
-      await goApi.createProfileFromPreset(selectedPreset)
-      toast.success(`Profile created from preset "${selectedPreset}"`)
-      setPresetDialogOpen(false)
-      await load()
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to create from preset')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  // --- Edit Profile ---
   function openEditDialog(profile: ProfileData) {
     setEditingProfile(profile)
-    setFormName(profile.name)
-    setFormDescription(profile.description || '')
-    const aliasRows = Object.entries(profile.aliases || {}).map(([alias, model]) => ({
-      alias,
-      model,
-    }))
-    setFormAliases(aliasRows.length > 0 ? aliasRows : [{ alias: '', model: '' }])
     setEditDialogOpen(true)
   }
 
-  async function handleEdit() {
-    if (!editingProfile) return
-
-    const addAliases: Record<string, string> = {}
-    const currentAliasKeys = new Set<string>()
-
-    for (const row of formAliases) {
-      const a = row.alias.trim()
-      const m = row.model.trim()
-      if (a && m) {
-        addAliases[a] = m
-        currentAliasKeys.add(a)
-      }
-    }
-
-    // Find removed aliases
-    const removeAliases = Object.keys(editingProfile.aliases || {}).filter(
-      (key) => !currentAliasKeys.has(key),
-    )
-
-    setSaving(true)
-    try {
-      await goApi.updateProfile(editingProfile.name, { addAliases, removeAliases })
-      toast.success(`Profile "${editingProfile.name}" updated`)
-      setEditDialogOpen(false)
-      await load()
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to update profile')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  // --- Activate / Deactivate ---
   async function handleActivate(name: string) {
     setActivating(name)
     try {
@@ -259,7 +98,6 @@ export default function ProfilesScreen() {
     }
   }
 
-  // --- Delete ---
   async function handleDelete() {
     if (!deleteTarget) return
     setDeleting(true)
@@ -274,55 +112,6 @@ export default function ProfilesScreen() {
       setDeleting(false)
     }
   }
-
-  // --- Alias editor rows component ---
-  const AliasEditor = () => (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <Label>Alias Mappings</Label>
-        <Button type="button" variant="outline" size="sm" onClick={addAliasRow} className="gap-1.5">
-          <Plus className="h-3 w-3" />
-          Add Row
-        </Button>
-      </div>
-      <div className="space-y-2 rounded-lg border bg-muted/20 p-3">
-        {formAliases.length === 0 && (
-          <p className="py-2 text-center text-sm text-muted-foreground">
-            No aliases. Click "Add Row" to start.
-          </p>
-        )}
-        {formAliases.map((row, index) => (
-          <div key={index} className="flex items-center gap-2">
-            <Input
-              value={row.alias}
-              onChange={(e) => updateAliasRow(index, 'alias', e.target.value)}
-              placeholder="claude-sonnet"
-              className="flex-1 font-mono text-xs"
-            />
-            <ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-            <Input
-              value={row.model}
-              onChange={(e) => updateAliasRow(index, 'model', e.target.value)}
-              placeholder="kr/claude-sonnet-4.5"
-              className="flex-1 font-mono text-xs"
-            />
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
-              onClick={() => removeAliasRow(index)}
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </Button>
-          </div>
-        ))}
-      </div>
-      <p className="text-xs text-muted-foreground">
-        Map model names (as sent by CLI tools) to provider/model targets in dntproxy.
-      </p>
-    </div>
-  )
 
   return (
     <div className="space-y-6">
@@ -407,234 +196,42 @@ export default function ProfilesScreen() {
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          {profiles.map((profile) => {
-            const isActive = profile.name === activeProfile
-            const aliasEntries = Object.entries(profile.aliases || {})
-            return (
-              <Card
-                key={profile.id}
-                className={
-                  isActive ? 'border-violet-500/40 shadow-[0_0_0_1px] shadow-violet-500/20' : ''
-                }
-              >
-                <CardHeader className="pb-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <CardTitle className="truncate text-base">{profile.name}</CardTitle>
-                        {isActive && (
-                          <Badge
-                            variant="default"
-                            className="shrink-0 bg-violet-500 hover:bg-violet-600"
-                          >
-                            <Star className="mr-1 h-3 w-3 fill-current" />
-                            Active
-                          </Badge>
-                        )}
-                      </div>
-                      {profile.description && (
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          {profile.description}
-                        </p>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      {!isActive ? (
-                        <Button
-                          variant="default"
-                          size="sm"
-                          onClick={() => handleActivate(profile.name)}
-                          disabled={activating === profile.name}
-                          className="gap-1.5 bg-violet-600 hover:bg-violet-700"
-                        >
-                          <Power className="h-3.5 w-3.5" />
-                          {activating === profile.name ? 'Activating…' : 'Activate'}
-                        </Button>
-                      ) : (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={handleDeactivate}
-                          disabled={activating === '__deactivate__'}
-                          className="gap-1.5"
-                        >
-                          <PowerOff className="h-3.5 w-3.5" />
-                          {activating === '__deactivate__' ? '…' : 'Deactivate'}
-                        </Button>
-                      )}
-                      <Button
-                        variant="outline"
-                        size="icon"
-                        className="h-8 w-8"
-                        onClick={() => openEditDialog(profile)}
-                      >
-                        <Pencil className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="icon"
-                        className="h-8 w-8 text-destructive hover:text-destructive"
-                        onClick={() => setDeleteTarget(profile)}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-1.5 rounded-md border bg-muted/20 p-3">
-                    <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      Aliases ({aliasEntries.length})
-                    </p>
-                    {aliasEntries.slice(0, 6).map(([alias, model]) => (
-                      <div key={alias} className="flex items-center gap-2 text-xs">
-                        <span className="min-w-0 truncate font-mono text-foreground">{alias}</span>
-                        <ArrowRight className="h-3 w-3 shrink-0 text-muted-foreground/60" />
-                        <span className="min-w-0 truncate font-mono text-muted-foreground">
-                          {model}
-                        </span>
-                      </div>
-                    ))}
-                    {aliasEntries.length > 6 && (
-                      <p className="pt-1 text-xs text-muted-foreground">
-                        +{aliasEntries.length - 6} more aliases
-                      </p>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-            )
-          })}
+          {profiles.map((profile) => (
+            <ProfileCard
+              key={profile.id}
+              profile={profile}
+              isActive={profile.name === activeProfile}
+              activating={activating}
+              onActivate={handleActivate}
+              onDeactivate={handleDeactivate}
+              onEdit={openEditDialog}
+              onDelete={setDeleteTarget}
+            />
+          ))}
         </div>
       )}
 
-      {/* Create Profile Dialog */}
-      <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
-        <DialogContent className="sm:max-w-xl">
-          <DialogHeader>
-            <DialogTitle>Create Profile</DialogTitle>
-            <DialogDescription>
-              Define model alias mappings. When activated, these aliases route CLI tool requests to
-              your chosen providers.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="profile-name">Name</Label>
-                <Input
-                  id="profile-name"
-                  value={formName}
-                  onChange={(e) => setFormName(e.target.value)}
-                  placeholder="my-profile"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="profile-desc">Description</Label>
-                <Input
-                  id="profile-desc"
-                  value={formDescription}
-                  onChange={(e) => setFormDescription(e.target.value)}
-                  placeholder="Optional description"
-                />
-              </div>
-            </div>
-            <AliasEditor />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setCreateDialogOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handleCreate} disabled={saving}>
-              {saving ? 'Creating…' : 'Create Profile'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Dialogs */}
+      <CreateProfileDialog
+        open={createDialogOpen}
+        onOpenChange={setCreateDialogOpen}
+        onSuccess={load}
+      />
 
-      {/* Create from Preset Dialog */}
-      <Dialog open={presetDialogOpen} onOpenChange={setPresetDialogOpen}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Create from Preset</DialogTitle>
-            <DialogDescription>
-              Choose a built-in preset to quickly create a profile with pre-configured alias
-              mappings.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="space-y-2">
-              <Label>Preset</Label>
-              <Select value={selectedPreset} onValueChange={setSelectedPreset}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select a preset…" />
-                </SelectTrigger>
-                <SelectContent>
-                  {presets.map((preset) => (
-                    <SelectItem key={preset.name} value={preset.name}>
-                      <span className="font-medium">{preset.name}</span>
-                      <span className="ml-2 text-muted-foreground">— {preset.description}</span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+      <PresetDialog
+        open={presetDialogOpen}
+        presets={presets}
+        onOpenChange={setPresetDialogOpen}
+        onSuccess={load}
+      />
 
-            {selectedPreset && (
-              <div className="space-y-2 rounded-lg border bg-muted/20 p-3">
-                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Preview
-                </p>
-                {presets
-                  .find((p) => p.name === selectedPreset)
-                  ?.aliases &&
-                  Object.entries(
-                    presets.find((p) => p.name === selectedPreset)!.aliases,
-                  ).map(([alias, model]) => (
-                    <div key={alias} className="flex items-center gap-2 text-xs">
-                      <span className="font-mono text-foreground">{alias}</span>
-                      <ArrowRight className="h-3 w-3 shrink-0 text-muted-foreground/60" />
-                      <span className="font-mono text-muted-foreground">{model}</span>
-                    </div>
-                  ))}
-              </div>
-            )}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setPresetDialogOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handleCreateFromPreset} disabled={saving || !selectedPreset}>
-              {saving ? 'Creating…' : 'Create from Preset'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Edit Profile Dialog */}
-      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
-        <DialogContent className="sm:max-w-xl">
-          <DialogHeader>
-            <DialogTitle>Edit Profile: {editingProfile?.name}</DialogTitle>
-            <DialogDescription>
-              Update the alias mappings for this profile.
-              {editingProfile?.name === activeProfile &&
-                ' Changes will immediately affect active routing.'}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <AliasEditor />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditDialogOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handleEdit} disabled={saving}>
-              {saving ? 'Saving…' : 'Save Changes'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <EditProfileDialog
+        open={editDialogOpen}
+        profile={editingProfile}
+        activeProfile={activeProfile}
+        onOpenChange={setEditDialogOpen}
+        onSuccess={load}
+      />
 
       {/* Delete Confirmation */}
       <AlertDialog

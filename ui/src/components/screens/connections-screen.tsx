@@ -1,20 +1,20 @@
-import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
+import { useEffect, useState, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../api';
-import { Plus, Search, Link2, AlertTriangle, ChevronDown, Zap, RefreshCw, Loader2 } from 'lucide-react';
-import ConnectionCard from '../connections/ConnectionCard';
+import { Plus, Search, Link2, AlertTriangle, RefreshCw, Loader2 } from 'lucide-react';
 import EditModelsModal from '../connections/EditModelsModal';
 import EditConnectionModal from '../connections/EditConnectionModal';
 import DeleteDialog from '../connections/DeleteDialog';
 import { ProviderLogoIcon } from '../connections/helpers';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Card, CardContent } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
+import { Switch } from '@/components/ui/switch';
 import { toast } from 'sonner';
-import { cn } from '@/lib/utils';
 import { getProviderLabel, getProviderMeta, PROVIDER_ORDER } from '@/lib/provider-registry';
-import type { Connection, ConnectionGroup, UsageData } from '@/types/connections';
+import { ConnectionStats } from './connections/connection-stats';
+import { ConnectionGroup } from './connections/connection-group';
+import { useQuotaFetch } from './connections/use-quota-fetch';
+import type { Connection, ConnectionGroup as ConnectionGroupType } from '@/types/connections';
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -29,15 +29,9 @@ export default function ConnectionsScreen() {
         id: string;
         name: string;
     } | null>(null);
-    const [quotaResult, setQuotaResult] = useState<Record<string, UsageData>>({});
     const [searchQuery, setSearchQuery] = useState('');
     const [autoRefreshQuota, setAutoRefreshQuota] = useState(false);
     const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
-
-    // Track which provider groups have been fetched for quota + which are loading
-    const [fetchedGroups, setFetchedGroups] = useState<Record<string, boolean>>({});
-    const [fetchingGroups, setFetchingGroups] = useState<Record<string, boolean>>({});
-    const quotaRefreshInFlightRef = useRef(false);
 
     const toggleGroup = useCallback((id: string) => {
         setCollapsedGroups((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -90,7 +84,7 @@ export default function ConnectionsScreen() {
             groups[p].push(c);
         });
 
-        const result: ConnectionGroup[] = [];
+        const result: ConnectionGroupType[] = [];
 
         // Known providers in priority order
         PROVIDER_ORDER.forEach((p) => {
@@ -123,6 +117,13 @@ export default function ConnectionsScreen() {
         return result;
     }, [filteredConns]);
 
+    // ── Quota fetch hook ───────────────────────────────────────────────────────
+    const { quotaResult, fetchedGroups, fetchingGroups, handleFetchGroupQuota } = useQuotaFetch({
+        groupedConns,
+        autoRefreshQuota,
+        onConnectionsUpdate: setConns,
+    });
+
     // ── Load connections only (no quota fetch) ─────────────────────────────────
     const load = useCallback(async () => {
         setLoadError('');
@@ -141,119 +142,6 @@ export default function ConnectionsScreen() {
     useEffect(() => {
         load();
     }, [load]);
-
-    // ── On-demand quota fetch per provider group ───────────────────────────────
-    const handleFetchGroupQuota = useCallback(
-        async (groupId: string) => {
-            const group = groupedConns.find((g) => g.id === groupId);
-            if (!group) return;
-
-            setFetchingGroups((prev) => ({ ...prev, [groupId]: true }));
-
-            const promises = group.items
-                .filter((c) => c.isActive)
-                .map(async (c) => {
-                    try {
-                        const res = await api.getUsage(c.id);
-                        return [c.id, res] as const;
-                    } catch (e: any) {
-                        return [c.id, { error: e.message }] as const;
-                    }
-                });
-
-            const settled = await Promise.allSettled(promises);
-            const quotaUpdates: Record<string, UsageData> = {};
-            settled.forEach((result) => {
-                if (result.status === 'fulfilled') {
-                    const [connId, value] = result.value;
-                    quotaUpdates[connId] = value;
-                }
-            });
-
-            if (Object.keys(quotaUpdates).length > 0) {
-                setQuotaResult((prev) => ({ ...prev, ...quotaUpdates }));
-                setConns((prev) =>
-                    prev.map((conn) => {
-                        const update = quotaUpdates[conn.id];
-                        if (update && !update.error && !update.limitReached) {
-                            return {
-                                ...conn,
-                                lastError: undefined,
-                                rateLimitedUntil: undefined,
-                                backoffLevel: undefined,
-                            };
-                        }
-                        return conn;
-                    }),
-                );
-            }
-            setFetchingGroups((prev) => ({ ...prev, [groupId]: false }));
-            setFetchedGroups((prev) => ({ ...prev, [groupId]: true }));
-        },
-        [groupedConns],
-    );
-
-    // ── Auto-refresh: only for groups that were explicitly fetched ──────────────
-    useEffect(() => {
-        if (!autoRefreshQuota) return;
-        const fetchedGroupIds = Object.keys(fetchedGroups);
-        if (fetchedGroupIds.length === 0) return;
-
-        const refreshFetchedGroupsQuota = async () => {
-            if (quotaRefreshInFlightRef.current) return;
-            quotaRefreshInFlightRef.current = true;
-
-            try {
-                const activeConnections = fetchedGroupIds.flatMap((groupId) => {
-                    const group = groupedConns.find((g) => g.id === groupId);
-                    if (!group) return [] as Connection[];
-                    return group.items.filter((c) => c.isActive);
-                });
-
-                if (activeConnections.length === 0) return;
-
-                const uniqueConnections = Array.from(new Map(activeConnections.map((c) => [c.id, c])).values());
-                const results = await Promise.allSettled(
-                    uniqueConnections.map(async (c) => {
-                        const usage = await api.getUsage(c.id);
-                        return [c.id, usage] as const;
-                    }),
-                );
-
-                const quotaUpdates: Record<string, UsageData> = {};
-                results.forEach((result) => {
-                    if (result.status === 'fulfilled') {
-                        const [id, usage] = result.value;
-                        quotaUpdates[id] = usage;
-                    }
-                });
-
-                if (Object.keys(quotaUpdates).length > 0) {
-                    setQuotaResult((prev) => ({ ...prev, ...quotaUpdates }));
-                    setConns((prev) =>
-                        prev.map((conn) => {
-                            const update = quotaUpdates[conn.id];
-                            if (update && !update.error && !update.limitReached) {
-                                return {
-                                    ...conn,
-                                    lastError: undefined,
-                                    rateLimitedUntil: undefined,
-                                    backoffLevel: undefined,
-                                };
-                            }
-                            return conn;
-                        }),
-                    );
-                }
-            } finally {
-                quotaRefreshInFlightRef.current = false;
-            }
-        };
-
-        refreshFetchedGroupsQuota();
-        const t = setInterval(refreshFetchedGroupsQuota, 30000);
-        return () => clearInterval(t);
-    }, [autoRefreshQuota, fetchedGroups, groupedConns]);
 
     // ── Handlers ───────────────────────────────────────────────────────────────
     const handleDeleteConfirm = useCallback(async (id: string) => {
@@ -287,46 +175,7 @@ export default function ConnectionsScreen() {
             </div>
 
             {/* Stats */}
-            {conns.length > 0 && (
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                    <Card>
-                        <CardContent className="p-4">
-                            <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1">
-                                <Link2 size={12} /> Total Connections
-                            </div>
-                            <div className="text-2xl font-bold">{connectionStats.total}</div>
-                        </CardContent>
-                    </Card>
-                    <Card>
-                        <CardContent className="p-4">
-                            <div className="flex items-center gap-2 text-xs text-emerald-600 mb-1">
-                                <span className="h-2 w-2 rounded-full bg-emerald-500" /> Active
-                            </div>
-                            <div className="text-2xl font-bold text-emerald-600">{connectionStats.active}</div>
-                        </CardContent>
-                    </Card>
-                    <Card className={connectionStats.needsAttention > 0 ? 'border-destructive/40' : ''}>
-                        <CardContent className="p-4">
-                            <div
-                                className={cn(
-                                    'flex items-center gap-2 text-xs mb-1',
-                                    connectionStats.needsAttention > 0 ? 'text-destructive' : 'text-muted-foreground',
-                                )}
-                            >
-                                <AlertTriangle size={12} /> Issues
-                            </div>
-                            <div
-                                className={cn(
-                                    'text-2xl font-bold',
-                                    connectionStats.needsAttention > 0 ? 'text-destructive' : 'text-muted-foreground',
-                                )}
-                            >
-                                {connectionStats.needsAttention}
-                            </div>
-                        </CardContent>
-                    </Card>
-                </div>
-            )}
+            {conns.length > 0 && <ConnectionStats {...connectionStats} />}
 
             {/* Toolbar */}
             {conns.length > 0 && (
@@ -347,11 +196,9 @@ export default function ConnectionsScreen() {
                         />
                     </div>
                     <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors select-none shrink-0">
-                        <input
-                            type="checkbox"
+                        <Switch
                             checked={autoRefreshQuota}
-                            onChange={(e) => setAutoRefreshQuota(e.target.checked)}
-                            className="w-3.5 h-3.5 rounded cursor-pointer"
+                            onCheckedChange={setAutoRefreshQuota}
                         />
                         Auto-refresh loaded quotas
                     </label>
@@ -395,87 +242,22 @@ export default function ConnectionsScreen() {
                 </div>
             ) : (
                 <div className="space-y-6">
-                    {groupedConns.map((group) => {
-                        const isCollapsed = collapsedGroups[group.id];
-                        const hasActiveItems = group.items.some((c) => c.isActive);
-                        const isFetching = fetchingGroups[group.id];
-                        const hasFetched = fetchedGroups[group.id];
-
-                        return (
-                            <div key={group.id}>
-                                <div className="flex items-center gap-2 mb-3">
-                                    {/* Clickable group header (toggle collapse) */}
-                                    <button
-                                        type="button"
-                                        className="flex items-center gap-2 cursor-pointer select-none flex-1 group/col text-left"
-                                        onClick={() => toggleGroup(group.id)}
-                                        aria-expanded={!isCollapsed}
-                                        aria-label={`${isCollapsed ? 'Expand' : 'Collapse'} ${group.label} connections`}
-                                    >
-                                        <div
-                                            className={cn(
-                                                'flex h-7 w-7 items-center justify-center rounded-lg border transition-transform group-hover/col:scale-105 overflow-hidden',
-                                                group.colorClass,
-                                            )}
-                                        >
-                                            {group.icon}
-                                        </div>
-                                        <h3 className="text-sm font-semibold">{group.label}</h3>
-                                        <Badge variant="secondary" className="text-[10px] h-5">
-                                            {group.items.length}
-                                        </Badge>
-                                        <ChevronDown
-                                            className={`h-4 w-4 text-muted-foreground transition-transform ${isCollapsed ? '-rotate-90' : ''}`}
-                                        />
-                                    </button>
-
-                                    {/* Check quota button — only for groups with active connections */}
-                                    {hasActiveItems && !isFetching && (
-                                        <Button
-                                            variant="outline"
-                                            size="sm"
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                handleFetchGroupQuota(group.id);
-                                            }}
-                                            className={cn(
-                                                'text-xs h-7 gap-1 shrink-0',
-                                                hasFetched
-                                                    ? 'text-primary'
-                                                    : 'text-amber-600 border-amber-500/30 hover:bg-amber-500/10',
-                                            )}
-                                            title={hasFetched ? 'Refresh loaded quotas' : 'Load group quotas'}
-                                        >
-                                            {hasFetched ? (
-                                                <RefreshCw className="h-3 w-3" />
-                                            ) : (
-                                                <Zap className="h-3 w-3" />
-                                            )}
-                                            {hasFetched ? 'Refresh' : 'Load quotas'}
-                                        </Button>
-                                    )}
-
-                                    {/* Loading spinner while fetching */}
-                                    {isFetching && <RefreshCw className="h-4 w-4 animate-spin text-primary shrink-0" />}
-                                </div>
-                                {!isCollapsed && (
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-                                        {group.items.map((c) => (
-                                            <ConnectionCard
-                                                key={c.id}
-                                                conn={c}
-                                                initialQuotaResult={quotaResult[c.id]}
-                                                onReload={load}
-                                                onDelete={(id, name) => setDeleteTarget({ id, name })}
-                                                onEditModels={setEditModelsConn}
-                                                onEditConnection={setEditConn}
-                                            />
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
-                        );
-                    })}
+                    {groupedConns.map((group) => (
+                        <ConnectionGroup
+                            key={group.id}
+                            group={group}
+                            isCollapsed={collapsedGroups[group.id]}
+                            isFetching={fetchingGroups[group.id]}
+                            hasFetched={fetchedGroups[group.id]}
+                            quotaResult={quotaResult}
+                            onToggle={() => toggleGroup(group.id)}
+                            onFetchQuota={() => handleFetchGroupQuota(group.id)}
+                            onReload={load}
+                            onDelete={(id, name) => setDeleteTarget({ id, name })}
+                            onEditModels={setEditModelsConn}
+                            onEditConnection={setEditConn}
+                        />
+                    ))}
                 </div>
             )}
 

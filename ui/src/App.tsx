@@ -10,15 +10,11 @@ import {
   LayoutDashboard,
   Link2,
   Boxes,
-  Layers,
   MessageSquare,
   ScrollText,
   Settings as SettingsIcon,
   Key,
   HardDriveDownload,
-  ChevronLeft,
-  ChevronRight,
-  Zap,
   Moon,
   Sun,
   Menu,
@@ -29,24 +25,12 @@ import {
 import { useTheme } from "next-themes";
 
 import { Button } from "@/components/ui/button";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/stores/app-store";
-import { getStoredApiKey, setStoredApiKey, onUnauthorized } from "@/lib/go-api";
+import { getStoredApiKey, onUnauthorized } from "@/lib/go-api";
+import { Sidebar } from "@/components/layout/sidebar";
+import { MobileMenu } from "@/components/layout/mobile-menu";
 
 import DashboardScreen from "@/components/screens/dashboard-screen";
 import ConnectionsScreen from "@/components/screens/connections-screen";
@@ -191,170 +175,28 @@ export default function App() {
       ? location.pathname === "/"
       : location.pathname.startsWith(path);
 
-  const NavButton = ({ item }: { item: NavItem }) => {
-    const Icon = item.icon;
-    const active = isActive(item.path);
-    const link = (
-      <a
-        key={item.path}
-        href={`/dashboard${item.path}`}
-        onClick={(e) => {
-          e.preventDefault();
-          handlePageSelect(item.path);
-        }}
-        className={cn(
-          "flex items-center gap-3 w-full px-3 py-2 mx-2 rounded-lg text-sm font-medium transition-colors",
-          active
-            ? "bg-primary text-primary-foreground"
-            : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-        )}
-      >
-        <Icon className="w-4 h-4 shrink-0" />
-        {sidebarOpen && <span className="truncate">{item.label}</span>}
-      </a>
-    );
-
-    if (!sidebarOpen) {
-      return (
-        <Tooltip key={item.path} delayDuration={0}>
-          <TooltipTrigger asChild>{link}</TooltipTrigger>
-          <TooltipContent side="right" sideOffset={8}>
-            {item.label}
-          </TooltipContent>
-        </Tooltip>
-      );
-    }
-
-    return link;
-  };
-
   return (
     <div className="min-h-screen bg-background md:flex">
       {/* Desktop Sidebar */}
-      <aside
-        className={cn(
-          "fixed left-0 top-0 z-40 hidden h-screen border-r border-border bg-card transition-all duration-300 ease-in-out md:flex md:flex-col",
-          sidebarOpen ? "w-64" : "w-16",
-        )}
-      >
-        <div className="flex items-center gap-3 px-4 h-16 border-b border-border shrink-0">
-          <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary text-primary-foreground">
-            <Zap className="w-4 h-4" />
-          </div>
-          {sidebarOpen && (
-            <span className="font-semibold text-lg tracking-tight truncate">
-              Dntproxy
-            </span>
-          )}
-        </div>
-
-        <ScrollArea className="flex-1 py-3">
-          {Object.entries(groupedItems).map(([group, items]) => (
-            <div key={group} className="mb-2">
-              {sidebarOpen && (
-                <div className="px-4 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                  {group}
-                </div>
-              )}
-              {!sidebarOpen && <Separator className="my-2 mx-2" />}
-              {items.map((item) => (
-                <NavButton key={item.path} item={item} />
-              ))}
-            </div>
-          ))}
-        </ScrollArea>
-
-        <div className="border-t border-border p-2 shrink-0 flex items-center gap-1">
-          <Tooltip delayDuration={0}>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-                className="w-8 h-8"
-              >
-                {mounted && theme === "dark" ? (
-                  <Sun className="w-4 h-4" />
-                ) : (
-                  <Moon className="w-4 h-4" />
-                )}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="right">
-              {mounted && theme === "dark" ? "Light Mode" : "Dark Mode"}
-            </TooltipContent>
-          </Tooltip>
-
-          <Tooltip delayDuration={0}>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={toggleSidebar}
-                className="w-8 h-8"
-              >
-                {sidebarOpen ? (
-                  <ChevronLeft className="w-4 h-4" />
-                ) : (
-                  <ChevronRight className="w-4 h-4" />
-                )}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="right">
-              {sidebarOpen ? "Collapse Sidebar" : "Expand Sidebar"}
-            </TooltipContent>
-          </Tooltip>
-        </div>
-      </aside>
+      <Sidebar
+        sidebarOpen={sidebarOpen}
+        groupedItems={groupedItems}
+        isActive={isActive}
+        onNavigate={handlePageSelect}
+        onToggleSidebar={toggleSidebar}
+        theme={theme}
+        onToggleTheme={() => setTheme(theme === "dark" ? "light" : "dark")}
+        mounted={mounted}
+      />
 
       {/* Mobile Sheet */}
-      <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
-        <SheetContent side="left" className="w-[280px] p-0 md:hidden">
-          <SheetHeader className="border-b border-border px-4 py-3 text-left">
-            <div className="flex items-center gap-3">
-              <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary text-primary-foreground">
-                <Zap className="w-4 h-4" />
-              </div>
-              <div>
-                <SheetTitle className="text-base tracking-tight">
-                  Dntproxy
-                </SheetTitle>
-                <SheetDescription className="text-xs">
-                  Navigation
-                </SheetDescription>
-              </div>
-            </div>
-          </SheetHeader>
-          <ScrollArea className="h-[calc(100%-72px)] py-3">
-            {Object.entries(groupedItems).map(([group, items]) => (
-              <div key={group} className="mb-3">
-                <div className="px-4 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                  {group}
-                </div>
-                {items.map((item) => {
-                  const Icon = item.icon;
-                  const active = isActive(item.path);
-                  return (
-                    <button
-                      key={item.path}
-                      onClick={() => handlePageSelect(item.path)}
-                      className={cn(
-                        "flex items-center gap-3 w-full px-3 py-2 mx-2 rounded-lg text-sm font-medium transition-colors",
-                        active
-                          ? "bg-primary text-primary-foreground"
-                          : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-                      )}
-                    >
-                      <Icon className="w-4 h-4 shrink-0" />
-                      <span className="truncate">{item.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            ))}
-          </ScrollArea>
-        </SheetContent>
-      </Sheet>
+      <MobileMenu
+        open={mobileMenuOpen}
+        onOpenChange={setMobileMenuOpen}
+        groupedItems={groupedItems}
+        isActive={isActive}
+        onNavigate={handlePageSelect}
+      />
 
       {/* Main content */}
       <main

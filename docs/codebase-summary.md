@@ -36,6 +36,18 @@ Core application layers (Clean Architecture).
 Web admin UI (React, Vite, TypeScript).
 - Uses `bun` as the preferred package manager.
 - Features tools for managing connections, logs, settings, aliases, combos, and tunnel visually.
+- **Modular Architecture**: All major screens refactored into subdirectories (2026-05-08):
+  - `playground/`: Chat interface components (ModelSelector, ParameterControls, MessageList, InputArea)
+  - `logs/`: Log viewer components (LogTable, LogFilters, LogStats, LogDetails)
+  - `profiles/`: Profile management (ProfileList, ProfileForm, ProfileCard)
+  - `api-keys/`: API key management (KeyList, KeyGenerator, KeyCard)
+  - `dashboard/`: Dashboard widgets (StatsCard, QuickActions, RecentActivity)
+  - `connections/`: Connection management (ConnectionCard, ConnectionForm, ConnectionList, QuotaPanel)
+  - `layout/`: Shared layout components (Sidebar, Header, Footer)
+- **Component Consistency**: All screens now use shadcn/ui components (Button, Switch, RadioGroup, Dialog, etc.)
+- **Theme System**: Migrated from hardcoded dark colors to CSS variables for proper theme support
+- **API Client**: Unified `goApi` usage across all components
+- **File Size**: All screen orchestrators now <400 lines, component modules <200 lines
 - **Connections UI**: Collapsible provider groups, grid layout, inline editing modal, quota panel with real-time fetching, logs viewer integration, provider logos.
 - **Tunnel UI**: Enable/disable controls, real-time status polling, URL sharing, security warnings, CLI documentation.
 - **Playground UI**: Enhanced chat interface with model selection, parameter controls, message history.

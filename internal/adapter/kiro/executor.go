@@ -65,7 +65,7 @@ func (e *Executor) Execute(model string, body []byte, credentials *domain.Creden
 		req.Header.Set("Authorization", "Bearer "+credentials.AccessToken)
 	}
 
-	reqlog.SetBodies(string(shared.TruncateBody(shared.SanitizeBody(payloadBytes), 8192)), "")
+	reqlog.SetBodies(shared.PrepareLoggedBody(payloadBytes), "")
 
 	start := time.Now()
 
@@ -87,7 +87,7 @@ func (e *Executor) Execute(model string, body []byte, credentials *domain.Creden
 			respBodyStr = string(bodyBytes)
 		}
 		
-		reqlog.SetBodies("", string(shared.TruncateBody(shared.SanitizeBody(bodyBytes), 8192)))
+		reqlog.SetBodies("", shared.PrepareLoggedBody(bodyBytes))
 		errUpstream := fmt.Errorf("%s", respBodyStr)
 		reqlog.Upstream(kiroBaseURL, "POST", resp.StatusCode, duration, errUpstream)
 

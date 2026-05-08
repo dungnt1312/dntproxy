@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -52,6 +53,47 @@ func ShouldLogRawBodies() bool {
 		logRawBodies = v == "1" || v == "true"
 	})
 	return logRawBodies
+}
+
+// LoggedBodyMaxBytes returns the max number of bytes to store for request/response bodies.
+// Defaults:
+//   - raw bodies disabled: 8KB (sanitized + truncated)
+//   - raw bodies enabled:  1MB (unsanitized, still capped to prevent runaway storage)
+//
+// Override with DNTPROXY_LOG_BODY_MAX_BYTES (0 or negative means "no truncation", but still capped to 1MB).
+func LoggedBodyMaxBytes() int {
+	// Base defaults
+	defaultLimit := 8192
+	hardCap := 1 * 1024 * 1024
+	if ShouldLogRawBodies() {
+		defaultLimit = hardCap
+	}
+
+	v := os.Getenv("DNTPROXY_LOG_BODY_MAX_BYTES")
+	if v == "" {
+		return defaultLimit
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return defaultLimit
+	}
+	if n <= 0 {
+		return hardCap
+	}
+	if n > hardCap {
+		return hardCap
+	}
+	return n
+}
+
+// PrepareLoggedBody sanitizes and truncates a body for persistent logs.
+// When DNTPROXY_LOG_RAW_BODIES is enabled, sanitization is skipped, but size is still capped.
+func PrepareLoggedBody(b []byte) string {
+	maxBytes := LoggedBodyMaxBytes()
+	if ShouldLogRawBodies() {
+		return TruncateBody(b, maxBytes)
+	}
+	return TruncateBody(SanitizeBody(b), maxBytes)
 }
 
 // TruncateBody returns at most maxBytes of the body as a string,

@@ -122,7 +122,7 @@ func (e *Executor) executeStandard(model string, body []byte, credentials *domai
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
 
-	reqlog.SetBodies(string(shared.TruncateBody(shared.SanitizeBody(forwardBody), 8192)), "")
+	reqlog.SetBodies(shared.PrepareLoggedBody(forwardBody), "")
 
 	start := time.Now()
 
@@ -144,7 +144,7 @@ func (e *Executor) executeStandard(model string, body []byte, credentials *domai
 			respBodyStr = string(bodyBytes)
 		}
 
-		reqlog.SetBodies("", string(shared.TruncateBody(shared.SanitizeBody(bodyBytes), 8192)))
+		reqlog.SetBodies("", shared.PrepareLoggedBody(bodyBytes))
 		errUpstream := fmt.Errorf("%s", respBodyStr)
 		reqlog.Upstream(url, "POST", resp.StatusCode, duration, errUpstream)
 
@@ -195,7 +195,7 @@ func (e *Executor) executeCodexResponses(model string, body []byte, credentials 
 	// Random session_id per request (matches real Codex CLI behavior)
 	req.Header.Set("session_id", fmt.Sprintf("%d-%s", time.Now().UnixMilli(), randomAlphaNum(9)))
 
-	reqlog.SetBodies(string(shared.TruncateBody(shared.SanitizeBody(translatedBody), 8192)), "")
+	reqlog.SetBodies(shared.PrepareLoggedBody(translatedBody), "")
 
 	start := time.Now()
 
@@ -217,7 +217,7 @@ func (e *Executor) executeCodexResponses(model string, body []byte, credentials 
 			respBodyStr = string(bodyBytes)
 		}
 
-		reqlog.SetBodies("", string(shared.TruncateBody(shared.SanitizeBody(bodyBytes), 8192)))
+		reqlog.SetBodies("", shared.PrepareLoggedBody(bodyBytes))
 		errUpstream := fmt.Errorf("%s", respBodyStr)
 		reqlog.Upstream(url, "POST", resp.StatusCode, duration, errUpstream)
 		return nil, resp.StatusCode, fmt.Errorf("codex returned %d: %s", resp.StatusCode, respBodyStr)

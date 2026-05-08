@@ -149,7 +149,7 @@ func (e *Executor) Execute(model string, body []byte, credentials *domain.Creden
 	req.Header.Set("x-api-key", credentials.APIKey)
 	req.Header.Set("anthropic-version", "2023-06-01")
 
-	reqlog.SetBodies(string(shared.TruncateBody(shared.SanitizeBody(anthropicBody), 8192)), "")
+	reqlog.SetBodies(shared.PrepareLoggedBody(anthropicBody), "")
 
 	start := time.Now()
 
@@ -171,7 +171,7 @@ func (e *Executor) Execute(model string, body []byte, credentials *domain.Creden
 			respBodyStr = string(bodyBytes)
 		}
 		
-		reqlog.SetBodies("", string(shared.TruncateBody(shared.SanitizeBody(bodyBytes), 8192)))
+		reqlog.SetBodies("", shared.PrepareLoggedBody(bodyBytes))
 		errUpstream := fmt.Errorf("%s", respBodyStr)
 		reqlog.Upstream(url, "POST", resp.StatusCode, duration, errUpstream)
 		return nil, resp.StatusCode, fmt.Errorf("anthropic returned %d: %s", resp.StatusCode, respBodyStr)

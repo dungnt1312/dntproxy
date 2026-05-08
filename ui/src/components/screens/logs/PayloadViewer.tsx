@@ -1,18 +1,26 @@
-import React, { useState } from "react";
-import { ChevronRight, Copy, Check } from "lucide-react";
+import React, { useMemo, useState } from "react";
+import { ChevronRight, Copy, Check, Maximize2, WrapText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
-export function PayloadViewer({ label, rawContent, defaultOpen = true }: { label: string; rawContent: any; defaultOpen?: boolean }) {
+export function PayloadViewer({ label, rawContent, defaultOpen = true }: { label: string; rawContent: unknown; defaultOpen?: boolean }) {
   const [isOpen, setIsOpen] = useState(defaultOpen);
   const [viewMode, setViewMode] = useState<"formatted" | "raw">("formatted");
   const [copied, setCopied] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const [wrap, setWrap] = useState(true);
 
-  const rawString = typeof rawContent === "string" ? rawContent : JSON.stringify(rawContent);
-
-  if (!rawString || rawString === "{}" || rawString === "[]" || rawString === '""') return null;
+  // JSON.stringify(undefined) returns undefined — normalize to empty string to keep hooks safe.
+  const rawString = (typeof rawContent === "string" ? rawContent : (JSON.stringify(rawContent) ?? "")) ?? "";
+  const hasContent = Boolean(rawString) && rawString !== "{}" && rawString !== "[]" && rawString !== '""';
 
   const handleCopy = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -21,7 +29,8 @@ export function PayloadViewer({ label, rawContent, defaultOpen = true }: { label
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const getFormattedContent = () => {
+  const formatted = useMemo(() => {
+    if (!hasContent) return "";
     if (viewMode === "raw") return rawString;
 
     let content = rawString;
@@ -60,7 +69,7 @@ export function PayloadViewer({ label, rawContent, defaultOpen = true }: { label
                try {
                    const parsed = JSON.parse(block.text);
                    finalContent += `// ${block.tag}\n` + JSON.stringify(parsed, null, 2);
-               } catch (e) {
+               } catch {
                    finalContent += `// ${block.tag} (RAW/INCOMPLETE)\n` + block.text.replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\');
                }
            } else if (block.tag === 'text') {
@@ -84,9 +93,12 @@ export function PayloadViewer({ label, rawContent, defaultOpen = true }: { label
     }
 
     return content;
-  };
+  }, [hasContent, rawString, viewMode]);
 
-  const formatted = getFormattedContent();
+  const isTruncated = rawString.includes("... [truncated ");
+  const displayContent = formatted;
+
+  if (!hasContent) return null;
 
   return (
     <div className="mb-3 rounded-lg border bg-card overflow-hidden shadow-sm">
@@ -99,6 +111,11 @@ export function PayloadViewer({ label, rawContent, defaultOpen = true }: { label
             <ChevronRight className="h-4 w-4 text-muted-foreground" />
           </motion.div>
           {label}
+          {isTruncated && (
+            <span className="text-[10px] font-semibold text-amber-600 dark:text-amber-400 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded">
+              Truncated
+            </span>
+          )}
         </span>
         
         {isOpen && (
@@ -117,6 +134,24 @@ export function PayloadViewer({ label, rawContent, defaultOpen = true }: { label
                 Raw
               </button>
             </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={() => setWrap(w => !w)}
+              title={wrap ? "Disable wrap" : "Enable wrap"}
+            >
+              <WrapText className={cn("h-3.5 w-3.5", wrap ? "text-foreground" : "text-muted-foreground")} />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={() => setExpanded(true)}
+              title="Expand"
+            >
+              <Maximize2 className="h-3.5 w-3.5 text-muted-foreground" />
+            </Button>
             <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleCopy} title="Copy raw payload">
               {copied ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5 text-muted-foreground" />}
             </Button>
@@ -134,13 +169,66 @@ export function PayloadViewer({ label, rawContent, defaultOpen = true }: { label
             className="overflow-hidden border-t"
           >
             <ScrollArea className="max-h-[450px]">
-               <pre className="p-4 text-[13px] font-mono whitespace-pre-wrap break-words bg-[#1e1e1e] text-[#d4d4d4] dark:bg-[#0d0d0d] dark:text-[#c9d1d9] m-0 selection:bg-[#264f78]">
-                 {formatted}
+               <pre className={cn(
+                 "p-4 text-[13px] font-mono bg-[#1e1e1e] text-[#d4d4d4] dark:bg-[#0d0d0d] dark:text-[#c9d1d9] m-0 selection:bg-[#264f78]",
+                 wrap ? "whitespace-pre-wrap wrap-break-word" : "whitespace-pre overflow-x-auto"
+               )}>
+                 {displayContent}
                </pre>
             </ScrollArea>
           </motion.div>
         )}
       </AnimatePresence>
+
+      <Dialog open={expanded} onOpenChange={setExpanded}>
+        <DialogContent className="sm:max-w-5xl max-h-[85vh] flex flex-col">
+          <DialogHeader className="pb-0">
+            <DialogTitle className="text-base">{label}</DialogTitle>
+          </DialogHeader>
+          <div className="flex items-center gap-2 -mt-2">
+            <div className="flex items-center bg-background border rounded-md p-0.5">
+              <button
+                onClick={() => setViewMode("formatted")}
+                className={cn("px-2 py-1 text-[11px] font-medium rounded-sm transition-colors", viewMode === "formatted" ? "bg-muted shadow-sm" : "text-muted-foreground hover:text-foreground")}
+              >
+                Formatted
+              </button>
+              <button
+                onClick={() => setViewMode("raw")}
+                className={cn("px-2 py-1 text-[11px] font-medium rounded-sm transition-colors", viewMode === "raw" ? "bg-muted shadow-sm" : "text-muted-foreground hover:text-foreground")}
+              >
+                Raw
+              </button>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 px-2"
+              onClick={() => setWrap(w => !w)}
+            >
+              <WrapText className="h-4 w-4 mr-1" />
+              {wrap ? "Wrap" : "No wrap"}
+            </Button>
+            <Button variant="outline" size="sm" className="h-8 px-2" onClick={() => navigator.clipboard.writeText(rawString)}>
+              <Copy className="h-4 w-4 mr-1" />
+              Copy
+            </Button>
+            {isTruncated && (
+              <span className="text-xs text-amber-500 ml-auto">
+                Showing truncated payload (increase `DNTPROXY_LOG_BODY_MAX_BYTES` to store more)
+              </span>
+            )}
+          </div>
+          <ScrollArea className="flex-1 mt-2 rounded-md border">
+            <pre className={cn(
+              "p-4 text-[13px] font-mono bg-[#0d0d0d] text-[#c9d1d9] m-0 selection:bg-[#264f78]",
+              wrap ? "whitespace-pre-wrap wrap-break-word" : "whitespace-pre"
+            )}>
+              {displayContent}
+            </pre>
+          </ScrollArea>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

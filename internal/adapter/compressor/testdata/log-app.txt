@@ -1,0 +1,19 @@
+2026-05-08T10:00:01Z INFO  [APP] Server started on :20199
+2026-05-08T10:00:02Z INFO  [KIRO] Connection established conn-001
+2026-05-08T10:00:03Z INFO  [CHAT] POST /v1/chat/completions | model=kr/claude-sonnet
+2026-05-08T10:00:03Z INFO  [KIRO] Request sent requestId=req-abc123
+2026-05-08T10:00:04Z INFO  [KIRO] Stream chunk received bytes=512
+2026-05-08T10:00:04Z INFO  [KIRO] Stream chunk received bytes=512
+2026-05-08T10:00:04Z INFO  [KIRO] Stream chunk received bytes=512
+2026-05-08T10:00:04Z INFO  [KIRO] Stream chunk received bytes=256
+2026-05-08T10:00:04Z INFO  [KIRO] Stream complete requestId=req-abc123
+2026-05-08T10:00:05Z INFO  [CHAT] POST /v1/chat/completions | model=kr/claude-sonnet
+2026-05-08T10:00:05Z INFO  [KIRO] Request sent requestId=req-def456
+2026-05-08T10:00:06Z INFO  [KIRO] Stream chunk received bytes=1024
+2026-05-08T10:00:06Z INFO  [KIRO] Stream chunk received bytes=1024
+2026-05-08T10:00:06Z INFO  [KIRO] Stream complete requestId=req-def456
+2026-05-08T10:00:07Z ERROR [KIRO] Token refresh failed: expired
+2026-05-08T10:00:07Z INFO  [KIRO] Retrying with next account
+2026-05-08T10:00:08Z INFO  [CHAT] POST /v1/chat/completions | model=kr/claude-haiku
+2026-05-08T10:00:08Z INFO  [KIRO] Request sent requestId=req-ghi789
+2026-05-08T10:00:09Z INFO  [KIRO] Stream complete requestId=req-ghi789

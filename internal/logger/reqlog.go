@@ -191,7 +191,7 @@ func (r *RequestLog) emitStructuredLogs() {
 		ID:             r.ID,
 		Level:          level,
 		Provider:       strings.ToUpper(r.ResolvedProvider),
-		Direction:      "request",
+		Direction:      "response",
 		Method:         r.ClientMethod,
 		Path:           r.ClientPath,
 		StatusCode:     r.StatusCode,

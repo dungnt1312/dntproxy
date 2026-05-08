@@ -290,3 +290,14 @@ OpenAI request → model resolve → combo expand → account select →
 - [ ] Dockerization (Dockerfile + docker-compose)
 - [ ] Anthropic adapter implementation
 - [ ] Metrics validation and monitoring
+
+### Phase 7: Message Compressor — DONE
+- `internal/adapter/compressor/` package: `Compressor`, `ContentType`, `Stats`, `Options`
+- `NewWithLoader(func() Options)` — re-reads settings at most once/second (atomic, lock-free)
+- 11-rule priority detector: CodeFile (skip) > GitDiff > GitStatus > GitLog > GoTest > CargoTest > Pytest > LS > Log > JSON > Generic
+- 5 filters in `filters/` sub-package: `GitFilter`, `TestFilter`, `LsFilter`, `LogFilter`, `JSONFilter`
+- Fail-open: any parse error / panic / ratio > 0.85 → return original body unchanged
+- Injected into `chatHandler` and `messagesHandler` (post translation for `/v1/messages`)
+- `domain.CompressionSettings` + `Normalize()` + backward-compatible JSON zero-fill
+- Settings API + UI toggle (Token Compression card in Settings screen)
+- 29 unit tests covering detector, all filters, and end-to-end compressor

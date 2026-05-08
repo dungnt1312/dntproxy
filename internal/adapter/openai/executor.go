@@ -264,6 +264,11 @@ func (e *Executor) executeCodexResponses(model string, body []byte, credentials 
 			}
 		}
 
+		if err := scanner.Err(); err != nil {
+			pw.CloseWithError(err)
+			return
+		}
+
 		// If stream ended without response.completed, send finish
 		if !state.FinishReasonSent {
 			finishReason := "stop"

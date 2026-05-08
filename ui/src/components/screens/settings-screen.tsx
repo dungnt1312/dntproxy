@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { motion } from "framer-motion";
-import { Settings, ShieldAlert, RotateCcw, Save, Loader2 } from "lucide-react";
+import { Settings, ShieldAlert, RotateCcw, Save, Loader2, Sparkles } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -29,6 +29,9 @@ interface SettingsData {
   serverPort: number;
   apiKeyAuthEnabled: boolean;
   defaultRoutingStrategy: string;
+  compressionEnabled: boolean;
+  compressionMinLength: number;
+  compressionLogSavings: boolean;
 }
 
 const DEFAULT_SETTINGS: SettingsData = {
@@ -36,6 +39,9 @@ const DEFAULT_SETTINGS: SettingsData = {
   serverPort: 20199,
   apiKeyAuthEnabled: true,
   defaultRoutingStrategy: "fallback",
+  compressionEnabled: false,
+  compressionMinLength: 500,
+  compressionLogSavings: true,
 };
 
 const containerVariants = {
@@ -95,6 +101,9 @@ export default function SettingsScreen() {
         serverPort: settings.serverPort,
         apiKeyAuthEnabled: settings.apiKeyAuthEnabled,
         defaultRoutingStrategy: settings.defaultRoutingStrategy,
+        compressionEnabled: settings.compressionEnabled,
+        compressionMinLength: settings.compressionMinLength,
+        compressionLogSavings: settings.compressionLogSavings,
       });
       setSettings(json);
       setInitialSettings(json);
@@ -205,6 +214,56 @@ export default function SettingsScreen() {
                 <span className="font-medium">Round-Robin:</span> Rotate the
                 starting model across combo requests.
               </p>
+            </div>
+          </CardContent>
+        </Card>
+      </motion.div>
+
+      {/* Token Compression */}
+      <motion.div variants={itemVariants}>
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <Sparkles className="size-5 text-violet-600" />
+              <CardTitle className="text-base">Token Compression</CardTitle>
+            </div>
+            <CardDescription>
+              Detect verbose command output (git/test/ls/log/json) in tool
+              results and compress before forwarding to provider. Reduces token
+              cost on tool-heavy agent loops.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4 p-6 pt-0">
+            <div className="flex items-center justify-between gap-4">
+              <div className="space-y-0.5">
+                <Label htmlFor="compEnabled">Enable compression</Label>
+                <p className="text-xs text-muted-foreground">
+                  Rewrites tool result content using compact,
+                  semantically-equivalent forms.
+                </p>
+              </div>
+              <Switch
+                id="compEnabled"
+                checked={settings.compressionEnabled}
+                onCheckedChange={(v) => updateField("compressionEnabled", v)}
+              />
+            </div>
+            <div className="flex items-center justify-between gap-4">
+              <div className="space-y-0.5">
+                <Label htmlFor="compLog">Log savings</Label>
+                <p className="text-xs text-muted-foreground">
+                  Track per-request original/compressed bytes in the logs
+                  database.
+                </p>
+              </div>
+              <Switch
+                id="compLog"
+                disabled={!settings.compressionEnabled}
+                checked={settings.compressionLogSavings}
+                onCheckedChange={(v) =>
+                  updateField("compressionLogSavings", v)
+                }
+              />
             </div>
           </CardContent>
         </Card>

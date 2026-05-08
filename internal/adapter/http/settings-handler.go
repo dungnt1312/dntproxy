@@ -15,13 +15,13 @@ func apiGetSettings(store port.CredentialStore) gin.HandlerFunc {
 			c.JSON(500, gin.H{"error": err.Error()})
 			return
 		}
-		
+
 		// Override with actual running port from context
 		settings := cfg.Settings
 		if actualPort := GetServerPort(c); actualPort > 0 {
 			settings.Port = actualPort
 		}
-		
+
 		c.JSON(200, settings)
 	}
 }
@@ -46,6 +46,8 @@ func apiUpdateSettings(store port.CredentialStore) gin.HandlerFunc {
 			if req.ComboStrategies != nil {
 				cfg.Settings.ComboStrategies = req.ComboStrategies
 			}
+			cfg.Settings.Compression = req.Compression
+			cfg.Settings.Compression.Normalize()
 			updated = cfg.Settings
 		}); err != nil {
 			c.JSON(500, gin.H{"error": "Failed to save config"})

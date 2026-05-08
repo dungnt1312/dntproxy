@@ -1,7 +1,7 @@
 ---
 title: "RTK-inspired Message Compressor"
 description: "Pre-provider middleware that detects and compresses verbose command output (git/test/ls/log/json) inside chat messages — pure Go, no binary dependency."
-status: pending
+status: done
 priority: P2
 effort: 3-5 days
 branch: main

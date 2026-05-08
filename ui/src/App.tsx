@@ -24,6 +24,7 @@ import {
   Menu,
   Globe,
   UserCircle,
+  BarChart2,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 
@@ -55,6 +56,7 @@ import LogsScreen from "@/components/screens/logs-screen";
 import SettingsScreen from "@/components/screens/settings-screen";
 import ApiKeysScreen from "@/components/screens/api-keys-screen";
 import BackupScreen from "@/components/screens/backup-screen";
+import UsageScreen from "@/components/screens/usage-screen";
 import TunnelScreen from "@/components/screens/tunnel-screen";
 import ProfilesScreen from "@/components/screens/profiles-screen";
 import AddConnectionPage from "@/components/pages/add-connection-page";
@@ -90,6 +92,7 @@ const navItems: NavItem[] = [
   { path: "/profiles", label: "Profiles", icon: UserCircle, group: "Management" },
   { path: "/api-keys", label: "API Keys", icon: Key, group: "Security" },
   { path: "/tunnel", label: "Tunnel", icon: Globe, group: "Network" },
+  { path: "/usage", label: "Usage", icon: BarChart2, group: "Monitoring" },
   { path: "/logs", label: "Logs", icon: ScrollText, group: "Monitoring" },
   { path: "/settings", label: "Settings", icon: SettingsIcon, group: "System" },
   {
@@ -396,6 +399,7 @@ export default function App() {
             <Route path="/models" element={<ModelsScreen />} />
             <Route path="/profiles" element={<ProfilesScreen />} />
             <Route path="/playground" element={<PlaygroundScreen />} />
+            <Route path="/usage" element={<UsageScreen />} />
             <Route path="/logs" element={<LogsScreen />} />
             <Route path="/settings" element={<SettingsScreen />} />
             <Route path="/api-keys" element={<ApiKeysScreen />} />

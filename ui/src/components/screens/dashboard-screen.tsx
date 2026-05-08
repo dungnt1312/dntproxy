@@ -81,16 +81,16 @@ function formatRelativeTime(dateStr: string | null): string {
   const min = Math.floor(sec / 60)
   if (min < 60) return `${min}m ago`
   const hr = Math.floor(min / 60)
-  return `${hr}h ago`
+  if (hr < 24) return `${hr}h ago`
+  const days = Math.floor(hr / 24)
+  return `${days}d ago`
 }
 
 function formatDayLabel(date: string): string {
-  const d = new Date(date + 'T00:00:00')
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  const d = new Date(date + 'T00:00:00Z')
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
 }
 
-// Map range → days count for chart
-const RANGE_DAYS: Record<KpiRange, string> = { '24h': '7d', '7d': '7d', '30d': '30d' }
 const KPI_RANGE_LABELS: Record<KpiRange, string> = { '24h': 'Today', '7d': '7 days', '30d': '30 days' }
 
 // ─── Main Dashboard ──────────────────────────────────────────────────────────
@@ -103,12 +103,15 @@ export default function DashboardScreen() {
   const [dailyStats, setDailyStats] = useState<DailyUsageStat[]>([])
   const [loading, setLoading] = useState(true)
   const [chartLoading, setChartLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [chartError, setChartError] = useState<string | null>(null)
+  const [lastRefreshed, setLastRefreshed] = useState<number>(Date.now())
   const kpiIntervalRef = useRef<ReturnType<typeof setInterval>>(undefined)
   const chartIntervalRef = useRef<ReturnType<typeof setInterval>>(undefined)
 
   const fetchKpi = useCallback(async (range: KpiRange) => {
     try {
-      const summary = await goApi.getLogSummary({ range }).catch(() => null)
+      const summary = await goApi.getLogSummary({ range })
       setKpi({
         totalRequests: summary?.totalRequests ?? 0,
         errorRequests: summary?.errorRequests ?? 0,
@@ -117,6 +120,10 @@ export default function DashboardScreen() {
         avgLatencyMs: summary?.avgLatencyMs ?? 0,
       })
       setRecentErrors(summary?.recentErrors ?? [])
+      setError(null)
+      setLastRefreshed(Date.now())
+    } catch {
+      setError('Failed to load KPI data')
     } finally {
       setLoading(false)
     }
@@ -124,9 +131,11 @@ export default function DashboardScreen() {
 
   const fetchChart = useCallback(async (range: KpiRange) => {
     try {
-      const chartRange = RANGE_DAYS[range]
-      const stats = await goApi.getLogDaily(chartRange).catch(() => [])
+      const stats = await goApi.getLogDaily(range)
       setDailyStats(Array.isArray(stats) ? stats : [])
+      setChartError(null)
+    } catch {
+      setChartError('Failed to load chart data')
     } finally {
       setChartLoading(false)
     }
@@ -175,11 +184,13 @@ export default function DashboardScreen() {
             <p className="text-xs text-muted-foreground mt-0.5">
               {loading
                 ? 'Loading...'
-                : kpi === null
-                  ? 'No data'
-                  : isHealthy
-                    ? 'System Healthy'
-                    : `${kpi.errorRequests} error${kpi.errorRequests > 1 ? 's' : ''} in ${KPI_RANGE_LABELS[kpiRange].toLowerCase()}`}
+                : error
+                  ? error
+                  : kpi === null
+                    ? 'No data'
+                    : isHealthy
+                      ? `System Healthy · Updated ${formatRelativeTime(new Date(lastRefreshed).toISOString())}`
+                      : `${kpi.errorRequests} error${kpi.errorRequests > 1 ? 's' : ''} in ${KPI_RANGE_LABELS[kpiRange].toLowerCase()}`}
             </p>
           </div>
         </div>
@@ -191,7 +202,7 @@ export default function DashboardScreen() {
                 key={r}
                 onClick={() => setKpiRange(r)}
                 className={cn(
-                  'px-2.5 py-1 text-xs rounded font-medium transition-colors',
+                  'px-2.5 py-1 text-xs rounded font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                   kpiRange === r
                     ? 'bg-background shadow-sm text-foreground'
                     : 'text-muted-foreground hover:text-foreground',
@@ -235,7 +246,7 @@ export default function DashboardScreen() {
             />
             <StatCard label="Total Tokens" value={formatTokens(kpi?.totalTokens ?? 0)} accent="text-blue-400" range={kpiRange} />
             <StatCard label="Avg Latency" value={formatLatency(kpi?.avgLatencyMs ?? 0)} range={kpiRange} />
-            <StatCard label="Est. Cost" value={`~${formatCost(kpi?.costTotal ?? 0)}`} accent="text-amber-500" range={kpiRange} />
+            <StatCard label="Est. Cost" value={formatCost(kpi?.costTotal ?? 0)} accent="text-amber-500" range={kpiRange} />
           </>
         )}
       </div>
@@ -243,7 +254,7 @@ export default function DashboardScreen() {
       {/* ── Chart + Live Feed ── */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
         <div className="lg:col-span-3 space-y-3">
-          <DailyUsageChart data={dailyStats} loading={chartLoading} range={kpiRange} />
+          <DailyUsageChart data={dailyStats} loading={chartLoading} error={chartError} range={kpiRange} onRetry={() => { setChartLoading(true); setChartError(null); fetchChart(kpiRange) }} />
           {recentErrors.length > 0 && (
             <ErrorsHint errors={recentErrors} onViewAll={() => navigate('/logs?level=ERROR')} />
           )}
@@ -279,18 +290,24 @@ function StatCard({ label, value, accent, range }: {
 // ─── Daily Usage Chart ───────────────────────────────────────────────────────
 
 const CHART_COLORS = {
-  requests: '#60a5fa',
-  errors: '#f87171',
-  tokens: '#34d399',
+  requests: 'var(--chart-1)',
+  errors: 'var(--destructive)',
+  tokens: 'var(--chart-2)',
 }
 
 const CHART_RANGE_LABELS: Record<KpiRange, string> = {
-  '24h': 'Last 7 days',
+  '24h': 'Today',
   '7d': 'Last 7 days',
   '30d': 'Last 30 days',
 }
 
-function DailyUsageChart({ data, loading, range }: { data: DailyUsageStat[]; loading: boolean; range: KpiRange }) {
+function DailyUsageChart({ data, loading, error, range, onRetry }: {
+  data: DailyUsageStat[]
+  loading: boolean
+  error: string | null
+  range: KpiRange
+  onRetry: () => void
+}) {
   const maxTokens = Math.max(...data.map(d => d.totalTokens), 0)
   const tokenScale = maxTokens >= 1_000_000 ? 1_000_000 : maxTokens >= 1_000 ? 1_000 : 1
   const tokenLabel = maxTokens >= 1_000_000 ? 'Tokens (M)' : maxTokens >= 1_000 ? 'Tokens (K)' : 'Tokens'
@@ -323,7 +340,7 @@ function DailyUsageChart({ data, loading, range }: { data: DailyUsageStat[]; loa
           </div>
         ) : (
           <ResponsiveContainer width="100%" height={240}>
-            <ComposedChart data={chartData} margin={{ top: 4, right: 8, left: -8, bottom: 0 }}>
+            <ComposedChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.07)" vertical={false} />
               <XAxis
                 dataKey="day"
@@ -504,7 +521,7 @@ function LiveFeed() {
             {paused ? 'Stream paused' : 'Waiting for requests...'}
           </div>
         ) : (
-          <ScrollArea className="h-[calc(100vh-360px)] min-h-[260px]">
+          <ScrollArea className="flex-1 min-h-0">
             <table className="w-full text-xs border-collapse">
               <thead className="sticky top-0 bg-card z-10">
                 <tr className="border-b border-border">
@@ -530,7 +547,7 @@ function FeedRow({ entry }: { entry: LogEntry }) {
   const isError = entry.level === 'ERROR' || (entry.statusCode && entry.statusCode >= 400)
 
   return (
-    <tr className={cn('transition-colors', isError ? 'bg-red-50/50 dark:bg-red-950/10' : 'hover:bg-muted/30')}>
+    <tr className={cn('transition-colors', isError ? 'bg-red-500/10 dark:bg-red-500/15' : 'hover:bg-muted/30')}>
       <td className="py-1.5 pl-1">
         <span className={cn('block w-1.5 h-1.5 rounded-full', isError ? 'bg-red-500' : 'bg-emerald-500')} />
       </td>

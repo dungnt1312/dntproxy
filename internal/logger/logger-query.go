@@ -79,3 +79,24 @@ func (l *Logger) DeletePrice(id string) error {
 	defer cancel()
 	return l.store.DeletePrice(ctx, id)
 }
+
+func (l *Logger) UsageStats(ctx context.Context, period string) (*domain.UsageStatsResponse, error) {
+	if l.store == nil {
+		return &domain.UsageStatsResponse{Period: period}, nil
+	}
+	return l.store.UsageStats(ctx, period)
+}
+
+func (l *Logger) ChartData(ctx context.Context, period string) ([]domain.ChartPoint, error) {
+	if l.store == nil {
+		return nil, nil
+	}
+	return l.store.ChartData(ctx, period)
+}
+
+func (l *Logger) RequestDetails(ctx context.Context, page, pageSize int, provider, startDate, endDate string) (*domain.RequestDetailsResponse, error) {
+	if l.store == nil {
+		return &domain.RequestDetailsResponse{}, nil
+	}
+	return l.store.RequestDetails(ctx, page, pageSize, provider, startDate, endDate)
+}

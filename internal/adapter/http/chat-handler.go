@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/dungnt/dntproxy/internal/adapter/compressor"
 	"github.com/dungnt/dntproxy/internal/port"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -25,7 +26,7 @@ var streamReadTimeout = func() time.Duration {
 	return 5 * time.Minute
 }()
 
-func chatHandler(chatService port.ChatService, store port.CredentialStore) gin.HandlerFunc {
+func chatHandler(chatService port.ChatService, store port.CredentialStore, comp *compressor.Compressor) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		requestID := uuid.New().String()
 
@@ -48,6 +49,13 @@ func chatHandler(chatService port.ChatService, store port.CredentialStore) gin.H
 			return
 		}
 
+		// Compress tool result content before forwarding
+		body, stats := comp.Compress(body)
+		if stats.CompressedBytes > 0 && stats.CompressedBytes < stats.OriginalBytes {
+			log.Printf("[COMPRESS] orig=%d comp=%d saved=%d tokens",
+				stats.OriginalBytes, stats.CompressedBytes, stats.TokensSaved)
+		}
+
 		log.Printf("[CHAT] POST /v1/chat/completions | model=%s", partial.Model)
 
 		result := chatService.HandleChat(body, partial.Model, requestID)
@@ -60,6 +68,7 @@ func chatHandler(chatService port.ChatService, store port.CredentialStore) gin.H
 			c.Status(http.StatusOK)
 			c.Writer.Flush()
 
+			var bytesReceived int64
 			done := make(chan struct{})
 			defer close(done)
 			chunks, errs := streamChunks(done, result.Stream)
@@ -78,6 +87,7 @@ func chatHandler(chatService port.ChatService, store port.CredentialStore) gin.H
 							return
 						}
 						c.Writer.Flush()
+						bytesReceived += int64(len(chunk))
 					}
 					if !timeout.Stop() {
 						select {
@@ -88,12 +98,12 @@ func chatHandler(chatService port.ChatService, store port.CredentialStore) gin.H
 					timeout.Reset(streamReadTimeout)
 				case readErr, ok := <-errs:
 					if ok && readErr != nil && readErr != io.EOF {
-						log.Printf("[CHAT] Stream error: %s", readErr)
+						log.Printf("[CHAT] Stream error: model=%s bytes=%d err=%s", partial.Model, bytesReceived, readErr)
 					}
 					result.Stream.Close()
 					return
 				case <-timeout.C:
-					log.Printf("[CHAT] Stream error: stream read timeout after %v", streamReadTimeout)
+					log.Printf("[CHAT] Stream timeout after %v | model=%s bytes=%d", streamReadTimeout, partial.Model, bytesReceived)
 					result.Stream.Close()
 					return
 				case <-c.Request.Context().Done():

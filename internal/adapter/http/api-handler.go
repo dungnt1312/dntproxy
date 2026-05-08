@@ -89,7 +89,12 @@ func RegisterAPIRoutes(r *gin.Engine, store port.CredentialStore, providers port
 		api.GET("/logs/stream", apiLogStream)
 		api.POST("/logs/clear", apiClearLogs)
 
-		// Usage/Quota
+		// Usage Analytics
+		api.GET("/usage/stats", apiGetUsageStats)
+		api.GET("/usage/chart", apiGetUsageChart)
+		api.GET("/usage/request-details", apiGetRequestDetails)
+
+		// Usage/Quota (per-connection)
 		api.GET("/usage/:connectionId", apiGetUsage(store))
 
 		// Backup
@@ -145,16 +150,16 @@ func apiDebugAccounts(store port.CredentialStore) gin.HandlerFunc {
 		log.Printf("[DEBUG] GetActiveConnections(%s) -> %d connections", provider, len(connections))
 
 		type safeDebugConn struct {
-			ID              string            `json:"id"`
-			Name            string            `json:"name"`
-			IsActive        bool              `json:"isActive"`
-			Weight          int               `json:"weight"`
-			SupportedModels []string          `json:"supportedModels"`
-			RateLimitedUntil string           `json:"rateLimitedUntil"`
-			ModelLocks      map[string]string `json:"modelLocks"`
-			BackoffLevel    int               `json:"backoffLevel"`
-			HasToken        bool              `json:"hasToken"`
-			HasAPIKey       bool              `json:"hasApiKey"`
+			ID               string            `json:"id"`
+			Name             string            `json:"name"`
+			IsActive         bool              `json:"isActive"`
+			Weight           int               `json:"weight"`
+			SupportedModels  []string          `json:"supportedModels"`
+			RateLimitedUntil string            `json:"rateLimitedUntil"`
+			ModelLocks       map[string]string `json:"modelLocks"`
+			BackoffLevel     int               `json:"backoffLevel"`
+			HasToken         bool              `json:"hasToken"`
+			HasAPIKey        bool              `json:"hasApiKey"`
 		}
 
 		var safe []safeDebugConn

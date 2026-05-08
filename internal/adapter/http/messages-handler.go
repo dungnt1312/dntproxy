@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/dungnt/dntproxy/internal/adapter/compressor"
 	"github.com/dungnt/dntproxy/internal/port"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -69,7 +70,7 @@ type openaiToolFn2 struct {
 
 // messagesHandler handles POST /v1/messages (Anthropic Messages API compatible).
 // Translates Anthropic format → OpenAI format → chatService → OpenAI SSE → Anthropic SSE.
-func messagesHandler(chatService port.ChatService, store port.CredentialStore) gin.HandlerFunc {
+func messagesHandler(chatService port.ChatService, store port.CredentialStore, comp *compressor.Compressor) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		requestID := uuid.New().String()
 
@@ -105,6 +106,13 @@ func messagesHandler(chatService port.ChatService, store port.CredentialStore) g
 		if err != nil {
 			writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "Translation error: "+err.Error())
 			return
+		}
+
+		// Compress tool result content before forwarding
+		openaiBody, stats := comp.Compress(openaiBody)
+		if stats.CompressedBytes > 0 && stats.CompressedBytes < stats.OriginalBytes {
+			log.Printf("[COMPRESS] orig=%d comp=%d saved=%d tokens",
+				stats.OriginalBytes, stats.CompressedBytes, stats.TokensSaved)
 		}
 
 		// Use chatService (always gets OpenAI SSE stream back)

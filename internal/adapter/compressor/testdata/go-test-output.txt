@@ -1,0 +1,23 @@
+=== RUN   TestCompress
+=== RUN   TestCompress/disabled
+--- PASS: TestCompress/disabled (0.00s)
+=== RUN   TestCompress/git_diff
+--- PASS: TestCompress/git_diff (0.00s)
+--- PASS: TestCompress (0.01s)
+=== RUN   TestDetect
+=== RUN   TestDetect/code_file
+--- PASS: TestDetect/code_file (0.00s)
+=== RUN   TestDetect/git_diff
+--- PASS: TestDetect/git_diff (0.00s)
+--- PASS: TestDetect (0.00s)
+=== RUN   TestGitFilter
+=== RUN   TestGitFilter/status
+--- PASS: TestGitFilter/status (0.00s)
+=== RUN   TestGitFilter/diff
+--- FAIL: TestGitFilter/diff (0.01s)
+    git_filter_test.go:42: ratio=0.92 exceeded 0.60
+=== RUN   TestLogFilter
+=== RUN   TestLogFilter/dedup
+--- PASS: TestLogFilter/dedup (0.00s)
+--- PASS: TestLogFilter (0.00s)
+FAIL	github.com/dungnt/dntproxy/internal/adapter/compressor	0.06s

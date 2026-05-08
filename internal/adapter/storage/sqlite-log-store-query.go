@@ -43,13 +43,13 @@ func (s *SQLiteLogStore) List(ctx context.Context, query domain.LogQuery) ([]dom
 func (s *SQLiteLogStore) Summary(ctx context.Context, query domain.LogQuery) (*domain.LogSummary, error) {
 	where, args := buildLogWhere(query)
 	row := s.db.QueryRowContext(ctx, `SELECT
-		COUNT(CASE WHEN direction = 'request' THEN 1 END),
+		COUNT(CASE WHEN direction = 'response' THEN 1 END),
 		COUNT(CASE WHEN level = 'ERROR' THEN 1 END),
 		COALESCE(SUM(input_tokens), 0),
 		COALESCE(SUM(output_tokens), 0),
 		COALESCE(SUM(total_tokens), 0),
 		COALESCE(SUM(cost_total), 0),
-		COALESCE(AVG(CASE WHEN direction = 'request' AND duration_ms > 0 THEN duration_ms END), 0)
+		COALESCE(AVG(CASE WHEN direction = 'response' AND duration_ms > 0 THEN duration_ms END), 0)
 		FROM request_logs `+where, args...)
 
 	summary := &domain.LogSummary{Currency: "USD"}
@@ -102,7 +102,7 @@ func (s *SQLiteLogStore) DailyStats(ctx context.Context, query domain.LogQuery) 
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT
 			date(timestamp_ms/1000, 'unixepoch', 'localtime') as day,
-			COUNT(CASE WHEN direction = 'request' THEN 1 END),
+			COUNT(CASE WHEN direction = 'response' THEN 1 END),
 			COUNT(CASE WHEN level = 'ERROR' THEN 1 END),
 			COALESCE(SUM(input_tokens), 0),
 			COALESCE(SUM(output_tokens), 0),

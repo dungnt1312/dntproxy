@@ -209,6 +209,9 @@ function mapSettings(go: any) {
     serverPort: Number(go.port ?? 20199),
     apiKeyAuthEnabled: Boolean(go.requireApiKey),
     defaultRoutingStrategy: String(go.comboStrategy || "fallback"),
+    compressionEnabled: Boolean(go?.compression?.enabled),
+    compressionMinLength: Number(go?.compression?.minContentLength ?? 500),
+    compressionLogSavings: go?.compression?.logSavings !== false,
   };
 }
 
@@ -345,6 +348,11 @@ export const goApi: any = {
       comboStrategy:
         data.defaultRoutingStrategy ?? data.comboStrategy ?? "fallback",
       stickyRoundRobinLimit: data.stickyRoundRobinLimit ?? 3,
+      compression: {
+        enabled: Boolean(data.compressionEnabled ?? false),
+        minContentLength: Number(data.compressionMinLength ?? 500),
+        logSavings: data.compressionLogSavings !== false,
+      },
     };
     return goRequest("/settings", {
       method: "PUT",

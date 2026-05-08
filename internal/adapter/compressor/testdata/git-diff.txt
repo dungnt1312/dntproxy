@@ -1,0 +1,22 @@
+diff --git a/internal/service/chat-service.go b/internal/service/chat-service.go
+index 1a2b3c4..5d6e7f8 100644
+--- a/internal/service/chat-service.go
++++ b/internal/service/chat-service.go
+@@ -10,7 +10,7 @@ func (s *chatService) HandleChat(body []byte, model string, requestID string) po
+ 	ctx := context.Background()
+ 	resolved, err := s.resolver.Resolve(model)
+ 	if err != nil {
+-		return port.ChatResult{StatusCode: 400, Error: "unknown model"}
++		return port.ChatResult{StatusCode: 404, Error: "model not found: " + model}
+ 	}
+ 	conn, creds, err := s.selector.Select(ctx, resolved.Provider, resolved.Model)
+ 	if err != nil {
+@@ -22,6 +22,10 @@ func (s *chatService) HandleChat(body []byte, model string, requestID string) po
+ 	if err != nil {
+ 		return port.ChatResult{StatusCode: 500, Error: err.Error()}
+ 	}
++	if result.Stream == nil {
++		return port.ChatResult{StatusCode: 502, Error: "no stream from provider"}
++	}
+ 	return result
+ }

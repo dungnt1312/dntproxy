@@ -11,51 +11,49 @@
 
 ## Overview
 
-Build the standalone `internal/adapter/compressor/` package. Pure Go, no external deps, no other internal packages — depends only on `encoding/json`, `regexp`, `strings`, `bufio`, `bytes`. Importable from the http adapter without creating cycles.
-
-## Key Insights
-
-- All 5 filters share the same shape: `func(in string) (out string, ok bool)`. `ok=false` means "I don't recognize this content, leave alone".
-- Detector is heuristic, not perfect — every filter must self-validate via regex anchors and bail (`ok=false`) if surprised. **Fail-open is the contract.**
-- Most token bloat in tool-using agent loops is `tool_call` / `tool_result` content. Iterating only those messages keeps cost ≤O(N\_tool_msgs · content_len), not O(full_body).
+Build the standalone `internal/adapter/compressor/` package. Pure Go, no external deps, no other internal packages — depends only on `encoding/json`, `regexp`, `strings`, `bufio`, `bytes`.
 
 ## Requirements
 
 ### Functional
-- `Compress(body []byte) ([]byte, Stats)` rewrites `messages[*].content` (string or content-block array) only when:
-  - role ∈ {`tool`, `user`, `assistant`}, AND
+- `Compress(body []byte) ([]byte, Stats)` rewrites tool result content only when:
+  - Content source is a tool result (Shape A or B — see Message Parser section), AND
   - content length ≥ `MinContentLength` (default 500), AND
-  - detected ContentType ≠ `ContentGeneric`.
-- Original body returned verbatim on any error path (JSON parse fail, regex panic recover, unknown structure).
-- `Stats` carries: `OriginalBytes`, `CompressedBytes`, `TokensSaved` (= `(orig-comp)/4`), `Detections map[string]int` (e.g. `{"go-test":3, "git-diff":1}`).
+  - detected ContentType ≠ `ContentGeneric` AND ≠ `ContentCodeFile`, AND
+  - compression ratio < 0.85 (at least 15% savings).
+- **Skip block when any of these is true:**
+  - `is_error: true` on the tool result block.
+  - ContentType = `ContentCodeFile`.
+  - Content has base64 line: any line matching `^[A-Za-z0-9+/]{60,}={0,2}$`.
+  - After filter, `len(out) > len(in) * 0.85`.
+- Original body returned verbatim on any error path (JSON parse fail, regex panic, unknown structure).
+- `Stats` carries: `OriginalBytes`, `CompressedBytes`, `TokensSaved` (= `(orig-comp)/4`), `Detections map[string]int`, `Skipped int`.
 
 ### Non-Functional
 - Single-pass scan per filter — no nested re-tokenization.
-- Total compressor latency ≤2ms for 100KB body on a single core.
-- Each Go file ≤200 lines.
+- Total compressor latency ≤ 2ms for 100KB body on a single core.
+- Each Go file ≤ 200 lines.
 
 ## Architecture
 
 ```
 internal/adapter/compressor/
-├── compressor.go           // public API: New(opts), Compress(body)
+├── compressor.go           // New(opts), Compress(body)
 ├── content-detector.go     // Detect(s string) ContentType
-├── message-parser.go       // walkMessages(body, fn) — visits content strings
-├── stats.go                // Stats struct + helpers
+├── message-parser.go       // walkMessages — visits tool result content only
+├── stats.go                // Stats + Options structs
 └── filters/
-    ├── filter.go           // shared types: Filter func(string) (string, bool)
-    ├── git-filter.go       // status / diff / log
-    ├── test-filter.go      // go test / cargo test / pytest
-    ├── ls-filter.go        // ls / tree / find
-    ├── log-filter.go       // generic log dedup + truncation
-    └── json-filter.go      // structure-only JSON
+    ├── filter.go           // type Filter func(string) (string, bool)
+    ├── git-filter.go
+    ├── test-filter.go
+    ├── ls-filter.go
+    ├── log-filter.go
+    └── json-filter.go
 ```
 
 ### Public API (`compressor.go`)
 
 ```go
-package compressor
-
 type Options struct {
     Enabled          bool
     MinContentLength int  // default 500
@@ -67,69 +65,160 @@ type Stats struct {
     CompressedBytes int
     TokensSaved     int
     Detections      map[string]int
-}
-
-type Compressor struct {
-    opts    Options
-    filters map[ContentType]filters.Filter
+    Skipped         int
 }
 
 func New(opts Options) *Compressor
-func (c *Compressor) Compress(body []byte) ([]byte, Stats)  // never returns error — fail-open
+func (c *Compressor) Compress(body []byte) ([]byte, Stats)
 ```
 
-### Detector Rules (`content-detector.go`)
+### Content Detector (`content-detector.go`)
 
-Check in priority order (most specific first), short-circuit on first match:
+Check in this priority order, short-circuit on first match:
 
-| ContentType  | Detection (literal substring or regex anchor) |
-|--------------|-----------------------------------------------|
-| `ContentGitDiff`   | starts with `diff --git` OR contains `\n@@ -` AND `\n+++` |
-| `ContentGitStatus` | contains `On branch ` AND (`Changes not staged` OR `nothing to commit` OR `Untracked files:`) |
-| `ContentGitLog`    | matches `commit [a-f0-9]{40}` ≥2 times |
-| `ContentGoTest`    | contains `--- PASS:` OR `--- FAIL:` OR matches `^FAIL\t` (multiline) |
-| `ContentCargoTest` | contains `running ` AND `test result: ` AND ` passed; ` |
-| `ContentPytest`    | contains `===== ` AND (`passed` OR `failed` OR `error`) AND `pytest` (case-insensitive) |
-| `ContentLS`        | ≥3 lines starting with `[d-][rwx-]{9}` OR ≥5 lines starting with `├──`/`└──`/`│   ` |
-| `ContentJSON`      | `strings.TrimSpace(s)` starts with `{` or `[` AND `json.Valid([]byte(s))==true` |
-| `ContentLog`       | ≥10 lines, ≥30% match `^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}` (timestamp prefix) |
-| `ContentGeneric`   | fallback — no compression applied |
+| # | ContentType | Rule |
+|---|-------------|------|
+| 1 | `ContentCodeFile` | **skip — no compress.** ≥ 3 distinct lines starting with any of: `package `, `import `, `func `, `class `, `def `, `const `, `type ` |
+| 2 | `ContentGitDiff` | starts with `diff --git ` OR (`\n@@ -` AND `\n+++ ` both present) |
+| 3 | `ContentGitStatus` | `On branch ` AND (`Changes not staged` OR `nothing to commit` OR `Untracked files:`) |
+| 4 | `ContentGitLog` | `^commit [a-f0-9]{40}` (multiline) matches ≥ 2 times |
+| 5 | `ContentGoTest` | `--- PASS:` OR `--- FAIL:` OR `=== RUN   ` OR `^FAIL\t` (multiline) |
+| 6 | `ContentCargoTest` | `running ` AND `test result: ` AND ` passed; ` |
+| 7 | `ContentPytest` | `=====` AND (`passed` OR `failed` OR `error`) AND `pytest` (case-insensitive) |
+| 8 | `ContentLS` | ≥ 3 lines matching `^[d-][rwx-]{9}` OR ≥ 5 lines starting with `├──` / `└──` / `│` |
+| 9 | `ContentLog` | ≥ 10 lines, ≥ 30% match `^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}` |
+| 10 | `ContentJSON` | trimmed starts with `{` or `[` AND `json.Valid() == true` |
+| 11 | `ContentGeneric` | fallback — no compression applied |
 
-Compile all regexes once (package-level `var = regexp.MustCompile(...)`).
+Compile all regexes once at package level with `regexp.MustCompile`.
 
 ### Filter Specs
 
 #### `git-filter.go`
-- **status:** keep first `On branch` line; collapse "Changes not staged"/"Changes to be committed" sections to `Modified: a.go, b.go (3 files)`; drop hint lines starting with `  (use "git ...")`.
-- **diff:** keep `diff --git`, `--- a/`, `+++ b/`, `@@` headers, and `+`/`-` lines; drop unchanged context lines (no leading `+`/`-`); drop `index abc..def` and `Binary files differ` notes by replacing with single placeholder.
-- **log:** keep `commit <sha>`, `Author: ...`, `Date: ...` (compacted to one line: `commit abc1234 by Alice 2026-05-01`), drop blank lines and indented body except first 80 chars of subject.
+
+**status input → output:**
+```
+# Before (many lines)
+On branch main
+Your branch is up to date with 'origin/main'.
+
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+        modified:   foo.go
+        modified:   bar.go
+
+# After
+On branch main
+Modified: foo.go, bar.go (2 files)
+```
+- Keep first `On branch` line.
+- Collapse staged/unstaged sections to single `Modified: ..., ... (N files)` line.
+- Drop all `(use "git ...")` hint lines and blank lines.
+
+**diff input → output:**
+```
+# Before
+diff --git a/foo.go b/foo.go
+index abc1234..def5678 100644
+--- a/foo.go
++++ b/foo.go
+@@ -10,7 +10,7 @@ func Foo() {
+ context line
+-old line
++new line
+ context line
+
+# After
+diff --git a/foo.go b/foo.go
+--- a/foo.go +++ b/foo.go
+@@ -10,7 +10,7 @@
+-old line
++new line
+```
+- Keep `diff --git` line.
+- Merge `--- a/` and `+++ b/` into one line.
+- Keep `@@` headers, strip trailing context descriptor after `@@`.
+- Keep `+` and `-` lines.
+- Drop context lines (lines with no `+`/`-` prefix).
+- Drop `index abc..def` lines.
+
+**log:** compact each commit to one line: `abc1234 Alice 2026-05-01: first 80 chars of subject`.
 
 #### `test-filter.go`
-- **go test:** drop every line containing `--- PASS:` and following indented run output until next `=== `, `--- `, `FAIL`, `PASS`, or end. Keep `--- FAIL:`, `panic:` and next 10 lines, final `FAIL`/`ok` summary line.
-- **cargo test:** drop lines matching `^test .* ... ok$`. Keep `failed`/`FAILED`, `test result:` summary, `running N tests`.
-- **pytest:** keep lines starting with `FAILED `, `ERROR `, `===== ` (separators), and final summary line; drop the rest.
+
+**go test input → output:**
+```
+# Before
+=== RUN   TestFoo
+=== RUN   TestFoo/sub1
+--- PASS: TestFoo/sub1 (0.00s)
+--- PASS: TestFoo (0.01s)
+=== RUN   TestBar
+--- FAIL: TestBar (0.05s)
+    bar_test.go:42: expected 1 got 2
+FAIL    github.com/foo/bar  0.06s
+
+# After
+--- FAIL: TestBar (0.05s)
+    bar_test.go:42: expected 1 got 2
+FAIL    github.com/foo/bar  0.06s
+```
+- Drop `=== RUN` lines.
+- Drop `--- PASS:` lines and their indented output.
+- Keep `--- FAIL:` + indented lines until next `=== ` / `--- ` / `FAIL` / `ok`.
+- Keep final `FAIL`/`ok` summary line.
+
+**cargo test:** drop lines matching `^test .* \.\.\. ok$`; keep `FAILED`, `test result:` summary, `running N tests`.
+
+**pytest:** keep `FAILED `, `ERROR `, `=====` separators, and final summary; drop the rest.
 
 #### `ls-filter.go`
-- **ls -l:** group by directory; replace runs of `[d-][rwx-]{9} ... filename` with `<dirname>/ (N files, M dirs)`.
-- **tree:** for each subtree of >5 entries, print first 3 + `... (N more)` + last entry.
-- **find:** dedup by directory prefix; if >10 results in same dir, print `<dir>/ (N matches)`.
+- **ls -l:** replace runs of `[d-][rwx-]{9} ... filename` lines with `<dirname>/ (N files, M dirs)`.
+- **tree:** for subtrees > 5 entries, print first 3 + `... (N more)` + last entry.
+- **find:** dedup by directory prefix; > 10 results in same dir → `<dir>/ (N matches)`.
 
 #### `log-filter.go`
-- Sliding-window dedup: identical adjacent lines replaced with `<line> ×N`.
-- Strip ISO/RFC3339 timestamp prefixes from leading 19 chars on every line where regex matches (saves ~22 chars/line).
-- If after dedup still >200 lines, keep first 50 + `... [<N> lines elided] ...` + last 50.
+- Sliding-window dedup: identical adjacent lines → `<line> ×N`.
+- Strip ISO/RFC3339 timestamp prefix (leading 19–32 chars) on matched lines.
+- If after dedup still > 200 lines, keep first 50 + `... [N lines elided] ...` + last 50.
 
 #### `json-filter.go`
-- Parse with `json.Decoder`. Emit a structural skeleton:
-  - object → `{"key1": "...", "key2": 0, "nested": {...}}`
-  - array → `[{...} ×N]` with element-count summary
-  - depth limit: 3 levels; truncate beyond.
+- Emit structural skeleton: object → `{"key": "...", "nested": {...}}`, array → `[{...} ×N]`.
+- Depth limit: 3 levels, truncate beyond with `...`.
 - If parse fails mid-way, return original (`ok=false`).
 
 ### Message Parser (`message-parser.go`)
 
-Walk the body via `map[string]json.RawMessage` to preserve order and unknown fields:
+Only visit tool result content — two shapes:
 
+**Shape A — OpenAI tool role:**
+```json
+{"role": "tool", "tool_call_id": "...", "content": "string output"}
+```
+Target: `msg["content"]` string.
+
+**Shape B — user message wrapping tool_result block:**
+```json
+{
+  "role": "user",
+  "content": [
+    {"type": "tool_result", "tool_use_id": "...", "is_error": false, "content": "string output"}
+  ]
+}
+```
+Or content as array of text blocks:
+```json
+{"type": "tool_result", "content": [{"type": "text", "text": "string output"}]}
+```
+
+**Skip rules (checked before compress):**
+1. Shape B block has `is_error == true` → skip block.
+2. ContentType == `ContentCodeFile` → skip.
+3. Content has base64 line → skip.
+4. After filter, ratio > 0.85 → return original.
+
+Implementation skeleton:
 ```go
 func walkAndCompress(body []byte, c *Compressor) ([]byte, Stats) {
     var raw map[string]json.RawMessage
@@ -138,19 +227,25 @@ func walkAndCompress(body []byte, c *Compressor) ([]byte, Stats) {
     if !ok { return body, Stats{} }
     var msgs []map[string]json.RawMessage
     if err := json.Unmarshal(msgsRaw, &msgs); err != nil { return body, Stats{} }
-    // for each msg: inspect role, mutate "content" if eligible
-    // ...
+
+    var stats Stats
+    for i, msg := range msgs {
+        var role string
+        _ = json.Unmarshal(msg["role"], &role)
+        switch role {
+        case "tool":
+            msgs[i], stats = compressShapeA(msg, stats, c)
+        case "user":
+            msgs[i], stats = compressShapeB(msg, stats, c)
+        }
+    }
+
     raw["messages"], _ = json.Marshal(msgs)
     out, err := json.Marshal(raw)
     if err != nil { return body, Stats{} }
     return out, stats
 }
 ```
-
-Content shapes to handle:
-- `"content": "string..."` — plain string.
-- `"content": [{"type":"text", "text":"..."}, ...]` — Anthropic-style content blocks; only `text` blocks rewritten.
-- Any other shape → skipped silently.
 
 ## Related Code Files
 
@@ -171,61 +266,69 @@ Content shapes to handle:
 
 ## Implementation Steps
 
-1. Create `internal/adapter/compressor/` directory.
-2. Write `stats.go` (~30 lines) — pure data type.
-3. Write `filters/filter.go` (~25 lines) — `type Filter func(string) (string, bool)` plus `ContentType` enum mirror.
-4. Write `compressor.go` (~80 lines) — `New`, `Compress`, filter dispatch table. Use `defer recover()` around each filter call so a regex bug never panics the request thread.
-5. Write `content-detector.go` (~120 lines) — package-level compiled regexes + `Detect(string) ContentType`.
-6. Write `message-parser.go` (~150 lines) — `walkAndCompress` plus content-shape helpers.
-7. Write each filter (`git`, `test`, `ls`, `log`, `json`) — each ≤200 lines, single-pass, no shared mutable state.
-8. Run `go build ./internal/adapter/compressor/...` until clean.
+1. Create `internal/adapter/compressor/` and `filters/` directories.
+2. Write `stats.go` — `Stats` + `Options` structs.
+3. Write `filters/filter.go` — `type Filter func(string) (string, bool)` + `ContentType` enum (11 values).
+4. Write `content-detector.go` — 11 rules in priority order, all regexes compiled at package level.
+5. Write `compressor.go` — `New`, `Compress`, filter dispatch table, `defer recover()` per filter call.
+6. Write `message-parser.go` — `walkAndCompress` + `compressShapeA` + `compressShapeB` + all skip logic.
+7. Write `filters/git-filter.go` — status / diff / log sub-detection.
+8. Write `filters/test-filter.go` — go test / cargo test / pytest sub-detection.
+9. Write `filters/ls-filter.go` — ls -l / tree / find sub-detection.
+10. Write `filters/log-filter.go`.
+11. Write `filters/json-filter.go`.
+12. Run `go build ./internal/adapter/compressor/...` until clean.
 
 ## Todo
 
-- [ ] Scaffold package directory and `filters/` subpackage.
-- [ ] Define `ContentType` enum + `Filter` signature.
-- [ ] Implement `Stats` + `Options` types.
-- [ ] Implement detector with all 9 rules + tests inline against literal fixtures.
-- [ ] Implement git filter (status / diff / log dispatched by sub-detection).
-- [ ] Implement test filter (go / cargo / pytest dispatched by sub-detection).
-- [ ] Implement ls filter (ls -l / tree / find dispatched by sub-detection).
-- [ ] Implement log filter.
-- [ ] Implement json filter.
-- [ ] Implement message parser with both string and content-block shapes.
-- [ ] Wire dispatcher in `compressor.go` with `recover()` guard.
+- [ ] Create package directories.
+- [ ] `stats.go` — `Stats` (with `Skipped int`) + `Options`.
+- [ ] `filters/filter.go` — `Filter` type + `ContentType` enum (11 values, `ContentCodeFile` first).
+- [ ] `content-detector.go` — all 11 rules, `ContentCodeFile` at priority 1.
+- [ ] `compressor.go` — dispatch + `recover()` guard.
+- [ ] `message-parser.go` — Shape A, Shape B, `is_error` skip, base64 skip, ratio gate.
+- [ ] `filters/git-filter.go` — status, diff, log.
+- [ ] `filters/test-filter.go` — go test, cargo test, pytest.
+- [ ] `filters/ls-filter.go` — ls, tree, find.
+- [ ] `filters/log-filter.go` — dedup + truncate.
+- [ ] `filters/json-filter.go` — skeleton output.
 - [ ] `go vet ./internal/adapter/compressor/...` clean.
 
 ## Success Criteria
 
-- Package compiles standalone.
-- `go vet` and `go build` clean.
-- For every detector rule, a hand-crafted fixture flips it to the right `ContentType`.
-- For every filter, `len(out) < len(in) * 0.7` on a representative fixture (git diff, go test, etc.).
-- `Compress(invalidJSON)` returns the input bytes unchanged with empty Stats.
-- `Compress` of a body with no `messages` key returns input unchanged.
+- Package compiles standalone, `go vet` clean.
+- `ContentCodeFile` fires on Go/Python/TS source fixture → no compression.
+- `is_error: true` tool result → passes through unchanged.
+- Each detector rule has a fixture that resolves to the correct `ContentType`.
+- Each filter: `len(out) < len(in) * 0.80` on representative fixture.
+- `Compress(invalidJSON)` → input unchanged, empty Stats.
+- `Compress` on body with no `messages` key → input unchanged.
+- Ratio gate: if filter produces > 85% of original size → original returned.
 
 ## Risk Assessment
 
 | Risk | Mitigation |
 |------|------------|
-| Filter accidentally drops semantic content | Self-validation: every filter checks invariants (e.g. test filter must keep at least one summary line); fail-open if invariant violated. |
-| Regex panic on pathological input | `defer recover()` wrapper around filter dispatch in `compressor.go`. |
-| JSON re-marshal reorders keys | Use `map[string]json.RawMessage` + careful re-assembly preserving original order where Go's stdlib allows; document key order is best-effort. |
-| Unicode (CJK / emoji) breaks line counting | Use `bufio.Scanner` with `ScanLines`; rune-aware substring slicing where needed. |
+| Filter drops semantic content (source code) | `ContentCodeFile` detection bails before any filter runs. |
+| Filter drops error details | `is_error: true` skip rule, never compress error outputs. |
+| Base64/binary output corrupted | Base64 line heuristic skips entire block. |
+| Regex panic on pathological input | `defer recover()` in `compressor.go` dispatch. |
+| JSON re-marshal reorders keys | `map[string]json.RawMessage` preserves most keys; document as best-effort. |
+| Unicode breaks line counting | `bufio.Scanner` with `ScanLines` handles all line endings correctly. |
 
 ## Security Considerations
 
-- Compressor never logs message content (only sizes and detection counts).
-- `recover()` swallows panics but logs `[compressor] recovered: <err>` to `internal/logger` — no message body in log line.
-- Body must remain valid JSON post-compression; downstream `chatService.HandleChat` re-parses and would 400 on invalid JSON, defeating the proxy.
+- Compressor never logs message content — only sizes and detection type counts.
+- `recover()` logs `[compressor] recovered: <err>` with no message body.
+- Output must be valid JSON; invalid output would cause downstream 400 errors.
 
 ## Next Steps
 
-- Phase 2 wires `Options` to `domain.Settings.Compression` so settings drive runtime behavior.
-- Phase 5 brings the unit-test suite that exercises every fixture.
+- Phase 2: wire `Options` into `domain.Settings` so the feature is runtime-configurable.
+- Phase 5: unit-test suite with fixtures for every detector rule and filter.
 
 ## Unresolved Questions
 
-1. Should compression also run on the `system` message? **Recommendation:** No for v1 (system is short and prompt-engineered).
-2. Should we expose `Options.AggressiveJSON` to drop array elements beyond first 3? **Recommendation:** Defer to v2 once savings telemetry is real.
-3. Compress streaming responses too? **Out of scope** — this plan is request-only.
+1. Should `system` messages be compressed? **No for v1** — system prompts are short and prompt-engineered.
+2. `Options.AggressiveJSON` (drop array elements > 3)? **Defer to v2** — wait for real savings telemetry.
+3. Compress streaming responses? **Out of scope** — request-side only.

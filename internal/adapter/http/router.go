@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/dungnt/dntproxy/internal/adapter/compressor"
 	"github.com/dungnt/dntproxy/internal/port"
 	"github.com/dungnt/dntproxy/internal/service"
 	"github.com/dungnt/dntproxy/internal/version"
@@ -28,12 +29,26 @@ func NewRouter(store port.CredentialStore, providers port.ProviderRegistry, tunn
 
 	chatService := service.NewChatService(store, providers)
 
+	// Build compressor — re-reads settings at most once per second
+	comp := compressor.NewWithLoader(func() compressor.Options {
+		s, err := store.GetSettings()
+		if err != nil || s == nil {
+			return compressor.Options{}
+		}
+		s.Compression.Normalize()
+		return compressor.Options{
+			Enabled:          s.Compression.Enabled,
+			MinContentLength: s.Compression.MinContentLength,
+			LogSavings:       s.Compression.LogSavings,
+		}
+	})
+
 	// OpenAI-compatible endpoints (with optional API key check)
 	v1 := r.Group("/v1")
 	v1.Use(apiKeyMiddleware(store))
 	{
-		v1.POST("/chat/completions", chatHandler(chatService, store))
-		v1.POST("/messages", messagesHandler(chatService, store))
+		v1.POST("/chat/completions", chatHandler(chatService, store, comp))
+		v1.POST("/messages", messagesHandler(chatService, store, comp))
 		v1.GET("/models", modelsHandler(store))
 	}
 

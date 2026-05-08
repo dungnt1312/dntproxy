@@ -21,4 +21,7 @@ type LogStore interface {
 	DeletePrice(ctx context.Context, id string) error
 	Clear(ctx context.Context) error
 	PurgeOlderThan(ctx context.Context, cutoffMs int64) error
+	UsageStats(ctx context.Context, period string) (*domain.UsageStatsResponse, error)
+	ChartData(ctx context.Context, period string) ([]domain.ChartPoint, error)
+	RequestDetails(ctx context.Context, page, pageSize int, provider, startDate, endDate string) (*domain.RequestDetailsResponse, error)
 }

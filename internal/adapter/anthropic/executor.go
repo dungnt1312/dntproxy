@@ -26,8 +26,8 @@ func NewExecutor() *Executor {
 
 // anthropicMessage represents a message in Anthropic format.
 type anthropicMessage struct {
-	Role    string                 `json:"role"`
-	Content interface{}            `json:"content"` // string or array of content blocks
+	Role    string      `json:"role"`
+	Content interface{} `json:"content"` // string or array of content blocks
 }
 
 // anthropicContentBlock represents a content block in Anthropic format.
@@ -40,6 +40,15 @@ type anthropicContentBlock struct {
 	Usage     map[string]interface{} `json:"usage,omitempty"`
 	ToolUseID string                 `json:"tool_use_id,omitempty"`
 	Content   interface{}            `json:"content,omitempty"`
+	Source    *anthropicImageSource  `json:"source,omitempty"`
+}
+
+// anthropicImageSource represents an image source in Anthropic format.
+type anthropicImageSource struct {
+	Type      string `json:"type"`
+	URL       string `json:"url,omitempty"`
+	MediaType string `json:"media_type,omitempty"`
+	Data      string `json:"data,omitempty"`
 }
 
 // anthropicTool represents a tool in Anthropic format.
@@ -64,12 +73,12 @@ type anthropicRequest struct {
 
 // anthropicStreamEvent represents a streaming event from Anthropic API.
 type anthropicStreamEvent struct {
-	Type  string          `json:"type"`
-	Index int             `json:"index,omitempty"`
-	Message json.RawMessage `json:"message,omitempty"`
-	Delta json.RawMessage `json:"delta,omitempty"`
+	Type         string          `json:"type"`
+	Index        int             `json:"index,omitempty"`
+	Message      json.RawMessage `json:"message,omitempty"`
+	Delta        json.RawMessage `json:"delta,omitempty"`
 	ContentBlock json.RawMessage `json:"content_block,omitempty"`
-	Usage   json.RawMessage `json:"usage,omitempty"`
+	Usage        json.RawMessage `json:"usage,omitempty"`
 }
 
 // openaiChatRequest represents an OpenAI Chat Completions request.
@@ -81,20 +90,21 @@ type openaiChatRequest struct {
 	TopP        *float64        `json:"top_p,omitempty"`
 	Stream      bool            `json:"stream"`
 	Tools       []openaiTool    `json:"tools,omitempty"`
+	ToolChoice  interface{}     `json:"tool_choice,omitempty"`
 }
 
 type openaiMessage struct {
-	Role      string          `json:"role"`
-	Content   interface{}     `json:"content"`
-	Name      string          `json:"name,omitempty"`
-	ToolCalls []openaiToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string         `json:"tool_call_id,omitempty"`
+	Role       string           `json:"role"`
+	Content    interface{}      `json:"content"`
+	Name       string           `json:"name,omitempty"`
+	ToolCalls  []openaiToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string           `json:"tool_call_id,omitempty"`
 }
 
 type openaiToolCall struct {
-	ID       string          `json:"id"`
-	Type     string          `json:"type"`
-	Function openaiFunction  `json:"function"`
+	ID       string         `json:"id"`
+	Type     string         `json:"type"`
+	Function openaiFunction `json:"function"`
 }
 
 type openaiFunction struct {
@@ -103,8 +113,8 @@ type openaiFunction struct {
 }
 
 type openaiTool struct {
-	Type     string              `json:"type"`
-	Function openaiToolFunction  `json:"function"`
+	Type     string             `json:"type"`
+	Function openaiToolFunction `json:"function"`
 }
 
 type openaiToolFunction struct {
@@ -170,7 +180,7 @@ func (e *Executor) Execute(model string, body []byte, credentials *domain.Creden
 		if errRead == nil {
 			respBodyStr = string(bodyBytes)
 		}
-		
+
 		reqlog.SetBodies("", shared.PrepareLoggedBody(bodyBytes))
 		errUpstream := fmt.Errorf("%s", respBodyStr)
 		reqlog.Upstream(url, "POST", resp.StatusCode, duration, errUpstream)
@@ -217,6 +227,11 @@ func (e *Executor) Execute(model string, body []byte, credentials *domain.Creden
 			}
 		}
 
+		if err := scanner.Err(); err != nil {
+			pw.CloseWithError(err)
+			return
+		}
+
 		// Send final DONE
 		if !state.FinishReasonSent {
 			finishReason := "stop"
@@ -257,7 +272,11 @@ func translateToAnthropic(openaiReq openaiChatRequest, model string) (*anthropic
 		switch msg.Role {
 		case "system":
 			if str, ok := msg.Content.(string); ok {
-				systemMsg = str
+				if systemMsg == "" {
+					systemMsg = str
+				} else {
+					systemMsg += "\n\n" + str
+				}
 			}
 		case "user":
 			content := translateContent(msg.Content, "text")
@@ -354,6 +373,10 @@ func translateToAnthropic(openaiReq openaiChatRequest, model string) (*anthropic
 		}
 	}
 
+	if tc := translateToolChoice(openaiReq.ToolChoice); tc != nil {
+		req.ToolChoice = tc
+	}
+
 	return req, nil
 }
 
@@ -377,10 +400,28 @@ func translateContent(content interface{}, fallbackType string) interface{} {
 				case "image_url":
 					if img, ok := m["image_url"].(map[string]interface{}); ok {
 						if url, ok := img["url"].(string); ok {
-							blocks = append(blocks, anthropicContentBlock{
-								Type: "image",
-								Text: url,
-							})
+							var src *anthropicImageSource
+							if strings.HasPrefix(url, "data:") {
+								if semi := strings.Index(url, ";"); semi > 0 {
+									mediaType := strings.TrimPrefix(url[:semi], "data:")
+									rest := url[semi+1:]
+									if strings.HasPrefix(rest, "base64,") {
+										src = &anthropicImageSource{
+											Type:      "base64",
+											MediaType: mediaType,
+											Data:      strings.TrimPrefix(rest, "base64,"),
+										}
+									}
+								}
+							} else {
+								src = &anthropicImageSource{Type: "url", URL: url}
+							}
+							if src != nil {
+								blocks = append(blocks, anthropicContentBlock{
+									Type:   "image",
+									Source: src,
+								})
+							}
 						}
 					}
 				}
@@ -391,6 +432,31 @@ func translateContent(content interface{}, fallbackType string) interface{} {
 		}
 	}
 	return content
+}
+
+// translateToolChoice maps OpenAI tool_choice to Anthropic tool_choice format.
+func translateToolChoice(tc interface{}) map[string]interface{} {
+	if tc == nil {
+		return nil
+	}
+	switch v := tc.(type) {
+	case string:
+		switch v {
+		case "auto":
+			return map[string]interface{}{"type": "auto"}
+		case "required":
+			return map[string]interface{}{"type": "any"}
+		}
+	case map[string]interface{}:
+		if v["type"] == "function" {
+			if fn, ok := v["function"].(map[string]interface{}); ok {
+				if name, ok := fn["name"].(string); ok {
+					return map[string]interface{}{"type": "tool", "name": name}
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // NewAnthropicStreamState creates a new stream state.
@@ -420,7 +486,16 @@ func translateAnthropicEvent(eventType string, data []byte, state *AnthropicStre
 
 	switch eventType {
 	case "message_start":
-		// Message started
+		var startEvent struct {
+			Message struct {
+				Usage struct {
+					InputTokens int `json:"input_tokens"`
+				} `json:"usage"`
+			} `json:"message"`
+		}
+		if err := json.Unmarshal(data, &startEvent); err == nil {
+			state.Usage.PromptTokens = startEvent.Message.Usage.InputTokens
+		}
 		return ""
 
 	case "content_block_start":
@@ -428,19 +503,24 @@ func translateAnthropicEvent(eventType string, data []byte, state *AnthropicStre
 		var block anthropicContentBlock
 		if err := json.Unmarshal(streamEvent.ContentBlock, &block); err == nil {
 			if block.Type == "tool_use" {
+				idx := state.ToolCallIndex
 				state.ToolCallIndex++
-				// Send tool call start chunk
 				choice := map[string]interface{}{
-					"index": state.ToolCallIndex - 1,
-					"id":    block.ID,
-					"type":  "function",
-					"function": map[string]interface{}{
-						"name":      block.Name,
-						"arguments": "",
-					},
+					"index": 0,
 					"delta": map[string]interface{}{
 						"role":    "assistant",
 						"content": nil,
+						"tool_calls": []interface{}{
+							map[string]interface{}{
+								"index": idx,
+								"id":    block.ID,
+								"type":  "function",
+								"function": map[string]interface{}{
+									"name":      block.Name,
+									"arguments": "",
+								},
+							},
+						},
 					},
 				}
 				return formatSSEChunk(state, choice, nil)
@@ -467,10 +547,15 @@ func translateAnthropicEvent(eventType string, data []byte, state *AnthropicStre
 				// Tool use delta
 				if state.ToolCallIndex > 0 {
 					choice := map[string]interface{}{
-						"index": state.ToolCallIndex - 1,
+						"index": 0,
 						"delta": map[string]interface{}{
-							"function": map[string]interface{}{
-								"arguments": partialJSON,
+							"tool_calls": []interface{}{
+								map[string]interface{}{
+									"index": state.ToolCallIndex - 1,
+									"function": map[string]interface{}{
+										"arguments": partialJSON,
+									},
+								},
 							},
 						},
 					}
@@ -499,7 +584,7 @@ func translateAnthropicEvent(eventType string, data []byte, state *AnthropicStre
 			if delta.Delta.StopReason != "" {
 				finishReason := mapStopReason(delta.Delta.StopReason)
 				choice := map[string]interface{}{
-					"index":        0,
+					"index":         0,
 					"finish_reason": finishReason,
 					"delta":         map[string]interface{}{},
 				}
@@ -538,12 +623,12 @@ func formatSSEChunk(state *AnthropicStreamState, choice map[string]interface{}, 
 	choice["finish_reason"] = finishReason
 
 	payload := map[string]interface{}{
-		"id":                fmt.Sprintf("chatcmpl-%d", time.Now().UnixMilli()),
-		"object":            "chat.completion.chunk",
-		"created":           time.Now().Unix(),
-		"model":             state.Model,
+		"id":                 fmt.Sprintf("chatcmpl-%d", time.Now().UnixMilli()),
+		"object":             "chat.completion.chunk",
+		"created":            time.Now().Unix(),
+		"model":              state.Model,
 		"system_fingerprint": nil,
-		"choices":           []interface{}{choice},
+		"choices":            []interface{}{choice},
 	}
 
 	data, _ := json.Marshal(payload)

@@ -26,9 +26,9 @@ export interface UsageStatsData {
   totalPromptTokens: number;
   totalCompletionTokens: number;
   totalCost: number;
-  byProvider: UsageGroup[];
-  byModel: UsageGroup[];
-  byConnection: UsageGroup[];
+  byProvider: UsageGroup[] | null;
+  byModel: UsageGroup[] | null;
+  byConnection: UsageGroup[] | null;
 }
 
 function fmtNum(n: number): string {
@@ -153,9 +153,9 @@ export default function UsageStats({ data, loading }: UsageStatsProps) {
         />
       </div>
 
-      <GroupTable title="By Provider" rows={data.byProvider} />
-      <GroupTable title="By Model" rows={data.byModel} />
-      <GroupTable title="By Connection" rows={data.byConnection} />
+      <GroupTable title="By Provider" rows={data.byProvider ?? []} />
+      <GroupTable title="By Model" rows={data.byModel ?? []} />
+      <GroupTable title="By Connection" rows={data.byConnection ?? []} />
     </div>
   );
 }

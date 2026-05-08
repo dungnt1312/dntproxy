@@ -44,10 +44,10 @@ func (s *SQLiteLogStore) UsageStats(ctx context.Context, period string) (*domain
 	cutoff := periodCutoffMs(period)
 
 	resp := &domain.UsageStatsResponse{
-		Period:            period,
-		ByProvider:        []domain.UsageGroup{},
-		ByModel:           []domain.UsageGroup{},
-		ByConnection:      []domain.UsageGroup{},
+		Period:       period,
+		ByProvider:   []domain.UsageGroup{},
+		ByModel:      []domain.UsageGroup{},
+		ByConnection: []domain.UsageGroup{},
 	}
 
 	// Totals
@@ -106,7 +106,7 @@ func (s *SQLiteLogStore) queryUsageGroup(ctx context.Context, cutoff int64, grou
 	}
 	defer rows.Close()
 
-	var result []domain.UsageGroup
+	result := make([]domain.UsageGroup, 0)
 	for rows.Next() {
 		var g domain.UsageGroup
 		if err := rows.Scan(&g.Key, &g.Label, &g.Requests,

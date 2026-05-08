@@ -28,9 +28,11 @@ export default function AddConnectionModal({ onSuccess, onClose }: AddConnection
   const [importMode, setImportMode] = useState<ImportMode>('detect')
   const [form, setForm] = useState({ refreshToken: '', clientId: '', clientSecret: '', region: '', authMethod: 'builder-id' })
   const [openaiForm, setOpenaiForm] = useState({ name: '', apiKey: '', supportedModels: '' })
-  const [customForm, setCustomForm] = useState({ name: '', apiKey: '', baseUrl: '', supportedModels: '' })
+  const [customForm, setCustomForm] = useState({ name: '', apiKey: '', baseUrl: '', modelPrefix: '', supportedModels: '' })
   const [glmForm, setGlmForm] = useState({ name: '', apiKey: '', baseUrl: '', supportedModels: '' })
   const [minimaxForm, setMinimaxForm] = useState({ name: '', apiKey: '', baseUrl: '', supportedModels: '' })
+  const [anthropicForm, setAnthropicForm] = useState({ name: '', apiKey: '', baseUrl: '', supportedModels: '' })
+  const [geminiForm, setGeminiForm] = useState({ name: '', apiKey: '', baseUrl: '', supportedModels: '' })
   const [qwenMode, setQwenMode] = useState<'oauth' | 'apikey'>('oauth')
   const [qwenForm, setQwenForm] = useState({ name: '', apiKey: '', baseUrl: '', supportedModels: '' })
   const [qwenDeviceCode, setQwenDeviceCode] = useState<DeviceCodeState | null>(null)
@@ -61,9 +63,11 @@ export default function AddConnectionModal({ onSuccess, onClose }: AddConnection
   const resetForm = () => {
     setForm({ refreshToken: '', clientId: '', clientSecret: '', region: '', authMethod: 'builder-id' })
     setOpenaiForm({ name: '', apiKey: '', supportedModels: '' })
-    setCustomForm({ name: '', apiKey: '', baseUrl: '', supportedModels: '' })
+    setCustomForm({ name: '', apiKey: '', baseUrl: '', modelPrefix: '', supportedModels: '' })
     setGlmForm({ name: '', apiKey: '', baseUrl: '', supportedModels: '' })
     setMinimaxForm({ name: '', apiKey: '', baseUrl: '', supportedModels: '' })
+    setAnthropicForm({ name: '', apiKey: '', baseUrl: '', supportedModels: '' })
+    setGeminiForm({ name: '', apiKey: '', baseUrl: '', supportedModels: '' })
     setQwenForm({ name: '', apiKey: '', baseUrl: '', supportedModels: '' })
     setQwenDeviceCode(null); setQwenPolling(false)
     if (qwenPollRef.current) { clearTimeout(qwenPollRef.current); qwenPollRef.current = null }
@@ -169,7 +173,13 @@ export default function AddConnectionModal({ onSuccess, onClose }: AddConnection
     setLoading(true); setError('')
     try {
       const models = parseSupportedModels(customForm.supportedModels)
-      await api.addCustomConnection({ name: customForm.name || undefined, apiKey: customForm.apiKey || undefined, baseUrl: customForm.baseUrl, supportedModels: models.length > 0 ? models : undefined })
+      await api.addCustomConnection({
+        name: customForm.name || undefined,
+        apiKey: customForm.apiKey || undefined,
+        baseUrl: customForm.baseUrl,
+        modelPrefix: customForm.modelPrefix || undefined,
+        supportedModels: models.length > 0 ? models : undefined,
+      })
       done('Custom added!')
     } catch (e: any) { setError(e.message) } finally { setLoading(false) }
   }
@@ -224,6 +234,24 @@ export default function AddConnectionModal({ onSuccess, onClose }: AddConnection
     } catch (e: any) { setError(e.message) } finally { setLoading(false) }
   }
 
+  const handleAddAnthropic = async () => {
+    setLoading(true); setError('')
+    try {
+      const models = parseSupportedModels(anthropicForm.supportedModels)
+      await api.addAnthropicConnection({ name: anthropicForm.name || undefined, apiKey: anthropicForm.apiKey, baseUrl: anthropicForm.baseUrl || undefined, supportedModels: models.length > 0 ? models : undefined })
+      done('Anthropic added!')
+    } catch (e: any) { setError(e.message) } finally { setLoading(false) }
+  }
+
+  const handleAddGemini = async () => {
+    setLoading(true); setError('')
+    try {
+      const models = parseSupportedModels(geminiForm.supportedModels)
+      await api.addGeminiConnection({ name: geminiForm.name || undefined, apiKey: geminiForm.apiKey, baseUrl: geminiForm.baseUrl || undefined, supportedModels: models.length > 0 ? models : undefined })
+      done('Gemini added!')
+    } catch (e: any) { setError(e.message) } finally { setLoading(false) }
+  }
+
   const DeviceCodePanel = () => deviceCode ? (
     <div className="space-y-3 mt-4 rounded-lg border bg-muted/40 p-4">
       <div className="text-center">
@@ -249,6 +277,8 @@ export default function AddConnectionModal({ onSuccess, onClose }: AddConnection
     { id: 'qwen', name: 'Qwen', icon: <ProviderLogoIcon provider="qwen" size={14} /> },
     { id: 'glm', name: 'GLM', icon: <ProviderLogoIcon provider="glm" size={14} /> },
     { id: 'minimax', name: 'MiniMax', icon: <ProviderLogoIcon provider="minimax" size={14} /> },
+    { id: 'anthropic', name: 'Anthropic', icon: <ProviderLogoIcon provider="anthropic" size={14} /> },
+    { id: 'gemini', name: 'Gemini', icon: <ProviderLogoIcon provider="gemini" size={14} /> },
     { id: 'openai-compatible', name: 'Custom', icon: <ProviderLogoIcon provider="openai-compatible" size={14} /> },
   ]
 
@@ -539,6 +569,7 @@ export default function AddConnectionModal({ onSuccess, onClose }: AddConnection
                   <Input type="password" value={customForm.apiKey} onChange={e => setCustomForm({ ...customForm, apiKey: e.target.value })} placeholder="API Key (optional)" className="text-xs font-mono" />
                   <Input value={customForm.name} onChange={e => setCustomForm({ ...customForm, name: e.target.value })} placeholder="Display Name" className="text-xs" />
                 </div>
+                <Input value={customForm.modelPrefix} onChange={e => setCustomForm({ ...customForm, modelPrefix: e.target.value })} placeholder="Model Prefix (optional, e.g. my-provider/)" className="text-xs font-mono" />
                 <Textarea value={customForm.supportedModels} onChange={e => setCustomForm({ ...customForm, supportedModels: e.target.value })} placeholder="Supported Models (one per line, optional)" rows={3} className="text-xs font-mono" />
                 <Button onClick={handleAddCustom} disabled={loading || !customForm.baseUrl} size="sm" className="w-full bg-purple-600 hover:bg-purple-700">
                   {loading ? 'Adding…' : 'Add Custom Connection'}
@@ -574,6 +605,38 @@ export default function AddConnectionModal({ onSuccess, onClose }: AddConnection
                 <Textarea value={minimaxForm.supportedModels} onChange={e => setMinimaxForm({ ...minimaxForm, supportedModels: e.target.value })} placeholder="Supported Models (one per line, auto-populated if empty)" rows={3} className="text-xs font-mono" />
                 <Button onClick={handleAddMiniMax} disabled={loading || !minimaxForm.apiKey} size="sm" className="w-full bg-[#FF6B35] hover:bg-[#E85A25]">
                   {loading ? 'Adding…' : 'Add MiniMax Connection'}
+                </Button>
+              </div>
+            )}
+
+            {/* Anthropic */}
+            {provider === 'anthropic' && (
+              <div className="space-y-3 max-w-md mx-auto">
+                <p className="text-xs text-muted-foreground text-center">Connect Claude models with an Anthropic API key from <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer" className="text-amber-600 hover:underline">Anthropic Console</a>.</p>
+                <Input type="password" value={anthropicForm.apiKey} onChange={e => setAnthropicForm({ ...anthropicForm, apiKey: e.target.value })} placeholder="API Key *" className="text-xs font-mono" />
+                <div className="grid grid-cols-2 gap-3">
+                  <Input value={anthropicForm.name} onChange={e => setAnthropicForm({ ...anthropicForm, name: e.target.value })} placeholder="Display Name (optional)" className="text-xs" />
+                  <Input value={anthropicForm.baseUrl} onChange={e => setAnthropicForm({ ...anthropicForm, baseUrl: e.target.value })} placeholder="Base URL (optional)" className="text-xs font-mono" />
+                </div>
+                <Textarea value={anthropicForm.supportedModels} onChange={e => setAnthropicForm({ ...anthropicForm, supportedModels: e.target.value })} placeholder="Supported Models (one per line, auto-populated if empty)" rows={3} className="text-xs font-mono" />
+                <Button onClick={handleAddAnthropic} disabled={loading || !anthropicForm.apiKey} size="sm" className="w-full bg-amber-600 hover:bg-amber-700">
+                  {loading ? 'Adding…' : 'Add Anthropic Connection'}
+                </Button>
+              </div>
+            )}
+
+            {/* Gemini */}
+            {provider === 'gemini' && (
+              <div className="space-y-3 max-w-md mx-auto">
+                <p className="text-xs text-muted-foreground text-center">Connect Google Gemini models with an API key from <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">Google AI Studio</a>.</p>
+                <Input type="password" value={geminiForm.apiKey} onChange={e => setGeminiForm({ ...geminiForm, apiKey: e.target.value })} placeholder="API Key *" className="text-xs font-mono" />
+                <div className="grid grid-cols-2 gap-3">
+                  <Input value={geminiForm.name} onChange={e => setGeminiForm({ ...geminiForm, name: e.target.value })} placeholder="Display Name (optional)" className="text-xs" />
+                  <Input value={geminiForm.baseUrl} onChange={e => setGeminiForm({ ...geminiForm, baseUrl: e.target.value })} placeholder="Base URL (optional)" className="text-xs font-mono" />
+                </div>
+                <Textarea value={geminiForm.supportedModels} onChange={e => setGeminiForm({ ...geminiForm, supportedModels: e.target.value })} placeholder="Supported Models (one per line, auto-populated if empty)" rows={3} className="text-xs font-mono" />
+                <Button onClick={handleAddGemini} disabled={loading || !geminiForm.apiKey} size="sm" className="w-full bg-blue-500 hover:bg-blue-600">
+                  {loading ? 'Adding…' : 'Add Gemini Connection'}
                 </Button>
               </div>
             )}

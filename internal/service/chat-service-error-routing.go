@@ -5,12 +5,12 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/dungnt/dntproxy/internal/domain"
 	"github.com/dungnt/dntproxy/internal/port"
 )
 
 func shouldFallbackToNextAccount(status int, errorText string) bool {
-	switch status {
-	case 400, 405, 411, 413, 414, 415, 422, 431:
+	if domain.IsNonFallbackStatus(status) {
 		return false
 	}
 

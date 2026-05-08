@@ -29,3 +29,5 @@ temp
 .worktrees/
 logs/
 rewrite
+
+.claude/worktrees

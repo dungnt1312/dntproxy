@@ -22,6 +22,9 @@ type ProviderConfig struct {
 	// Format specifies the API protocol. Defaults to OpenAI-compatible.
 	// Set to "anthropic-msg" for Anthropic, "aws-eventstream" for Kiro.
 	Format RequestFormat
+	// SupportsQuota indicates whether this provider has a quota/usage API.
+	// When false, the UI hides the quota fetch button entirely.
+	SupportsQuota bool
 	// OAuth config (only set for providers that support OAuth)
 	OAuth *OAuthConfig
 }
@@ -50,15 +53,8 @@ var ProviderConfigs = map[string]ProviderConfig{
 		DefaultBaseURL: "https://codewhisperer.us-east-1.amazonaws.com",
 		ChatPath:       "", // Uses AWS EventStream, not HTTP
 		Format:         FormatAWSKiro,
-		DefaultModels: []string{
-			"claude-opus-4.6",
-			"claude-opus-4.5",
-			"claude-sonnet-4.5",
-			"claude-haiku-4.5",
-			"deepseek-3.2",
-			"deepseek-3.1",
-			"qwen3-coder-next",
-		},
+		SupportsQuota:  true,
+		// DefaultModels auto-populated from model-definition registry for single source of truth
 		// Kiro OAuth is handled via AWS Cognito — no static OAuthConfig here
 	},
 
@@ -70,14 +66,8 @@ var ProviderConfigs = map[string]ProviderConfig{
 		DefaultBaseURL: "https://api.openai.com",
 		ChatPath:       "/v1/chat/completions",
 		Format:         FormatOpenAIChat,
-		DefaultModels: []string{
-			"gpt-5.4",
-			"gpt-5.4-mini",
-			"gpt-5.4-nano",
-			"gpt-5.3",
-			"gpt-5.3-codex",
-			"gpt-5.1-mini",
-		},
+		SupportsQuota:  true,
+		// DefaultModels auto-populated from model-definition registry
 		OAuth: &OAuthConfig{
 			ClientID:     "app_EMoamEEZ73f0CkXaXp7hrann",
 			AuthorizeURL: "https://auth.openai.com/oauth/authorize",
@@ -95,6 +85,7 @@ var ProviderConfigs = map[string]ProviderConfig{
 		DefaultBaseURL: "https://api.openai.com",
 		ChatPath:       "/v1/chat/completions",
 		Format:         FormatOpenAIChat,
+		SupportsQuota:  false,
 		DefaultModels:  []string{},
 	},
 
@@ -106,15 +97,8 @@ var ProviderConfigs = map[string]ProviderConfig{
 		DefaultBaseURL: "https://api.z.ai",
 		ChatPath:       "/api/coding/paas/v4/chat/completions",
 		Format:         FormatOpenAIChat,
-		DefaultModels: []string{
-			"glm-5.1",
-			"glm-5-turbo",
-			"glm-5V-turbo",
-			"glm-5",
-			"glm-4.7",
-			"glm-4.7-flash",
-			"glm-4.6",
-		},
+		SupportsQuota:  false,
+		// DefaultModels auto-populated from model-definition registry
 	},
 
 	"minimax": {
@@ -125,13 +109,8 @@ var ProviderConfigs = map[string]ProviderConfig{
 		DefaultBaseURL: "https://api.minimax.io",
 		ChatPath:       "/v1/chat/completions",
 		Format:         FormatOpenAIChat,
-		DefaultModels: []string{
-			"MiniMax-M2.7",
-			"MiniMax-M2.7-highspeed",
-			"MiniMax-M2.5",
-			"MiniMax-M2.1",
-			"MiniMax-M2",
-		},
+		SupportsQuota:  true,
+		// DefaultModels auto-populated from model-definition registry
 	},
 
 	"qwen": {
@@ -142,12 +121,8 @@ var ProviderConfigs = map[string]ProviderConfig{
 		DefaultBaseURL: "https://portal.qwen.ai",
 		ChatPath:       "/v1/chat/completions",
 		Format:         FormatOpenAIChat,
-		DefaultModels: []string{
-			"qwen3-coder",
-			"qwen3-coder-plus",
-			"qwen-plus",
-			"qwen-turbo",
-		},
+		SupportsQuota:  false,
+		// DefaultModels auto-populated from model-definition registry
 		OAuth: &OAuthConfig{
 			ClientID:      "f0304373b74a44d2b584a3fb70ca9e56",
 			DeviceCodeURL: "https://chat.qwen.ai/api/v1/oauth2/device/code",
@@ -165,11 +140,8 @@ var ProviderConfigs = map[string]ProviderConfig{
 		DefaultBaseURL: "https://api.anthropic.com",
 		ChatPath:       "/v1/messages",
 		Format:         FormatAnthropicMsg,
-		DefaultModels: []string{
-			"claude-sonnet",
-			"claude-opus",
-			"claude-haiku",
-		},
+		SupportsQuota:  false,
+		// DefaultModels auto-populated from model-definition registry
 	},
 
 	"gemini": {
@@ -180,18 +152,19 @@ var ProviderConfigs = map[string]ProviderConfig{
 		DefaultBaseURL: "https://generativelanguage.googleapis.com",
 		ChatPath:       "/v1beta/openai/chat/completions",
 		Format:         FormatOpenAIChat,
-		DefaultModels: []string{
-			"gemini-2.5-flash",
-			"gemini-2.5-pro",
-			"gemini-2.0-flash",
-		},
+		SupportsQuota:  false,
+		// DefaultModels auto-populated from model-definition registry
 	},
 }
 
 // GetProviderConfig returns the config for a provider ID.
 // Falls back to openai-compatible if not found.
+// DefaultModels are auto-populated from the model-definition registry for single source of truth.
 func GetProviderConfig(providerID string) ProviderConfig {
 	if cfg, ok := ProviderConfigs[providerID]; ok {
+		if len(cfg.DefaultModels) == 0 && providerID != "openai-compatible" {
+			cfg.DefaultModels = GetDefaultModelsForProvider(providerID)
+		}
 		return cfg
 	}
 	// Fallback: treat as OpenAI-compatible
@@ -203,7 +176,7 @@ func GetProviderConfig(providerID string) ProviderConfig {
 		DefaultBaseURL: "https://api.openai.com",
 		ChatPath:       "/v1/chat/completions",
 		Format:         FormatOpenAIChat,
-		DefaultModels:  []string{},
+		DefaultModels:  GetDefaultModelsForProvider(providerID),
 	}
 }
 

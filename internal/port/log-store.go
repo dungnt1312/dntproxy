@@ -13,6 +13,7 @@ type LogStore interface {
 	List(ctx context.Context, query domain.LogQuery) ([]domain.LogEntry, error)
 	Summary(ctx context.Context, query domain.LogQuery) (*domain.LogSummary, error)
 	ConnectionSummaries(ctx context.Context, query domain.LogQuery) ([]domain.LogConnectionSummary, error)
+	DailyStats(ctx context.Context, query domain.LogQuery) ([]domain.DailyUsageStat, error)
 	ListPrices(ctx context.Context) ([]domain.ModelPrice, error)
 	PriceFor(ctx context.Context, provider, model string) (*domain.ModelPrice, error)
 	InsertPrice(ctx context.Context, price *domain.ModelPrice) error

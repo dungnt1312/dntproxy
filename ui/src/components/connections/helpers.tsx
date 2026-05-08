@@ -1,17 +1,20 @@
 import { Shield, Check, X, Clock, Lock, AlertTriangle, RefreshCw } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
-import { Progress } from '@/components/ui/progress';
 import { ProviderLogo } from './ProviderLogo';
+import { getProviderLabel, getProviderMeta as getRegistryProviderMeta } from '@/lib/provider-registry';
+import type { Connection } from '@/types/connections';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export const PROVIDERS = [
-    { id: 'kiro', name: 'Kiro AI', icon: 'KI' },
-    { id: 'openai', name: 'OpenAI', icon: 'OA' },
-    { id: 'qwen', name: 'Qwen', icon: 'QW' },
-    { id: 'glm', name: 'GLM (Zhipu AI)', icon: 'GL' },
-    { id: 'minimax', name: 'MiniMax', icon: 'MM' },
-    { id: 'openai-compatible', name: 'OpenAI Compatible', icon: 'OC' },
+    { id: 'kiro', name: getProviderLabel('kiro'), icon: 'KI' },
+    { id: 'openai', name: getProviderLabel('openai'), icon: 'OA' },
+    { id: 'qwen', name: getProviderLabel('qwen'), icon: 'QW' },
+    { id: 'glm', name: getProviderLabel('glm'), icon: 'GL' },
+    { id: 'minimax', name: getProviderLabel('minimax'), icon: 'MM' },
+    { id: 'anthropic', name: getProviderLabel('anthropic'), icon: 'AN' },
+    { id: 'gemini', name: getProviderLabel('gemini'), icon: 'GE' },
+    { id: 'openai-compatible', name: getProviderLabel('openai-compatible'), icon: 'OC' },
 ] as const;
 
 export type ImportMode = 'detect' | 'file' | 'manual' | 'builder-id' | 'idc' | 'social';
@@ -40,11 +43,11 @@ export function secsToHuman(secs: number): string {
     return `${Math.floor(secs / 3600)}h ${Math.floor((secs % 3600) / 60)}m`;
 }
 
-export function getProviderMeta(provider: string) {
+export function getLegacyProviderMeta(provider: string) {
     return PROVIDERS.find((x) => x.id === provider);
 }
 
-export const getProviderLabel = (p: string) => getProviderMeta(p)?.name ?? p;
+export { getProviderLabel };
 
 export function connectionAttentionRank(c: {
     isActive?: boolean;
@@ -82,52 +85,18 @@ export const QwenLogo = ProviderLogoIcon;
 export const CustomLogo = ProviderLogoIcon;
 
 export function getProviderInfo(provider: string) {
-    if (provider === 'kiro')
-        return {
-            icon: <ProviderLogoIcon provider="kiro" size={32} className="rounded-md" />,
-            colorClass: 'bg-[#FF9900]/10 border-[#FF9900]/20',
-            dotClass: 'bg-[#FF9900]',
-            label: 'AWS / Kiro',
-        };
-    if (provider === 'openai')
-        return {
-            icon: <ProviderLogoIcon provider="openai" size={32} className="rounded-md" />,
-            colorClass: 'bg-[#10a37f]/10 border-[#10a37f]/20',
-            dotClass: 'bg-[#10a37f]',
-            label: 'OpenAI',
-        };
-    if (provider === 'glm')
-        return {
-            icon: <ProviderLogoIcon provider="glm" size={32} className="rounded-md" />,
-            colorClass: 'bg-[#0066FF]/10 border-[#0066FF]/20',
-            dotClass: 'bg-[#0066FF]',
-            label: 'GLM (Zhipu AI)',
-        };
-    if (provider === 'minimax')
-        return {
-            icon: <ProviderLogoIcon provider="minimax" size={32} className="rounded-md" />,
-            colorClass: 'bg-[#FF6B35]/10 border-[#FF6B35]/20',
-            dotClass: 'bg-[#FF6B35]',
-            label: 'MiniMax',
-        };
-    if (provider === 'qwen')
-        return {
-            icon: <ProviderLogoIcon provider="qwen" size={32} className="rounded-md" />,
-            colorClass: 'bg-[#6366F1]/10 border-[#6366F1]/20',
-            dotClass: 'bg-[#6366F1]',
-            label: 'Qwen',
-        };
+    const meta = getRegistryProviderMeta(provider);
     return {
         icon: <ProviderLogoIcon provider={provider} size={32} className="rounded-md" />,
-        colorClass: 'bg-primary/10 border-primary/20',
+        colorClass: meta.colorClass,
         dotClass: 'bg-primary',
-        label: provider || 'Custom API',
+        label: meta.label,
     };
 }
 
 // ─── Small UI Components ──────────────────────────────────────────────────────
 
-export function TokenBar({ conn }: { conn: any }) {
+export function TokenBar({ conn }: { conn: Connection }) {
     if (!conn.expiresAt && !conn.apiKey) return null;
 
     if (conn.apiKey) {
@@ -140,6 +109,8 @@ export function TokenBar({ conn }: { conn: any }) {
             </Badge>
         );
     }
+
+    if (!conn.expiresAt) return null;
 
     const expMs = new Date(conn.expiresAt).getTime();
     const secsLeft = Math.ceil((expMs - Date.now()) / 1000);
@@ -166,9 +137,10 @@ export function TokenBar({ conn }: { conn: any }) {
     );
 }
 
-export function StatusRow({ conn }: { conn: any }) {
+export function StatusRow({ conn }: { conn: Connection }) {
     const isRL = conn.rateLimitedUntil && new Date(conn.rateLimitedUntil) > new Date();
-    const rlSecs = isRL ? Math.ceil((new Date(conn.rateLimitedUntil).getTime() - Date.now()) / 1000) : 0;
+    const rlSecs =
+        isRL && conn.rateLimitedUntil ? Math.ceil((new Date(conn.rateLimitedUntil).getTime() - Date.now()) / 1000) : 0;
     const lockCount = conn.modelLocks
         ? Object.values(conn.modelLocks).filter((e: any) => new Date(e) > new Date()).length
         : 0;
@@ -183,7 +155,7 @@ export function StatusRow({ conn }: { conn: any }) {
                     <Clock size={9} /> RL: {secsToHuman(rlSecs)}
                 </Badge>
             )}
-            {conn.backoffLevel > 0 && (
+            {(conn.backoffLevel ?? 0) > 0 && (
                 <Badge
                     variant="outline"
                     className="gap-1 text-amber-600 border-amber-500/30 bg-amber-500/10 text-[10px] py-0 h-5"

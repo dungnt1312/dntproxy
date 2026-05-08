@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { api } from "../../api";
 import InlineName from "./InlineName";
-import { TokenBar, getProviderInfo } from "./helpers";
+import { StatusRow, TokenBar, getProviderInfo } from "./helpers";
 import QuotaPanel from "./QuotaPanel";
 import LogsViewerModal from "./LogsViewerModal";
 import {
@@ -33,14 +33,16 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
+import type { Connection, TestConnectionResult, UsageData } from "@/types/connections";
 
 interface ConnectionCardProps {
-  conn: any;
-  initialQuotaResult?: any;
+  conn: Connection;
+  initialQuotaResult?: UsageData;
   onReload: () => void;
   onDelete: (id: string, name: string) => void;
-  onEditModels: (conn: any) => void;
-  onEditConnection?: (conn: any) => void;
+  onEditModels: (conn: Connection) => void;
+  onEditConnection?: (conn: Connection) => void;
 }
 
 export default function ConnectionCard({
@@ -51,13 +53,13 @@ export default function ConnectionCard({
   onEditModels,
   onEditConnection,
 }: ConnectionCardProps) {
-  const [testResult, setTestResult] = useState<any>(null);
-  const [quotaResult, setQuotaResult] = useState<any>(
+  const [testResult, setTestResult] = useState<TestConnectionResult | null>(null);
+  const [quotaResult, setQuotaResult] = useState<UsageData | null>(
     initialQuotaResult ?? null,
   );
   const [quotaLoading, setQuotaLoading] = useState(false);
-  const [isQuotaOpen, setIsQuotaOpen] = useState(false);
   const [isLogOpen, setIsLogOpen] = useState(false);
+  const [toggleLoading, setToggleLoading] = useState(false);
 
   useEffect(() => {
     if (initialQuotaResult !== undefined) {
@@ -67,7 +69,7 @@ export default function ConnectionCard({
 
   const isRL = c.rateLimitedUntil && new Date(c.rateLimitedUntil) > new Date();
   const isExpired = c.expiresAt && new Date(c.expiresAt) < new Date();
-  const hasIssue = isRL || isExpired || c.backoffLevel > 0 || c.lastError;
+  const hasIssue = isRL || isExpired || (c.backoffLevel ?? 0) > 0 || c.lastError;
   const providerInfo = getProviderInfo(c.provider);
 
   const handleTest = async () => {
@@ -75,11 +77,16 @@ export default function ConnectionCard({
     try {
       const res = await api.testConnection(c.id);
       setTestResult(res);
-      // Reload connections to reflect updated status (e.g., token refreshed, errors cleared)
-      onReload();
+      if (res.status === "ok") {
+        toast.success(`${c.name} test passed`);
+      } else {
+        toast.error(res.message || `${c.name} test failed`);
+      }
+      await onReload();
     } catch (e: any) {
       setTestResult({ status: "error", message: e.message });
-      onReload();
+      toast.error(e.message || "Connection test failed");
+      await onReload();
     }
   };
 
@@ -89,6 +96,9 @@ export default function ConnectionCard({
     try {
       const res = await api.getUsage(c.id);
       setQuotaResult(res);
+      if (!res.error && !res.limitReached && hasIssue) {
+        await onReload();
+      }
     } catch (e: any) {
       setQuotaResult({ error: e.message });
     } finally {
@@ -97,8 +107,16 @@ export default function ConnectionCard({
   };
 
   const handleToggle = async () => {
-    await api.updateConnection(c.id, { isActive: !c.isActive });
-    onReload();
+    setToggleLoading(true);
+    try {
+      await api.updateConnection(c.id, { isActive: !c.isActive });
+      toast.success(`${c.name} ${c.isActive ? "disabled" : "enabled"}`);
+      await onReload();
+    } catch (e: any) {
+      toast.error(e.message || "Failed to update connection");
+    } finally {
+      setToggleLoading(false);
+    }
   };
 
   const handleRename = async (id: string, name: string) => {
@@ -109,9 +127,10 @@ export default function ConnectionCard({
   const handleResetCooldown = async () => {
     try {
       await api.resetCooldown(c.id);
-      onReload();
+      toast.success("Cooldown reset");
+      await onReload();
     } catch (e: any) {
-      console.error(e.message);
+      toast.error(e.message || "Failed to reset cooldown");
     }
   };
 
@@ -140,8 +159,9 @@ export default function ConnectionCard({
           variant="outline"
           className="bg-destructive/10 text-destructive dark:text-red-400 border-destructive/20 cursor-pointer hover:bg-destructive/20"
           onClick={() => setIsLogOpen(true)}
+          title={c.lastError || "View logs"}
         >
-          Error
+          Error · Logs
         </Badge>
       );
     return (
@@ -180,6 +200,7 @@ export default function ConnectionCard({
                   c.authMethod ||
                   "API Key"}
               </span>
+              <StatusRow conn={c} />
             </div>
           </div>
           <div className="shrink-0">{renderBadgeStatus()}</div>
@@ -191,7 +212,8 @@ export default function ConnectionCard({
             <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground pl-0.5">
               <Lock className="h-3 w-3 shrink-0" />
               <TokenBar conn={c} />
-              <span
+              <button
+                type="button"
                 className="ml-auto font-medium text-muted-foreground hover:text-foreground cursor-pointer transition-colors underline decoration-dashed underline-offset-[3px]"
                 onClick={(e) => {
                   e.stopPropagation();
@@ -202,7 +224,7 @@ export default function ConnectionCard({
                 {c.supportedModels?.length
                   ? `${c.supportedModels.length} models`
                   : "All models"}
-              </span>
+              </button>
             </div>
 
             {/* Inline Quota Display */}
@@ -263,6 +285,7 @@ export default function ConnectionCard({
                     ? "text-emerald-600 bg-emerald-500/10"
                     : "text-destructive bg-destructive/10",
                 )}
+                title={testResult.message}
               >
                 {testResult.status === "ok" ? "✓ OK" : "✗ Fail"}
               </span>
@@ -270,17 +293,13 @@ export default function ConnectionCard({
           </div>
 
           <div className="flex items-center gap-1 shrink-0">
-            <div
-              className="flex items-center p-1.5 rounded-md hover:bg-muted/60 transition-colors cursor-pointer"
-              onClick={handleToggle}
-              title={c.isActive ? "Disable connection" : "Enable connection"}
-            >
               <Switch
                 checked={c.isActive}
-                onCheckedChange={handleToggle}
-                className="scale-75 data-[state=checked]:bg-emerald-500 pointer-events-none m-0"
+                onCheckedChange={() => handleToggle()}
+                disabled={toggleLoading}
+                aria-label={c.isActive ? "Disable connection" : "Enable connection"}
+                className="scale-75 data-[state=checked]:bg-emerald-500 m-0"
               />
-            </div>
 
             {/* Dropdown Action Menu */}
             <DropdownMenu>
@@ -289,6 +308,7 @@ export default function ConnectionCard({
                   variant="ghost"
                   size="icon"
                   className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                  aria-label="Open connection actions"
                 >
                   <MoreHorizontal className="h-4 w-4" />
                 </Button>
@@ -315,7 +335,7 @@ export default function ConnectionCard({
                 >
                   <TerminalSquare size={15} /> View System Logs
                 </DropdownMenuItem>
-                {(isRL || c.backoffLevel > 0) && (
+                {(isRL || (c.backoffLevel ?? 0) > 0) && (
                   <DropdownMenuItem
                     onClick={handleResetCooldown}
                     className="gap-2 cursor-pointer text-xs py-2 text-amber-600 focus:text-amber-700"

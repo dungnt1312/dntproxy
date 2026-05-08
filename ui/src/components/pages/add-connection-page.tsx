@@ -21,6 +21,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { getProviderMeta } from '@/lib/provider-registry';
 
 export default function AddConnectionPage() {
     const navigate = useNavigate();
@@ -58,6 +59,18 @@ export default function AddConnectionPage() {
     });
     const [qwenMode, setQwenMode] = useState<'oauth' | 'apikey'>('oauth');
     const [qwenForm, setQwenForm] = useState({
+        name: '',
+        apiKey: '',
+        baseUrl: '',
+        supportedModels: '',
+    });
+    const [anthropicForm, setAnthropicForm] = useState({
+        name: '',
+        apiKey: '',
+        baseUrl: '',
+        supportedModels: '',
+    });
+    const [geminiForm, setGeminiForm] = useState({
         name: '',
         apiKey: '',
         baseUrl: '',
@@ -104,6 +117,8 @@ export default function AddConnectionPage() {
         setGlmForm({ name: '', apiKey: '', baseUrl: '', supportedModels: '' });
         setMinimaxForm({ name: '', apiKey: '', baseUrl: '', supportedModels: '' });
         setQwenForm({ name: '', apiKey: '', baseUrl: '', supportedModels: '' });
+        setAnthropicForm({ name: '', apiKey: '', baseUrl: '', supportedModels: '' });
+        setGeminiForm({ name: '', apiKey: '', baseUrl: '', supportedModels: '' });
         setQwenDeviceCode(null);
         setQwenPolling(false);
         if (qwenPollRef.current) {
@@ -429,6 +444,44 @@ export default function AddConnectionPage() {
         }
     };
 
+    const handleAddAnthropic = async () => {
+        setLoading(true);
+        setError('');
+        try {
+            const models = parseSupportedModels(anthropicForm.supportedModels);
+            await api.addAnthropicConnection({
+                name: anthropicForm.name || undefined,
+                apiKey: anthropicForm.apiKey,
+                baseUrl: anthropicForm.baseUrl || undefined,
+                supportedModels: models.length > 0 ? models : undefined,
+            });
+            handleSuccess('Anthropic connected!');
+        } catch (e: any) {
+            setError(e.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleAddGemini = async () => {
+        setLoading(true);
+        setError('');
+        try {
+            const models = parseSupportedModels(geminiForm.supportedModels);
+            await api.addGeminiConnection({
+                name: geminiForm.name || undefined,
+                apiKey: geminiForm.apiKey,
+                baseUrl: geminiForm.baseUrl || undefined,
+                supportedModels: models.length > 0 ? models : undefined,
+            });
+            handleSuccess('Gemini connected!');
+        } catch (e: any) {
+            setError(e.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
     const DeviceCodePanel = () =>
         deviceCode ? (
             <div className="space-y-3 mt-4 rounded-xl border bg-muted/40 p-5">
@@ -488,6 +541,18 @@ export default function AddConnectionPage() {
             description: 'MiniMax M2 series',
         },
         {
+            id: 'anthropic',
+            name: 'Anthropic',
+            icon: <ProviderLogoIcon provider="anthropic" size={24} />,
+            description: 'Claude via Anthropic API',
+        },
+        {
+            id: 'gemini',
+            name: 'Gemini',
+            icon: <ProviderLogoIcon provider="gemini" size={24} />,
+            description: 'Google Gemini models',
+        },
+        {
             id: 'openai-compatible',
             name: 'Custom',
             icon: <ProviderLogoIcon provider="openai-compatible" size={24} />,
@@ -536,6 +601,89 @@ export default function AddConnectionPage() {
 
     const selectedProvider = providerTabs.find((p) => p.id === provider);
 
+    const renderApiKeyProviderForm = ({
+        providerId,
+        title,
+        description,
+        form,
+        setForm,
+        onSubmit,
+        docsUrl,
+        docsLabel,
+    }: {
+        providerId: 'anthropic' | 'gemini';
+        title: string;
+        description: string;
+        form: { name: string; apiKey: string; baseUrl: string; supportedModels: string };
+        setForm: (value: { name: string; apiKey: string; baseUrl: string; supportedModels: string }) => void;
+        onSubmit: () => void;
+        docsUrl: string;
+        docsLabel: string;
+    }) => {
+        const meta = getProviderMeta(providerId);
+
+        return (
+            <div className="max-w-lg mx-auto space-y-5">
+                <div className="text-center">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-muted mx-auto">
+                        <ProviderLogoIcon provider={providerId} size={20} />
+                    </div>
+                    <p className="font-medium text-sm mt-3 mb-1">{title}</p>
+                    <p className="text-xs text-muted-foreground">
+                        {description}{' '}
+                        <a
+                            href={docsUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-primary hover:underline"
+                        >
+                            {docsLabel}
+                        </a>
+                        .
+                    </p>
+                </div>
+                <div className="space-y-3">
+                    <Input
+                        type="password"
+                        value={form.apiKey}
+                        onChange={(e) => setForm({ ...form, apiKey: e.target.value })}
+                        placeholder="API Key *"
+                        className="text-xs font-mono"
+                    />
+                    <div className="grid grid-cols-2 gap-3">
+                        <Input
+                            value={form.name}
+                            onChange={(e) => setForm({ ...form, name: e.target.value })}
+                            placeholder="Display Name (optional)"
+                            className="text-xs"
+                        />
+                        <Input
+                            value={form.baseUrl}
+                            onChange={(e) => setForm({ ...form, baseUrl: e.target.value })}
+                            placeholder="Base URL (optional)"
+                            className="text-xs font-mono"
+                        />
+                    </div>
+                    <Textarea
+                        value={form.supportedModels}
+                        onChange={(e) => setForm({ ...form, supportedModels: e.target.value })}
+                        placeholder="Supported Models (one per line, auto-populated if empty)"
+                        rows={3}
+                        className="text-xs font-mono"
+                    />
+                    <Button
+                        onClick={onSubmit}
+                        disabled={loading || !form.apiKey}
+                        size="sm"
+                        className={cn('w-full', meta.accentClass)}
+                    >
+                        {loading ? 'Adding…' : `Add ${meta.label} Connection`}
+                    </Button>
+                </div>
+            </div>
+        );
+    };
+
     return (
         <div className="space-y-6">
             {/* Header */}
@@ -557,7 +705,7 @@ export default function AddConnectionPage() {
             </div>
 
             {/* Provider tabs */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
                 {providerTabs.map((p) => (
                     <button
                         key={p.id}
@@ -1512,6 +1660,30 @@ export default function AddConnectionPage() {
                             )}
                         </div>
                     )}
+
+                    {provider === 'anthropic' &&
+                        renderApiKeyProviderForm({
+                            providerId: 'anthropic',
+                            title: 'Anthropic',
+                            description: 'Connect Claude models with an Anthropic API key from',
+                            form: anthropicForm,
+                            setForm: setAnthropicForm,
+                            onSubmit: handleAddAnthropic,
+                            docsUrl: 'https://console.anthropic.com/settings/keys',
+                            docsLabel: 'Anthropic Console',
+                        })}
+
+                    {provider === 'gemini' &&
+                        renderApiKeyProviderForm({
+                            providerId: 'gemini',
+                            title: 'Gemini',
+                            description: 'Connect Google Gemini models with an API key from',
+                            form: geminiForm,
+                            setForm: setGeminiForm,
+                            onSubmit: handleAddGemini,
+                            docsUrl: 'https://aistudio.google.com/app/apikey',
+                            docsLabel: 'Google AI Studio',
+                        })}
                 </div>
 
                 {/* Error banner */}

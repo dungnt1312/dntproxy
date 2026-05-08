@@ -50,7 +50,7 @@ export const api = {
     request('/connections/import', { method: 'POST', body: JSON.stringify(data) }),
   addOpenAIConnection: (data: { name?: string; apiKey: string; supportedModels?: string[] }) =>
     request('/connections/add-openai', { method: 'POST', body: JSON.stringify(data) }),
-  addCustomConnection: (data: { name?: string; apiKey?: string; baseUrl: string; supportedModels?: string[] }) =>
+  addCustomConnection: (data: { name?: string; apiKey?: string; baseUrl: string; modelPrefix?: string; supportedModels?: string[] }) =>
     request('/connections/add-custom', { method: 'POST', body: JSON.stringify(data) }),
   addGLMConnection: (data: { name?: string; apiKey: string; baseUrl?: string; supportedModels?: string[] }) =>
     request('/connections/add-glm', { method: 'POST', body: JSON.stringify(data) }),
@@ -58,6 +58,10 @@ export const api = {
     request('/connections/add-minimax', { method: 'POST', body: JSON.stringify(data) }),
   addQwenConnection: (data: { name?: string; apiKey: string; baseUrl?: string; supportedModels?: string[] }) =>
     request('/connections/add-qwen', { method: 'POST', body: JSON.stringify(data) }),
+  addAnthropicConnection: (data: { name?: string; apiKey: string; baseUrl?: string; supportedModels?: string[] }) =>
+    request('/connections/add-anthropic', { method: 'POST', body: JSON.stringify(data) }),
+  addGeminiConnection: (data: { name?: string; apiKey: string; baseUrl?: string; supportedModels?: string[] }) =>
+    request('/connections/add-gemini', { method: 'POST', body: JSON.stringify(data) }),
   deleteConnection: (id: string) => request(`/connections/${id}`, { method: 'DELETE' }),
   testConnection: (id: string) => request(`/connections/${id}/test`, { method: 'POST' }),
   updateConnection: (id: string, data: Record<string, unknown>) =>
@@ -122,6 +126,7 @@ export const api = {
 
   // Models
   getModels: () => request('/models'),
+  getModelRegistry: () => request('/models/registry'),
 
   // Logs
   getLogs: (filters?: Partial<LogFilters>) => request(`/logs${logQuery(filters)}`),

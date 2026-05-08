@@ -29,6 +29,16 @@ func apiGetLogSummary(c *gin.Context) {
 	c.JSON(200, summary)
 }
 
+func apiGetLogDaily(c *gin.Context) {
+	query := domain.LogQuery{Range: c.DefaultQuery("range", "14d")}
+	stats, err := logger.Get().DailyStats(query)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, stats)
+}
+
 func apiGetLogConnections(c *gin.Context) {
 	connections, err := logger.Get().ConnectionSummaries(parseLogQuery(c))
 	if err != nil {

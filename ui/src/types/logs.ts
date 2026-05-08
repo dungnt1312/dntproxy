@@ -52,6 +52,16 @@ export interface LogConnectionSummary {
   avgLatencyMs: number
 }
 
+export interface DailyUsageStat {
+  date: string
+  requests: number
+  errors: number
+  inputTokens: number
+  outputTokens: number
+  totalTokens: number
+  costTotal: number
+}
+
 export interface LogFilters {
   range: string
   connectionId: string

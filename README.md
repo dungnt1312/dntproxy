@@ -81,6 +81,11 @@ dntproxy auth add
 # List connections
 dntproxy auth list
 
+# Export/Import connections
+dntproxy connection export <connection-id> [file]
+dntproxy connection export-multiple --ids conn1,conn2 [file]
+dntproxy connection import <file> --mode add|replace|merge
+
 # Create model combo
 dntproxy combo add my-combo kr/claude-sonnet-4.5 oai/gpt-4o
 

@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react'
 import { Download, Loader2, Settings2 } from 'lucide-react'
 import { api } from '../../api'
 import ModelSelector from '../ModelSelector'
+import { getModelProviderId } from '@/lib/provider-registry'
+import type { Connection } from '@/types/connections'
 import {
   Dialog,
   DialogContent,
@@ -13,7 +15,7 @@ import {
 import { Button } from '@/components/ui/button'
 
 interface EditModelsModalProps {
-  conn: any
+  conn: Connection
   onSave: () => void
   onClose: () => void
 }
@@ -25,8 +27,9 @@ export default function EditModelsModal({ conn, onSave, onClose }: EditModelsMod
   const [fetchError, setFetchError] = useState('')
 
   useEffect(() => {
+    const modelProvider = getModelProviderId(conn.provider)
     const withPrefix = (conn.supportedModels || []).map((m: string) =>
-      m.includes('/') ? m : `${conn.provider}/${m}`
+      m.includes('/') ? m : `${modelProvider}/${m}`
     )
     setSelectedModels(withPrefix)
   }, [conn.id, conn.supportedModels, conn.provider])
@@ -37,15 +40,10 @@ export default function EditModelsModal({ conn, onSave, onClose }: EditModelsMod
     try {
       const res = await api.fetchConnectionModels(conn.id)
       const fetched = res.models || []
-      setSelectedModels(fetched.map((m: string) => m.includes('/') ? m : `${conn.provider}/${m}`))
+      const modelProvider = getModelProviderId(conn.provider)
+      setSelectedModels(fetched.map((m: string) => m.includes('/') ? m : `${modelProvider}/${m}`))
     } catch (e: any) {
-      if (conn.provider === 'openai' || conn.provider === 'openai-compatible') {
-        const fallbacks = ['gpt-4o', 'gpt-4o-mini', 'o1', 'o1-mini', 'o3-mini', 'chatgpt-4o-latest', 'gpt-4-turbo', 'gpt-3.5-turbo']
-        setSelectedModels(fallbacks)
-        setFetchError('Fetch failed. Loaded fallback list.')
-      } else {
-        setFetchError(e.message || 'Failed to fetch models')
-      }
+      setFetchError(e.message || 'Failed to fetch models')
     } finally {
       setFetching(false)
     }
@@ -54,8 +52,9 @@ export default function EditModelsModal({ conn, onSave, onClose }: EditModelsMod
   const handleSave = async () => {
     setSaving(true)
     try {
+      const modelProvider = getModelProviderId(conn.provider)
       const models = selectedModels.map(m => {
-        if (m.startsWith(conn.provider + '/')) return m.slice(conn.provider.length + 1)
+        if (m.startsWith(modelProvider + '/')) return m.slice(modelProvider.length + 1)
         const slash = m.indexOf('/')
         return slash >= 0 ? m.slice(slash + 1) : m
       })

@@ -69,6 +69,17 @@ type LogConnectionSummary struct {
 	AvgLatencyMs   float64 `json:"avgLatencyMs"`
 }
 
+// DailyUsageStat contains aggregated usage metrics for a single calendar day.
+type DailyUsageStat struct {
+	Date         string  `json:"date"`
+	Requests     int     `json:"requests"`
+	Errors       int     `json:"errors"`
+	InputTokens  int     `json:"inputTokens"`
+	OutputTokens int     `json:"outputTokens"`
+	TotalTokens  int     `json:"totalTokens"`
+	CostTotal    float64 `json:"costTotal"`
+}
+
 // ModelPrice stores an editable price profile used for estimated cost.
 type ModelPrice struct {
 	ID           string  `json:"id"`

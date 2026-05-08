@@ -96,9 +96,11 @@ func apiAddOpenAIConnection(store port.CredentialStore) gin.HandlerFunc {
 func apiAddCustomConnection(store port.CredentialStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req struct {
-			Name    string `json:"name"`
-			APIKey  string `json:"apiKey"`
-			BaseURL string `json:"baseUrl"`
+			Name            string   `json:"name"`
+			APIKey          string   `json:"apiKey"`
+			BaseURL         string   `json:"baseUrl"`
+			ModelPrefix     string   `json:"modelPrefix,omitempty"`
+			SupportedModels []string `json:"supportedModels,omitempty"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil || req.BaseURL == "" {
 			c.JSON(400, gin.H{"error": "baseUrl is required"})
@@ -107,15 +109,17 @@ func apiAddCustomConnection(store port.CredentialStore) gin.HandlerFunc {
 
 		now := time.Now().UTC().Format(time.RFC3339)
 		conn := domain.ProviderConnection{
-			ID:        uuid.New().String(),
-			Provider:  "openai-compatible",
-			AuthType:  "apikey",
-			Weight:    100,
-			IsActive:  true,
-			APIKey:    req.APIKey,
-			BaseURL:   req.BaseURL,
-			CreatedAt: now,
-			UpdatedAt: now,
+			ID:              uuid.New().String(),
+			Provider:        "openai-compatible",
+			AuthType:        "apikey",
+			Weight:          100,
+			IsActive:        true,
+			APIKey:          req.APIKey,
+			BaseURL:         req.BaseURL,
+			ModelPrefix:     req.ModelPrefix,
+			SupportedModels: req.SupportedModels,
+			CreatedAt:       now,
+			UpdatedAt:       now,
 		}
 
 		if err := store.Update(func(appCfg *domain.AppConfig) {

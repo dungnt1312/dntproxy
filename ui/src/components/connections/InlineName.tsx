@@ -2,9 +2,11 @@ import { useEffect, useState, useRef } from 'react'
 import { Loader2, Pencil, Check, X } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
+import { toast } from 'sonner'
+import type { Connection } from '@/types/connections'
 
 interface InlineNameProps {
-  conn: any
+  conn: Connection
   onRename: (id: string, name: string) => Promise<void>
 }
 
@@ -19,9 +21,14 @@ export default function InlineName({ conn, onRename }: InlineNameProps) {
   const save = async () => {
     if (!value.trim() || value === conn.name) { setEditing(false); return }
     setSaving(true)
-    await onRename(conn.id, value.trim())
-    setSaving(false)
-    setEditing(false)
+    try {
+      await onRename(conn.id, value.trim())
+      setEditing(false)
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to rename connection')
+    } finally {
+      setSaving(false)
+    }
   }
 
   const cancel = () => { setValue(conn.name); setEditing(false) }
@@ -56,6 +63,7 @@ export default function InlineName({ conn, onRename }: InlineNameProps) {
         className="h-5 w-5 opacity-0 group-hover/name:opacity-100 transition-opacity"
         onClick={e => { e.stopPropagation(); setEditing(true) }}
         title="Rename"
+        aria-label="Rename connection"
       >
         <Pencil size={10} className="text-muted-foreground" />
       </Button>

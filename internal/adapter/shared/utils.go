@@ -137,6 +137,7 @@ func ConnectionToCredentials(conn *domain.ProviderConnection) *domain.Credential
 		RefreshToken:         conn.RefreshToken,
 		APIKey:               conn.APIKey,
 		BaseURL:              conn.BaseURL,
+		ModelPrefix:          conn.ModelPrefix,
 		ProviderSpecificData: conn.ProviderSpecificData,
 	}
 

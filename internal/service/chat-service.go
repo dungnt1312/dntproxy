@@ -143,8 +143,8 @@ func (s *ChatService) executeOnProvider(body []byte, qualifiedModel string, requ
 	}
 
 	// Inject model into body (strip provider prefix if present)
-	var bodyMap map[string]interface{}
-	if err := json.Unmarshal(body, &bodyMap); err != nil {
+	var rawMap map[string]json.RawMessage
+	if err := json.Unmarshal(body, &rawMap); err != nil {
 		reqlog.End(http.StatusBadRequest, "Invalid JSON body")
 		return &ComboResult{OK: false, StatusCode: http.StatusBadRequest, Error: "Invalid JSON body"}, nil
 	}
@@ -152,8 +152,9 @@ func (s *ChatService) executeOnProvider(body []byte, qualifiedModel string, requ
 	if idx := strings.LastIndex(model, "/"); idx >= 0 {
 		cleanModel = model[idx+1:]
 	}
-	bodyMap["model"] = cleanModel
-	updatedBody, err := json.Marshal(bodyMap)
+	modelJSON, _ := json.Marshal(cleanModel)
+	rawMap["model"] = modelJSON
+	updatedBody, err := json.Marshal(rawMap)
 	if err != nil {
 		reqlog.End(http.StatusInternalServerError, "Failed to serialize request body")
 		return &ComboResult{OK: false, StatusCode: http.StatusInternalServerError, Error: "Failed to serialize request body"}, nil

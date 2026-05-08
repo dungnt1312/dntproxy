@@ -3,6 +3,7 @@ package openai
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -72,13 +73,39 @@ func (e *Executor) Execute(model string, body []byte, credentials *domain.Creden
 	return e.executeStandard(model, body, credentials, reqlog)
 }
 
+func applyModelPrefix(body []byte, prefix string) ([]byte, error) {
+	if prefix == "" {
+		return body, nil
+	}
+
+	var payload map[string]interface{}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, fmt.Errorf("parse request body: %w", err)
+	}
+
+	model, ok := payload["model"].(string)
+	if ok && strings.HasPrefix(model, prefix) {
+		payload["model"] = strings.TrimPrefix(model, prefix)
+	}
+
+	rewritten, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("rewrite request body: %w", err)
+	}
+	return rewritten, nil
+}
+
 // executeStandard handles standard OpenAI API key requests (api.openai.com/v1/chat/completions).
 func (e *Executor) executeStandard(model string, body []byte, credentials *domain.Credentials, reqlog port.RequestLogger) (io.ReadCloser, int, error) {
 	baseURL := resolveBaseURL(credentials)
 	chatPath := resolveChatPath(credentials)
 	url := baseURL + chatPath
+	forwardBody, err := applyModelPrefix(body, credentials.ModelPrefix)
+	if err != nil {
+		return nil, 400, err
+	}
 
-	req, err := http.NewRequest("POST", url, bytes.NewReader(body))
+	req, err := http.NewRequest("POST", url, bytes.NewReader(forwardBody))
 	if err != nil {
 		return nil, 500, fmt.Errorf("create request: %w", err)
 	}
@@ -94,8 +121,8 @@ func (e *Executor) executeStandard(model string, body []byte, credentials *domai
 	if apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
-	
-	reqlog.SetBodies(string(shared.TruncateBody(shared.SanitizeBody(body), 8192)), "")
+
+	reqlog.SetBodies(string(shared.TruncateBody(shared.SanitizeBody(forwardBody), 8192)), "")
 
 	start := time.Now()
 
@@ -116,11 +143,11 @@ func (e *Executor) executeStandard(model string, body []byte, credentials *domai
 		if errRead == nil {
 			respBodyStr = string(bodyBytes)
 		}
-		
+
 		reqlog.SetBodies("", string(shared.TruncateBody(shared.SanitizeBody(bodyBytes), 8192)))
 		errUpstream := fmt.Errorf("%s", respBodyStr)
 		reqlog.Upstream(url, "POST", resp.StatusCode, duration, errUpstream)
-		
+
 		return nil, resp.StatusCode, fmt.Errorf("returned %d: %s", resp.StatusCode, respBodyStr)
 	}
 
@@ -184,12 +211,12 @@ func (e *Executor) executeCodexResponses(model string, body []byte, credentials 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, errRead := io.ReadAll(io.LimitReader(resp.Body, 1*1024*1024))
 		resp.Body.Close()
-		
+
 		respBodyStr := "Unknown error"
 		if errRead == nil {
 			respBodyStr = string(bodyBytes)
 		}
-		
+
 		reqlog.SetBodies("", string(shared.TruncateBody(shared.SanitizeBody(bodyBytes), 8192)))
 		errUpstream := fmt.Errorf("%s", respBodyStr)
 		reqlog.Upstream(url, "POST", resp.StatusCode, duration, errUpstream)
@@ -248,7 +275,7 @@ func (e *Executor) executeCodexResponses(model string, body []byte, credentials 
 			completePayloadBuilder.WriteString(translated)
 			pw.Write([]byte("data: [DONE]\n\n"))
 		}
-		
+
 		// Set usage metrics
 		reqlog.SetUsage(state.PromptTokens, state.CompletionTokens, "codex_metrics")
 		if preview, _ := extractResponsePreview([]byte(completePayloadBuilder.String())); preview != "" {

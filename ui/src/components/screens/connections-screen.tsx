@@ -1,8 +1,7 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../api';
-import { Plus, Search, Link2, AlertTriangle, ChevronDown, Zap, RefreshCw } from 'lucide-react';
-import { getProviderLabel } from '../connections/helpers';
+import { Plus, Search, Link2, AlertTriangle, ChevronDown, Zap, RefreshCw, Loader2 } from 'lucide-react';
 import ConnectionCard from '../connections/ConnectionCard';
 import EditModelsModal from '../connections/EditModelsModal';
 import EditConnectionModal from '../connections/EditConnectionModal';
@@ -14,67 +13,23 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
-
-// ─── Provider metadata ────────────────────────────────────────────────────────
-
-const PROVIDER_ORDER = [
-    'kiro',
-    'openai',
-    'qwen',
-    'glm',
-    'minimax',
-    'anthropic',
-    'gemini',
-    'openai-compatible',
-] as const;
-
-const PROVIDER_META: Record<string, { label: string; colorClass: string }> = {
-    'kiro': {
-        label: 'AWS / Kiro',
-        colorClass: 'bg-orange-500/10 border-orange-500/20 text-orange-600',
-    },
-    'openai': {
-        label: 'OpenAI',
-        colorClass: 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600',
-    },
-    'qwen': {
-        label: 'Qwen',
-        colorClass: 'bg-indigo-500/10 border-indigo-500/20 text-indigo-600',
-    },
-    'glm': {
-        label: 'GLM (Zhipu AI)',
-        colorClass: 'bg-blue-500/10 border-blue-500/20 text-blue-600',
-    },
-    'minimax': {
-        label: 'MiniMax',
-        colorClass: 'bg-orange-400/10 border-orange-400/20 text-orange-500',
-    },
-    'anthropic': {
-        label: 'Anthropic',
-        colorClass: 'bg-amber-600/10 border-amber-600/20 text-amber-600',
-    },
-    'gemini': {
-        label: 'Gemini',
-        colorClass: 'bg-blue-400/10 border-blue-400/20 text-blue-500',
-    },
-    'openai-compatible': {
-        label: 'OpenAI Compatible',
-        colorClass: 'bg-purple-500/10 border-purple-500/20 text-purple-600',
-    },
-};
+import { getProviderLabel, getProviderMeta, PROVIDER_ORDER } from '@/lib/provider-registry';
+import type { Connection, ConnectionGroup, UsageData } from '@/types/connections';
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function ConnectionsScreen() {
     const navigate = useNavigate();
-    const [conns, setConns] = useState<any[]>([]);
-    const [editModelsConn, setEditModelsConn] = useState<any | null>(null);
-    const [editConn, setEditConn] = useState<any | null>(null);
+    const [conns, setConns] = useState<Connection[]>([]);
+    const [isLoading, setIsLoading] = useState(true);
+    const [loadError, setLoadError] = useState('');
+    const [editModelsConn, setEditModelsConn] = useState<Connection | null>(null);
+    const [editConn, setEditConn] = useState<Connection | null>(null);
     const [deleteTarget, setDeleteTarget] = useState<{
         id: string;
         name: string;
     } | null>(null);
-    const [quotaResult, setQuotaResult] = useState<Record<string, any>>({});
+    const [quotaResult, setQuotaResult] = useState<Record<string, UsageData>>({});
     const [searchQuery, setSearchQuery] = useState('');
     const [autoRefreshQuota, setAutoRefreshQuota] = useState(false);
     const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
@@ -91,8 +46,8 @@ export default function ConnectionsScreen() {
     // ── Stats ─────────────────────────────────────────────────────────────────
     const connectionStats = useMemo(() => {
         const total = conns.length;
-        const active = conns.filter((c: any) => c.isActive).length;
-        const needsAttention = conns.filter((c: any) => {
+        const active = conns.filter((c) => c.isActive).length;
+        const needsAttention = conns.filter((c) => {
             if (!c.isActive) return false;
             const rl = c.rateLimitedUntil && new Date(c.rateLimitedUntil) > new Date();
             const exp = c.expiresAt && new Date(c.expiresAt) < new Date();
@@ -105,7 +60,7 @@ export default function ConnectionsScreen() {
     const filteredConns = useMemo(() => {
         const q = searchQuery.trim().toLowerCase();
         if (!q) return conns;
-        return conns.filter((c: any) => {
+        return conns.filter((c) => {
             const providerLabel = getProviderLabel(c.provider).toLowerCase();
             const hay = [
                 c.name,
@@ -128,19 +83,19 @@ export default function ConnectionsScreen() {
         const list = [...filteredConns].sort((a, b) =>
             a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }),
         );
-        const groups: Record<string, any[]> = {};
-        list.forEach((c: any) => {
+        const groups: Record<string, Connection[]> = {};
+        list.forEach((c) => {
             const p = c.provider || 'unknown';
             if (!groups[p]) groups[p] = [];
             groups[p].push(c);
         });
 
-        const result: any[] = [];
+        const result: ConnectionGroup[] = [];
 
         // Known providers in priority order
         PROVIDER_ORDER.forEach((p) => {
             if (groups[p]) {
-                const meta = PROVIDER_META[p];
+                const meta = getProviderMeta(p);
                 result.push({
                     id: p,
                     label: meta.label,
@@ -153,14 +108,14 @@ export default function ConnectionsScreen() {
 
         // Unknown providers → own group
         Object.keys(groups).forEach((k) => {
-            if (!PROVIDER_ORDER.includes(k as any)) {
-                const label = getProviderLabel(k);
+            if (!PROVIDER_ORDER.includes(k as (typeof PROVIDER_ORDER)[number])) {
+                const meta = getProviderMeta(k);
                 result.push({
                     id: k,
-                    label,
+                    label: getProviderLabel(k),
                     items: groups[k],
                     icon: <ProviderLogoIcon provider={k} size={28} className="w-full h-full object-cover" />,
-                    colorClass: 'bg-gray-500/10 border-gray-500/20 text-gray-400',
+                    colorClass: meta.colorClass,
                 });
             }
         });
@@ -169,15 +124,23 @@ export default function ConnectionsScreen() {
     }, [filteredConns]);
 
     // ── Load connections only (no quota fetch) ─────────────────────────────────
-    const load = () =>
-        api
-            .getConnections()
-            .then((d) => setConns(d || []))
-            .catch(() => {});
+    const load = useCallback(async () => {
+        setLoadError('');
+        try {
+            const data = await api.getConnections();
+            setConns(data || []);
+        } catch (e: any) {
+            const message = e.message || 'Failed to load connections';
+            setLoadError(message);
+            toast.error(message);
+        } finally {
+            setIsLoading(false);
+        }
+    }, []);
 
     useEffect(() => {
         load();
-    }, []);
+    }, [load]);
 
     // ── On-demand quota fetch per provider group ───────────────────────────────
     const handleFetchGroupQuota = useCallback(
@@ -188,8 +151,8 @@ export default function ConnectionsScreen() {
             setFetchingGroups((prev) => ({ ...prev, [groupId]: true }));
 
             const promises = group.items
-                .filter((c: any) => c.isActive)
-                .map(async (c: any) => {
+                .filter((c) => c.isActive)
+                .map(async (c) => {
                     try {
                         const res = await api.getUsage(c.id);
                         return [c.id, res] as const;
@@ -199,7 +162,7 @@ export default function ConnectionsScreen() {
                 });
 
             const settled = await Promise.allSettled(promises);
-            const quotaUpdates: Record<string, any> = {};
+            const quotaUpdates: Record<string, UsageData> = {};
             settled.forEach((result) => {
                 if (result.status === 'fulfilled') {
                     const [connId, value] = result.value;
@@ -209,6 +172,20 @@ export default function ConnectionsScreen() {
 
             if (Object.keys(quotaUpdates).length > 0) {
                 setQuotaResult((prev) => ({ ...prev, ...quotaUpdates }));
+                setConns((prev) =>
+                    prev.map((conn) => {
+                        const update = quotaUpdates[conn.id];
+                        if (update && !update.error && !update.limitReached) {
+                            return {
+                                ...conn,
+                                lastError: undefined,
+                                rateLimitedUntil: undefined,
+                                backoffLevel: undefined,
+                            };
+                        }
+                        return conn;
+                    }),
+                );
             }
             setFetchingGroups((prev) => ({ ...prev, [groupId]: false }));
             setFetchedGroups((prev) => ({ ...prev, [groupId]: true }));
@@ -229,21 +206,21 @@ export default function ConnectionsScreen() {
             try {
                 const activeConnections = fetchedGroupIds.flatMap((groupId) => {
                     const group = groupedConns.find((g) => g.id === groupId);
-                    if (!group) return [] as any[];
-                    return group.items.filter((c: any) => c.isActive);
+                    if (!group) return [] as Connection[];
+                    return group.items.filter((c) => c.isActive);
                 });
 
                 if (activeConnections.length === 0) return;
 
-                const uniqueConnections = Array.from(new Map(activeConnections.map((c: any) => [c.id, c])).values());
+                const uniqueConnections = Array.from(new Map(activeConnections.map((c) => [c.id, c])).values());
                 const results = await Promise.allSettled(
-                    uniqueConnections.map(async (c: any) => {
+                    uniqueConnections.map(async (c) => {
                         const usage = await api.getUsage(c.id);
                         return [c.id, usage] as const;
                     }),
                 );
 
-                const quotaUpdates: Record<string, any> = {};
+                const quotaUpdates: Record<string, UsageData> = {};
                 results.forEach((result) => {
                     if (result.status === 'fulfilled') {
                         const [id, usage] = result.value;
@@ -253,6 +230,20 @@ export default function ConnectionsScreen() {
 
                 if (Object.keys(quotaUpdates).length > 0) {
                     setQuotaResult((prev) => ({ ...prev, ...quotaUpdates }));
+                    setConns((prev) =>
+                        prev.map((conn) => {
+                            const update = quotaUpdates[conn.id];
+                            if (update && !update.error && !update.limitReached) {
+                                return {
+                                    ...conn,
+                                    lastError: undefined,
+                                    rateLimitedUntil: undefined,
+                                    backoffLevel: undefined,
+                                };
+                            }
+                            return conn;
+                        }),
+                    );
                 }
             } finally {
                 quotaRefreshInFlightRef.current = false;
@@ -265,15 +256,15 @@ export default function ConnectionsScreen() {
     }, [autoRefreshQuota, fetchedGroups, groupedConns]);
 
     // ── Handlers ───────────────────────────────────────────────────────────────
-    const handleDeleteConfirm = async (id: string) => {
+    const handleDeleteConfirm = useCallback(async (id: string) => {
         await api.deleteConnection(id);
-        load();
-    };
+        await load();
+    }, [load]);
 
-    const handleModelsEditSave = () => {
+    const handleModelsEditSave = useCallback(() => {
         setEditModelsConn(null);
         load();
-    };
+    }, [load]);
 
     return (
         <div className="space-y-6">
@@ -362,20 +353,34 @@ export default function ConnectionsScreen() {
                             onChange={(e) => setAutoRefreshQuota(e.target.checked)}
                             className="w-3.5 h-3.5 rounded cursor-pointer"
                         />
-                        Auto refresh Quotas
+                        Auto-refresh loaded quotas
                     </label>
                 </div>
             )}
 
             {/* List */}
-            {conns.length === 0 ? (
+            {isLoading ? (
+                <div className="flex flex-col items-center justify-center rounded-lg border py-16 text-center">
+                    <Loader2 className="h-6 w-6 animate-spin text-primary mb-3" />
+                    <p className="text-sm text-muted-foreground">Loading connections…</p>
+                </div>
+            ) : loadError ? (
+                <div className="flex flex-col items-center justify-center rounded-lg border border-destructive/30 py-12 text-center">
+                    <AlertTriangle className="h-6 w-6 text-destructive mb-3" />
+                    <h3 className="text-base font-semibold mb-1">Failed to load connections</h3>
+                    <p className="text-sm text-muted-foreground mb-4 max-w-md">{loadError}</p>
+                    <Button onClick={load} variant="outline" className="gap-2">
+                        <RefreshCw size={14} /> Retry
+                    </Button>
+                </div>
+            ) : conns.length === 0 ? (
                 <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-16 text-center">
                     <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-primary/10 mb-4">
                         <Link2 className="h-6 w-6 text-primary" />
                     </div>
                     <h3 className="text-lg font-semibold mb-1">No connections yet</h3>
                     <p className="text-sm text-muted-foreground mb-4 max-w-sm">
-                        Add Kiro AI or OpenAI accounts to begin routing requests.
+                        Add Kiro, OpenAI, Anthropic, Gemini, or any compatible endpoint to begin routing requests.
                     </p>
                     <Button onClick={() => navigate('/connections/add')} variant="outline" className="gap-2">
                         <Plus size={16} /> Connect Now
@@ -392,7 +397,7 @@ export default function ConnectionsScreen() {
                 <div className="space-y-6">
                     {groupedConns.map((group) => {
                         const isCollapsed = collapsedGroups[group.id];
-                        const hasActiveItems = group.items.some((c: any) => c.isActive);
+                        const hasActiveItems = group.items.some((c) => c.isActive);
                         const isFetching = fetchingGroups[group.id];
                         const hasFetched = fetchedGroups[group.id];
 
@@ -400,9 +405,12 @@ export default function ConnectionsScreen() {
                             <div key={group.id}>
                                 <div className="flex items-center gap-2 mb-3">
                                     {/* Clickable group header (toggle collapse) */}
-                                    <div
-                                        className="flex items-center gap-2 cursor-pointer select-none flex-1 group/col"
+                                    <button
+                                        type="button"
+                                        className="flex items-center gap-2 cursor-pointer select-none flex-1 group/col text-left"
                                         onClick={() => toggleGroup(group.id)}
+                                        aria-expanded={!isCollapsed}
+                                        aria-label={`${isCollapsed ? 'Expand' : 'Collapse'} ${group.label} connections`}
                                     >
                                         <div
                                             className={cn(
@@ -419,7 +427,7 @@ export default function ConnectionsScreen() {
                                         <ChevronDown
                                             className={`h-4 w-4 text-muted-foreground transition-transform ${isCollapsed ? '-rotate-90' : ''}`}
                                         />
-                                    </div>
+                                    </button>
 
                                     {/* Check quota button — only for groups with active connections */}
                                     {hasActiveItems && !isFetching && (
@@ -436,14 +444,14 @@ export default function ConnectionsScreen() {
                                                     ? 'text-primary'
                                                     : 'text-amber-600 border-amber-500/30 hover:bg-amber-500/10',
                                             )}
-                                            title={hasFetched ? 'Refresh quota' : 'Check quota'}
+                                            title={hasFetched ? 'Refresh loaded quotas' : 'Load group quotas'}
                                         >
                                             {hasFetched ? (
                                                 <RefreshCw className="h-3 w-3" />
                                             ) : (
                                                 <Zap className="h-3 w-3" />
                                             )}
-                                            {hasFetched ? 'Refresh' : 'Check'}
+                                            {hasFetched ? 'Refresh' : 'Load quotas'}
                                         </Button>
                                     )}
 
@@ -452,7 +460,7 @@ export default function ConnectionsScreen() {
                                 </div>
                                 {!isCollapsed && (
                                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-                                        {group.items.map((c: any) => (
+                                        {group.items.map((c) => (
                                             <ConnectionCard
                                                 key={c.id}
                                                 conn={c}

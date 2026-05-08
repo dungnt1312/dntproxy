@@ -11,9 +11,10 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import type { Connection } from '@/types/connections'
 
 interface EditConnectionModalProps {
-  conn: any
+  conn: Connection
   onSuccess: (message: string) => void
   onClose: () => void
 }
@@ -22,7 +23,8 @@ export default function EditConnectionModal({ conn, onSuccess, onClose }: EditCo
   const [name, setName] = useState(conn.name || '')
   const [apiKey, setApiKey] = useState('')
   const [baseUrl, setBaseUrl] = useState(conn.baseUrl || '')
-  
+  const [modelPrefix, setModelPrefix] = useState(conn.modelPrefix || '')
+
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -30,11 +32,12 @@ export default function EditConnectionModal({ conn, onSuccess, onClose }: EditCo
     setLoading(true)
     setError('')
     try {
-      const payload: any = {}
+      const payload: Record<string, string> = {}
       if (name.trim() && name !== conn.name) payload.name = name.trim()
       if (apiKey.trim()) payload.apiKey = apiKey.trim()
       if (baseUrl !== conn.baseUrl) payload.baseUrl = baseUrl.trim()
-      
+      if (modelPrefix !== (conn.modelPrefix || '')) payload.modelPrefix = modelPrefix.trim()
+
       if (Object.keys(payload).length > 0) {
         await api.updateConnection(conn.id, payload)
         onSuccess('Connection updated!')
@@ -67,24 +70,24 @@ export default function EditConnectionModal({ conn, onSuccess, onClose }: EditCo
           <div className="space-y-3">
             <div className="space-y-1">
               <Label className="text-xs">Display Name</Label>
-              <Input 
-                value={name} 
-                onChange={e => setName(e.target.value)} 
-                placeholder="Connection Name" 
-                className="text-xs" 
+              <Input
+                value={name}
+                onChange={e => setName(e.target.value)}
+                placeholder="Connection Name"
+                className="text-xs"
                 autoComplete="off"
                 data-1p-ignore
               />
             </div>
-            
+
             <div className="space-y-1">
               <Label className="text-xs">API Key <span className="opacity-70 font-normal">(leave blank to keep current)</span></Label>
-              <Input 
-                type="password" 
-                value={apiKey} 
-                onChange={e => setApiKey(e.target.value)} 
-                placeholder="Enter new API key" 
-                className="text-xs font-mono" 
+              <Input
+                type="password"
+                value={apiKey}
+                onChange={e => setApiKey(e.target.value)}
+                placeholder="Enter new API key"
+                className="text-xs font-mono"
                 autoComplete="new-password"
                 data-1p-ignore
               />
@@ -92,15 +95,29 @@ export default function EditConnectionModal({ conn, onSuccess, onClose }: EditCo
 
             <div className="space-y-1">
               <Label className="text-xs">Base URL</Label>
-              <Input 
-                value={baseUrl} 
-                onChange={e => setBaseUrl(e.target.value)} 
-                placeholder="https://api.openai.com/v1" 
-                className="text-xs font-mono" 
+              <Input
+                value={baseUrl}
+                onChange={e => setBaseUrl(e.target.value)}
+                placeholder="https://api.openai.com/v1"
+                className="text-xs font-mono"
                 autoComplete="off"
                 data-1p-ignore
               />
             </div>
+
+            {conn.provider === 'openai-compatible' && (
+              <div className="space-y-1">
+                <Label className="text-xs">Model Prefix <span className="opacity-70 font-normal">(optional, stripped from model names)</span></Label>
+                <Input
+                  value={modelPrefix}
+                  onChange={e => setModelPrefix(e.target.value)}
+                  placeholder="e.g. my-provider/"
+                  className="text-xs font-mono"
+                  autoComplete="off"
+                  data-1p-ignore
+                />
+              </div>
+            )}
           </div>
 
           {error && (

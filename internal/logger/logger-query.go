@@ -35,6 +35,15 @@ func (l *Logger) ConnectionSummaries(query domain.LogQuery) ([]domain.LogConnect
 	return nil, nil
 }
 
+func (l *Logger) DailyStats(query domain.LogQuery) ([]domain.DailyUsageStat, error) {
+	if l.store != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return l.store.DailyStats(ctx, query)
+	}
+	return nil, nil
+}
+
 func (l *Logger) Prices() ([]domain.ModelPrice, error) {
 	if l.store != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

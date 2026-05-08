@@ -404,6 +404,11 @@ export const goApi: any = {
     return goRequest(`/logs/connections${query}`);
   },
 
+  getLogDaily: (range?: string) => {
+    const query = range ? `?range=${encodeURIComponent(range)}` : "";
+    return goRequest<import("../types/logs").DailyUsageStat[]>(`/logs/daily${query}`);
+  },
+
   clearLogs: () => goRequest("/logs/clear", { method: "POST" }),
 
   // Backup

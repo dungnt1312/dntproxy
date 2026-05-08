@@ -98,6 +98,64 @@ func (s *SQLiteLogStore) ConnectionSummaries(ctx context.Context, query domain.L
 	return result, rows.Err()
 }
 
+// DailyStats returns per-day aggregated usage for the requested range, with gaps filled as zero rows.
+func (s *SQLiteLogStore) DailyStats(ctx context.Context, query domain.LogQuery) ([]domain.DailyUsageStat, error) {
+	cutoffMs := rangeCutoffMs(query.Range)
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT
+			date(timestamp_ms/1000, 'unixepoch', 'localtime') as day,
+			COUNT(CASE WHEN direction = 'request' THEN 1 END),
+			COUNT(CASE WHEN level = 'ERROR' THEN 1 END),
+			COALESCE(SUM(input_tokens), 0),
+			COALESCE(SUM(output_tokens), 0),
+			COALESCE(SUM(total_tokens), 0),
+			COALESCE(SUM(cost_total), 0)
+		FROM request_logs
+		WHERE timestamp_ms >= ?
+		GROUP BY day
+		ORDER BY day ASC`, cutoffMs)
+	if err != nil {
+		return nil, fmt.Errorf("daily stats: %w", err)
+	}
+	defer rows.Close()
+
+	byDate := make(map[string]domain.DailyUsageStat)
+	for rows.Next() {
+		var stat domain.DailyUsageStat
+		if err := rows.Scan(&stat.Date, &stat.Requests, &stat.Errors,
+			&stat.InputTokens, &stat.OutputTokens, &stat.TotalTokens, &stat.CostTotal); err != nil {
+			return nil, err
+		}
+		byDate[stat.Date] = stat
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	days := rangeDayCount(query.Range)
+	result := make([]domain.DailyUsageStat, 0, days)
+	for i := days - 1; i >= 0; i-- {
+		d := time.Now().AddDate(0, 0, -i).Format("2006-01-02")
+		if s, ok := byDate[d]; ok {
+			result = append(result, s)
+		} else {
+			result = append(result, domain.DailyUsageStat{Date: d})
+		}
+	}
+	return result, nil
+}
+
+func rangeDayCount(r string) int {
+	switch r {
+	case "7d":
+		return 7
+	case "30d":
+		return 30
+	default:
+		return 14
+	}
+}
+
 func buildLogWhere(query domain.LogQuery) (string, []interface{}) {
 	clauses := []string{"timestamp_ms >= ?"}
 	args := []interface{}{rangeCutoffMs(query.Range)}

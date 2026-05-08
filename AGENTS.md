@@ -41,6 +41,7 @@ internal/adapter/               → Implementations
   │   ├── api-handler.go        → RegisterAPIRoutes (route wiring only)
   │   ├── chat-handler.go       → POST /v1/chat/completions
   │   ├── connection-handler.go → Connection CRUD + detect/test
+  │   ├── connection-export-handler.go → Connection export/import
   │   ├── quota-handler.go      → Quota check (Kiro/OpenAI/Codex)
   │   ├── combo-api-handler.go  → Combo CRUD
   │   ├── alias-handler.go      → Alias CRUD
@@ -63,7 +64,13 @@ internal/service/               → Business logic orchestration
   ├── model-resolver.go         → Alias, combo, provider/model parsing
   ├── account-selector.go       → Multi-account selection, cooldown, backoff, on-demand token refresh
   ├── combo-handler.go          → Fallback + round-robin strategies
-  └── tunnel-service.go         → Tunnel enable/disable/status
+  ├── tunnel-service.go         → Tunnel enable/disable/status
+  └── backup/                   → Backup/restore service
+      ├── types.go              → BackupData, ConnectionExportData
+      ├── export.go             → Full config export
+      ├── import.go             → Full config import
+      ├── connection-export.go  → Single/multiple connection export
+      └── connection-import.go  → Single/multiple connection import
 internal/logger/                → Structured logging (ring buffer + SQLite)
 ```
 
@@ -104,6 +111,10 @@ go build -o dntproxy ./cmd/dntproxy/
 - `GET /health` — Health check
 - `GET /api/connections` — List provider connections
 - `POST /api/connections` — Add connection
+- `POST /api/connections/import-file` — Import connection from file
+- `POST /api/connections/import-multiple` — Import multiple connections from file
+- `POST /api/connections/export-multiple` — Export multiple connections
+- `GET /api/connections/:id/export` — Export single connection
 - `DELETE /api/connections/:id` — Remove connection
 - `POST /api/connections/:id/test` — Test connection
 - `POST /api/connections/:id/detect` — Auto-detect models

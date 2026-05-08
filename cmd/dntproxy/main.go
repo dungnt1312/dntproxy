@@ -75,6 +75,9 @@ func main() {
 	// Profile commands
 	rootCmd.AddCommand(buildProfileCmd())
 
+	// Connection commands
+	rootCmd.AddCommand(buildConnectionCmd())
+
 	// Update command
 	rootCmd.AddCommand(buildUpdateCmd())
 
@@ -152,7 +155,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	addr := fmt.Sprintf(":%d", port)
-	log.Printf("[dntproxy] v%s starting on http://localhost%s", appversion.Version, addr)
+	log.Printf("[dntproxy] Starting on http://localhost%s", addr)
+	log.Printf("[dntproxy] Dashboard: http://localhost%s/dashboard", addr)
 	log.Printf("[dntproxy] OpenAI-compatible API: http://localhost%s/v1/chat/completions", addr)
 	log.Printf("[dntproxy] Anthropic Messages API: http://localhost%s/v1/messages", addr)
 

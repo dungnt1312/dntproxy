@@ -17,6 +17,13 @@ import (
 
 // === List Connections ===
 
+// connectionView is the API response shape for a single connection.
+// It embeds ProviderConnection and adds computed fields from provider config.
+type connectionView struct {
+	domain.ProviderConnection
+	SupportsQuota bool `json:"supportsQuota"`
+}
+
 func apiListConnections(store port.CredentialStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cfg, err := store.Load()
@@ -24,7 +31,19 @@ func apiListConnections(store port.CredentialStore) gin.HandlerFunc {
 			c.JSON(500, gin.H{"error": "Failed to load config"})
 			return
 		}
-		c.JSON(200, cfg.ProviderConnections)
+		views := make([]connectionView, len(cfg.ProviderConnections))
+		for i, conn := range cfg.ProviderConnections {
+			provCfg := domain.GetProviderConfig(conn.Provider)
+			supportsQuota := provCfg.SupportsQuota
+			if conn.Provider == "openai" && conn.AuthType != "oauth" {
+				supportsQuota = false
+			}
+			views[i] = connectionView{
+				ProviderConnection: conn,
+				SupportsQuota:      supportsQuota,
+			}
+		}
+		c.JSON(200, views)
 	}
 }
 
@@ -67,6 +86,7 @@ func apiUpdateConnection(store port.CredentialStore) gin.HandlerFunc {
 			SetModels       bool     `json:"setModels,omitempty"`
 			APIKey          *string  `json:"apiKey,omitempty"`
 			BaseURL         *string  `json:"baseUrl,omitempty"`
+			ModelPrefix     *string  `json:"modelPrefix,omitempty"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(400, gin.H{"error": "Invalid request"})
@@ -96,6 +116,9 @@ func apiUpdateConnection(store port.CredentialStore) gin.HandlerFunc {
 					}
 					if req.BaseURL != nil {
 						conn.BaseURL = *req.BaseURL
+					}
+					if req.ModelPrefix != nil {
+						conn.ModelPrefix = *req.ModelPrefix
 					}
 					conn.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 					break

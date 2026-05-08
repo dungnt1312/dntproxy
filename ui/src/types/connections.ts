@@ -1,0 +1,65 @@
+import type { ReactNode } from 'react';
+
+export interface Connection {
+  id: string;
+  name: string;
+  provider: string;
+  isActive: boolean;
+  email?: string;
+  baseUrl?: string;
+  providerName?: string;
+  authMethod?: string;
+  authType?: string;
+  apiKey?: string;
+  supportedModels?: string[];
+  modelPrefix?: string;
+  rateLimitedUntil?: string;
+  expiresAt?: string;
+  backoffLevel?: number;
+  lastError?: string;
+  modelLocks?: Record<string, string>;
+  // Computed from provider config by the backend
+  supportsQuota?: boolean;
+}
+
+export interface QuotaBucket {
+  key: string;
+  label: string;
+  used: number;
+  total: number;
+  remaining: number;
+  pct: number;
+  resetAt?: string;
+  unlimited: boolean;
+}
+
+export interface UsageData {
+  provider?: string;
+  plan?: string;
+  limitReached?: boolean;
+  message?: string;
+  quotas?: QuotaBucket[];
+  overages?: {
+    used: number;
+    cap: number;
+    remaining: number;
+    status?: string;
+    charge?: number;
+    rate?: number;
+  };
+  error?: string;
+}
+
+export interface TestConnectionResult {
+  status?: string;
+  message?: string;
+  loading?: boolean;
+}
+
+export interface ConnectionGroup {
+  id: string;
+  label: string;
+  items: Connection[];
+  icon: ReactNode;
+  colorClass: string;
+}

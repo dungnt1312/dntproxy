@@ -29,9 +29,13 @@ func chatHandler(chatService port.ChatService, store port.CredentialStore) gin.H
 	return func(c *gin.Context) {
 		requestID := uuid.New().String()
 
-		body, err := io.ReadAll(io.LimitReader(c.Request.Body, maxChatBodySize))
+		body, err := io.ReadAll(io.LimitReader(c.Request.Body, maxChatBodySize+1))
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"message": "Failed to read body"}})
+			return
+		}
+		if len(body) > maxChatBodySize {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": gin.H{"message": "Request body exceeds 10MB limit"}})
 			return
 		}
 

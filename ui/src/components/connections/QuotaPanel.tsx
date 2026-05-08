@@ -71,13 +71,15 @@ export default function QuotaPanel({
       <div className="flex items-center justify-between gap-2">
         <p className="text-[11px] text-destructive flex-1">{data.error}</p>
         {onRefresh && (
-          <div
+          <button
+            type="button"
             className="p-1 rounded-md hover:bg-muted/80 text-muted-foreground hover:text-foreground cursor-pointer transition-colors shrink-0"
             onClick={onRefresh}
             title="Retry"
+            aria-label="Retry quota fetch"
           >
             <RefreshCw size={12} className={cn(loading && "animate-spin")} />
-          </div>
+          </button>
         )}
       </div>
     );
@@ -91,13 +93,15 @@ export default function QuotaPanel({
           {data.message}
         </p>
         {onRefresh && (
-          <div
+          <button
+            type="button"
             className="p-1 rounded-md hover:bg-muted/80 text-muted-foreground hover:text-foreground cursor-pointer transition-colors shrink-0"
             onClick={onRefresh}
             title="Refresh"
+            aria-label="Refresh quota"
           >
             <RefreshCw size={12} className={cn(loading && "animate-spin")} />
-          </div>
+          </button>
         )}
       </div>
     );
@@ -110,20 +114,22 @@ export default function QuotaPanel({
           No quota info available.
         </p>
         {onRefresh && (
-          <div
+          <button
+            type="button"
             className="p-1 rounded-md hover:bg-muted/80 text-muted-foreground hover:text-foreground cursor-pointer transition-colors shrink-0"
             onClick={onRefresh}
             title="Refresh"
+            aria-label="Refresh quota"
           >
             <RefreshCw size={12} className={cn(loading && "animate-spin")} />
-          </div>
+          </button>
         )}
       </div>
     );
   }
 
-  const barColor = (pct: number) =>
-    pct >= 90 ? "bg-red-500" : pct >= 70 ? "bg-amber-500" : "bg-emerald-500";
+  const remainingRiskColor = (usedPct: number) =>
+    usedPct >= 90 ? "bg-red-500" : usedPct >= 70 ? "bg-amber-500" : "bg-emerald-500";
 
   return (
     <div className="space-y-1.5 w-full">
@@ -144,13 +150,15 @@ export default function QuotaPanel({
           )}
         </div>
         {onRefresh && (
-          <div
+          <button
+            type="button"
             className="p-1 -mr-1 rounded hover:bg-muted/60 text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
             onClick={onRefresh}
             title="Refresh quota"
+            aria-label="Refresh quota"
           >
             <RefreshCw size={12} className={cn(loading && "animate-spin")} />
-          </div>
+          </button>
         )}
       </div>
 
@@ -177,7 +185,7 @@ export default function QuotaPanel({
             </div>
             <div className="relative h-1.5 rounded-full bg-muted/60 overflow-hidden w-full">
               <div
-                className={`absolute inset-y-0 left-0 rounded-full transition-all duration-500 ${barColor(b.pct)}`}
+                className={`absolute inset-y-0 left-0 rounded-full transition-all duration-500 ${remainingRiskColor(b.pct)}`}
                 style={{ width: `${Math.max(0, 100 - b.pct)}%` }}
               />
             </div>

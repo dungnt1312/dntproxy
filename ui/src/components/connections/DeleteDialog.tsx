@@ -18,13 +18,16 @@ interface DeleteDialogProps {
 
 export default function DeleteDialog({ target, onConfirm, onClose }: DeleteDialogProps) {
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
 
   const handleConfirm = async () => {
     setLoading(true)
+    setError('')
     try {
       await onConfirm(target.id)
       onClose()
-    } catch {
+    } catch (e: any) {
+      setError(e.message || 'Failed to remove connection')
       setLoading(false)
     }
   }
@@ -39,6 +42,11 @@ export default function DeleteDialog({ target, onConfirm, onClose }: DeleteDialo
             All tokens, settings, and quota data will be permanently deleted.
           </AlertDialogDescription>
         </AlertDialogHeader>
+        {error && (
+          <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+            {error}
+          </div>
+        )}
         <AlertDialogFooter>
           <Button variant="outline" onClick={onClose} disabled={loading}>Cancel</Button>
           <Button variant="destructive" onClick={handleConfirm} disabled={loading} className="gap-2">

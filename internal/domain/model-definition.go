@@ -1,5 +1,10 @@
 package domain
 
+import (
+	"sort"
+	"strings"
+)
+
 // ModelDefinition represents metadata about a model.
 type ModelDefinition struct {
 	ID              string                 `json:"id"`              // e.g. "claude-sonnet-4.5"
@@ -68,7 +73,73 @@ func DefaultModelRegistry() *ModelRegistry {
 				Capabilities:    []string{"tools", "streaming"},
 				IsActive:        true,
 			},
+			"kiro/claude-opus-4.6": {
+				ID:              "claude-opus-4.6",
+				Name:            "Claude Opus 4.6",
+				Provider:        "kiro",
+				ContextWindow:   200000,
+				MaxOutputTokens: 8192,
+				InputPrice:      15.0,
+				OutputPrice:     75.0,
+				Capabilities:    []string{"vision", "tools", "streaming"},
+				IsActive:        true,
+			},
+			"kiro/claude-opus-4.5": {
+				ID:              "claude-opus-4.5",
+				Name:            "Claude Opus 4.5",
+				Provider:        "kiro",
+				ContextWindow:   200000,
+				MaxOutputTokens: 8192,
+				InputPrice:      15.0,
+				OutputPrice:     75.0,
+				Capabilities:    []string{"vision", "tools", "streaming"},
+				IsActive:        true,
+			},
+			"kiro/claude-sonnet-4.6": {
+				ID:              "claude-sonnet-4.6",
+				Name:            "Claude Sonnet 4.6",
+				Provider:        "kiro",
+				ContextWindow:   200000,
+				MaxOutputTokens: 8192,
+				InputPrice:      3.0,
+				OutputPrice:     15.0,
+				Capabilities:    []string{"vision", "tools", "streaming", "thinking"},
+				IsActive:        true,
+			},
+			"kiro/deepseek-3.1": {
+				ID:              "deepseek-3.1",
+				Name:            "DeepSeek 3.1",
+				Provider:        "kiro",
+				ContextWindow:   128000,
+				MaxOutputTokens: 8192,
+				InputPrice:      0.14,
+				OutputPrice:     0.28,
+				Capabilities:    []string{"tools", "streaming"},
+				IsActive:        true,
+			},
 			// OpenAI models
+			"openai/gpt-5.4": {
+				ID:              "gpt-5.4",
+				Name:            "GPT-5.4",
+				Provider:        "openai",
+				ContextWindow:   400000,
+				MaxOutputTokens: 128000,
+				InputPrice:      1.25,
+				OutputPrice:     10.0,
+				Capabilities:    []string{"reasoning", "vision", "tools", "streaming"},
+				IsActive:        true,
+			},
+			"openai/gpt-5.4-mini": {
+				ID:              "gpt-5.4-mini",
+				Name:            "GPT-5.4 Mini",
+				Provider:        "openai",
+				ContextWindow:   400000,
+				MaxOutputTokens: 128000,
+				InputPrice:      0.25,
+				OutputPrice:     2.0,
+				Capabilities:    []string{"reasoning", "vision", "tools", "streaming"},
+				IsActive:        true,
+			},
 			"openai/gpt-4.1": {
 				ID:              "gpt-4.1",
 				Name:            "GPT-4.1",
@@ -202,6 +273,39 @@ func DefaultModelRegistry() *ModelRegistry {
 				Capabilities:    []string{"vision", "tools", "streaming"},
 				IsActive:        true,
 			},
+			"glm/glm-5-turbo": {
+				ID:              "glm-5-turbo",
+				Name:            "GLM 5 Turbo",
+				Provider:        "glm",
+				ContextWindow:   128000,
+				MaxOutputTokens: 16384,
+				InputPrice:      1.4,
+				OutputPrice:     4.4,
+				Capabilities:    []string{"vision", "tools", "streaming", "thinking"},
+				IsActive:        true,
+			},
+			"glm/glm-5V-turbo": {
+				ID:              "glm-5V-turbo",
+				Name:            "GLM 5V Turbo",
+				Provider:        "glm",
+				ContextWindow:   128000,
+				MaxOutputTokens: 16384,
+				InputPrice:      1.4,
+				OutputPrice:     4.4,
+				Capabilities:    []string{"vision", "tools", "streaming", "thinking"},
+				IsActive:        true,
+			},
+			"glm/glm-4.7-flash": {
+				ID:              "glm-4.7-flash",
+				Name:            "GLM 4.7 Flash",
+				Provider:        "glm",
+				ContextWindow:   128000,
+				MaxOutputTokens: 8192,
+				InputPrice:      0.5,
+				OutputPrice:     1.5,
+				Capabilities:    []string{"vision", "tools", "streaming"},
+				IsActive:        true,
+			},
 			// MiniMax models
 			"minimax/MiniMax-M2.7": {
 				ID:              "MiniMax-M2.7",
@@ -303,6 +407,52 @@ func DefaultModelRegistry() *ModelRegistry {
 				Capabilities:    []string{"tools", "streaming"},
 				IsActive:        true,
 			},
+			// Anthropic models
+			"anthropic/claude-sonnet": {
+				ID:              "claude-sonnet",
+				Name:            "Claude Sonnet",
+				Provider:        "anthropic",
+				ContextWindow:   200000,
+				MaxOutputTokens: 8192,
+				InputPrice:      3.0,
+				OutputPrice:     15.0,
+				Capabilities:    []string{"vision", "tools", "streaming"},
+				IsActive:        true,
+			},
+			"anthropic/claude-opus": {
+				ID:              "claude-opus",
+				Name:            "Claude Opus",
+				Provider:        "anthropic",
+				ContextWindow:   200000,
+				MaxOutputTokens: 8192,
+				InputPrice:      15.0,
+				OutputPrice:     75.0,
+				Capabilities:    []string{"vision", "tools", "streaming"},
+				IsActive:        true,
+			},
+			"anthropic/claude-haiku": {
+				ID:              "claude-haiku",
+				Name:            "Claude Haiku",
+				Provider:        "anthropic",
+				ContextWindow:   200000,
+				MaxOutputTokens: 8192,
+				InputPrice:      0.8,
+				OutputPrice:     4.0,
+				Capabilities:    []string{"vision", "tools", "streaming"},
+				IsActive:        true,
+			},
+			// Gemini models
+			"gemini/gemini-2.5-flash": {
+				ID:              "gemini-2.5-flash",
+				Name:            "Gemini 2.5 Flash",
+				Provider:        "gemini",
+				ContextWindow:   1000000,
+				MaxOutputTokens: 8192,
+				InputPrice:      0.15,
+				OutputPrice:     0.6,
+				Capabilities:    []string{"vision", "tools", "streaming"},
+				IsActive:        true,
+			},
 		},
 	}
 }
@@ -359,4 +509,20 @@ func (r *ModelRegistry) RemoveModel(key string) {
 	if r.Models != nil {
 		delete(r.Models, key)
 	}
+}
+
+// GetDefaultModelsForProvider returns default model IDs for a provider from the model registry.
+func GetDefaultModelsForProvider(providerID string) []string {
+	registry := DefaultModelRegistry()
+	var models []string
+	for key, m := range registry.Models {
+		if m.Provider == providerID && m.IsActive {
+			parts := strings.Split(key, "/")
+			if len(parts) == 2 {
+				models = append(models, parts[1])
+			}
+		}
+	}
+	sort.Strings(models)
+	return models
 }

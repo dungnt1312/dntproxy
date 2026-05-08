@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/dungnt/dntproxy/internal/domain"
 	"github.com/dungnt/dntproxy/internal/logger"
 )
 
@@ -153,12 +154,7 @@ func (ch *ComboHandler) ClearRotation(comboName string) {
 }
 
 func shouldComboFallback(status int) bool {
-	switch status {
-	case 400, 405, 411, 413, 414, 415, 422, 431:
-		return false
-	default:
-		return true
-	}
+	return !domain.IsNonFallbackStatus(status)
 }
 
 func isTransientStatus(status int) bool {

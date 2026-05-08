@@ -1,6 +1,13 @@
-import { useState } from 'react'
-import { Plus, X, Search, Check } from 'lucide-react'
-import { MODELS_CONFIG, getModelsByProvider, getModelIdPrefixForProvider } from '../models-config'
+import { useState, useEffect } from 'react'
+import { Plus, X, Search, Check, Loader2 } from 'lucide-react'
+import { api } from '../api'
+import { getModelProviderId } from '@/lib/provider-registry'
+
+interface RegistryModel {
+  id: string
+  name: string
+  provider: string
+}
 
 interface ModelSelectorProps {
   selected: string[]
@@ -18,8 +25,39 @@ export default function ModelSelector({
   const [customInput, setCustomInput] = useState('')
   const [showCustomInput, setShowCustomInput] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const [registryModels, setRegistryModels] = useState<RegistryModel[]>([])
+  const [loading, setLoading] = useState(true)
 
-  const baseModels = provider ? getModelsByProvider(provider) : MODELS_CONFIG
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    api.getModelRegistry()
+      .then((res: any) => {
+        if (cancelled) return
+        const models: RegistryModel[] = []
+        if (res.models) {
+          for (const [key, m] of Object.entries(res.models)) {
+            const def = m as any
+            if (def.provider && def.id) {
+              models.push({ id: key, name: def.name || def.id, provider: def.provider })
+            }
+          }
+        }
+        setRegistryModels(models)
+      })
+      .catch(() => {
+        if (!cancelled) setRegistryModels([])
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [])
+
+  const modelProvider = provider ? getModelProviderId(provider) : undefined
+  const baseModels = modelProvider
+    ? registryModels.filter(m => m.provider === modelProvider || m.provider === provider)
+    : registryModels
   const models = allowedModels
     ? baseModels.filter(m => allowedModels.includes(m.id))
     : baseModels
@@ -50,7 +88,7 @@ export default function ModelSelector({
     onChange(selected.filter((m) => m !== modelId))
   }
 
-  const modelIdPrefix = provider ? (getModelIdPrefixForProvider(provider) ?? provider) : null
+  const modelIdPrefix = modelProvider ?? provider ?? null
 
   const addCustomModel = (): void => {
     const trimmed = customInput.trim()
@@ -145,7 +183,13 @@ export default function ModelSelector({
 
       {/* Model list - checked = allowed */}
       <div className="max-h-64 overflow-y-auto p-1 border border-border bg-background rounded-md shadow-sm">
-        {filteredModels.length === 0 && (
+        {loading && (
+          <div className="flex items-center justify-center gap-2 py-6 text-muted-foreground">
+            <Loader2 size={14} className="animate-spin" />
+            <span className="text-sm">Loading models…</span>
+          </div>
+        )}
+        {!loading && filteredModels.length === 0 && (
           <p className="text-sm text-muted-foreground py-6 text-center">No models found</p>
         )}
         <div className="space-y-0.5">

@@ -26,8 +26,11 @@ type ProviderConnection struct {
 	ModelLocks           map[string]string      `json:"modelLocks,omitempty"`
 	SupportedModels      []string               `json:"supportedModels,omitempty"`
 	BaseURL              string                 `json:"baseUrl,omitempty"`
-	CreatedAt            string                 `json:"createdAt,omitempty"`
-	UpdatedAt            string                 `json:"updatedAt,omitempty"`
+	// ModelPrefix is used by openai-compatible connections to strip a prefix
+	// from incoming model names before forwarding (e.g. "my-" → strip so "my-gpt-4" → "gpt-4").
+	ModelPrefix string `json:"modelPrefix,omitempty"`
+	CreatedAt   string `json:"createdAt,omitempty"`
+	UpdatedAt   string `json:"updatedAt,omitempty"`
 }
 
 // SupportsModel checks if this connection supports the given model.
@@ -62,6 +65,7 @@ type Credentials struct {
 	APIKey               string
 	ProfileArn           string
 	BaseURL              string
+	ModelPrefix          string
 	ProviderSpecificData map[string]interface{}
 }
 

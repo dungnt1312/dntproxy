@@ -6,6 +6,19 @@ import (
 	"time"
 )
 
+// NonFallbackStatusCodes are status codes that indicate a client error
+// that should not trigger fallback to next account/model.
+var NonFallbackStatusCodes = map[int]bool{
+	400: true, 405: true, 411: true, 413: true,
+	414: true, 415: true, 422: true, 431: true,
+}
+
+// IsNonFallbackStatus returns true if the status code indicates a client error
+// that should not trigger fallback.
+func IsNonFallbackStatus(status int) bool {
+	return NonFallbackStatusCodes[status]
+}
+
 // Cooldown durations in milliseconds.
 const (
 	CooldownUnauthorized   = 5000
@@ -62,9 +75,10 @@ func CheckFallbackError(status int, errorText string, backoffLevel int) Fallback
 	}
 
 	// Status code based
-	switch status {
-	case 400, 405, 411, 413, 414, 415, 422, 431:
+	if IsNonFallbackStatus(status) {
 		return FallbackResult{false, 0, backoffLevel}
+	}
+	switch status {
 	case 401:
 		return FallbackResult{true, CooldownUnauthorized, backoffLevel}
 	case 402, 403:

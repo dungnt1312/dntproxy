@@ -48,6 +48,14 @@ func ParseModelString(modelStr string) (*ParsedModel, error) {
 
 	providerOrAlias := modelPart[:idx]
 	model := modelPart[idx+1:]
+
+	if providerOrAlias == "" {
+		return nil, fmt.Errorf("invalid model format: empty provider in %q", modelStr)
+	}
+	if model == "" {
+		return nil, fmt.Errorf("invalid model format: empty model in %q", modelStr)
+	}
+
 	provider := resolveProviderAlias(providerOrAlias)
 
 	return &ParsedModel{

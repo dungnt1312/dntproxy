@@ -330,8 +330,7 @@ func weightedRandomSelect(available []domain.ProviderConnection) *domain.Provide
 
 // MarkUnavailable marks a connection as unavailable with cooldown.
 func (s *AccountSelector) MarkUnavailable(connectionID string, status int, errorText string, model string) error {
-	connFound := false
-	err := s.store.Update(func(cfg *domain.AppConfig) {
+	return s.store.Update(func(cfg *domain.AppConfig) {
 		var conn *domain.ProviderConnection
 		for i := range cfg.ProviderConnections {
 			if cfg.ProviderConnections[i].ID == connectionID {
@@ -342,7 +341,6 @@ func (s *AccountSelector) MarkUnavailable(connectionID string, status int, error
 		if conn == nil {
 			return
 		}
-		connFound = true
 
 		fb := domain.CheckFallbackError(status, errorText, conn.BackoffLevel)
 		if !fb.ShouldFallback {
@@ -363,13 +361,6 @@ func (s *AccountSelector) MarkUnavailable(connectionID string, status int, error
 			}
 		}
 	})
-	if err != nil {
-		return err
-	}
-	if !connFound {
-		return fmt.Errorf("connection not found: %s", connectionID)
-	}
-	return nil
 }
 
 // ClearError resets a connection's error state after a successful request.

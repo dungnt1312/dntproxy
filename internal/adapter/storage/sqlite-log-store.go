@@ -57,6 +57,7 @@ func (s *SQLiteLogStore) Insert(ctx context.Context, entry *domain.LogEntry) err
 	if entry.Currency == "" {
 		entry.Currency = "USD"
 	}
+	s.applyMissingCost(ctx, entry)
 
 	_, err := s.db.ExecContext(ctx, `INSERT INTO request_logs
 		(id, timestamp_ms, timestamp, level, provider, direction, method, path, status_code, duration_ms,
@@ -74,6 +75,20 @@ func (s *SQLiteLogStore) Insert(ctx context.Context, entry *domain.LogEntry) err
 		return fmt.Errorf("insert log: %w", err)
 	}
 	return nil
+}
+
+func (s *SQLiteLogStore) applyMissingCost(ctx context.Context, entry *domain.LogEntry) {
+	if entry.CostTotal > 0 || entry.TotalTokens <= 0 || entry.Model == "" {
+		return
+	}
+	price, err := s.PriceFor(ctx, entry.Provider, entry.Model)
+	if err != nil || price == nil {
+		return
+	}
+	entry.CostInput = float64(entry.InputTokens) / 1_000_000 * price.InputPer1M
+	entry.CostOutput = float64(entry.OutputTokens) / 1_000_000 * price.OutputPer1M
+	entry.CostTotal = entry.CostInput + entry.CostOutput
+	entry.Currency = price.Currency
 }
 
 // BatchInsert stores multiple log entries efficiently in a single transaction.

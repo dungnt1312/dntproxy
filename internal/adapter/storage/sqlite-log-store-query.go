@@ -39,24 +39,22 @@ func (s *SQLiteLogStore) List(ctx context.Context, query domain.LogQuery) ([]dom
 	return logs, rows.Err()
 }
 
-// Summary returns aggregate request, error, token, and cost totals.
+// Summary returns aggregate request, error, token, cost, and latency totals.
 func (s *SQLiteLogStore) Summary(ctx context.Context, query domain.LogQuery) (*domain.LogSummary, error) {
 	where, args := buildLogWhere(query)
-	// Always count "inbound" entries as requests — this is the direction logged
-	// by chat-handler.go when the client request arrives.
-	requestDirection := "inbound"
 	row := s.db.QueryRowContext(ctx, `SELECT
-		COUNT(CASE WHEN direction = '`+requestDirection+`' THEN 1 END),
+		COUNT(CASE WHEN direction = 'request' THEN 1 END),
 		COUNT(CASE WHEN level = 'ERROR' THEN 1 END),
 		COALESCE(SUM(input_tokens), 0),
 		COALESCE(SUM(output_tokens), 0),
 		COALESCE(SUM(total_tokens), 0),
-		COALESCE(SUM(cost_total), 0)
+		COALESCE(SUM(cost_total), 0),
+		COALESCE(AVG(CASE WHEN direction = 'request' AND duration_ms > 0 THEN duration_ms END), 0)
 		FROM request_logs `+where, args...)
 
 	summary := &domain.LogSummary{Currency: "USD"}
 	if err := row.Scan(&summary.Requests, &summary.Errors, &summary.InputTokens,
-		&summary.OutputTokens, &summary.TotalTokens, &summary.CostTotal); err != nil {
+		&summary.OutputTokens, &summary.TotalTokens, &summary.CostTotal, &summary.AvgLatencyMs); err != nil {
 		return nil, fmt.Errorf("summarize logs: %w", err)
 	}
 	return summary, nil

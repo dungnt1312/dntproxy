@@ -51,6 +51,7 @@ type LogSummary struct {
 	TotalTokens  int     `json:"totalTokens"`
 	CostTotal    float64 `json:"costTotal"`
 	Currency     string  `json:"currency"`
+	AvgLatencyMs float64 `json:"avgLatencyMs"`
 }
 
 // LogConnectionSummary powers the connection filter and side panel.

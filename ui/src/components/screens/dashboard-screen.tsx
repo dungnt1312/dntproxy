@@ -9,6 +9,7 @@ import {
   X,
   Zap,
   ArrowRight,
+  ChevronRight,
 } from 'lucide-react'
 import {
   ComposedChart,
@@ -39,9 +40,17 @@ type KpiRange = '24h' | '7d' | '30d'
 interface KpiData {
   totalRequests: number
   errorRequests: number
-  inputTokens: number
-  outputTokens: number
+  totalTokens: number
   costTotal: number
+  avgLatencyMs: number
+}
+
+interface RecentError {
+  id: string
+  createdAt: string
+  errorMessage: string | null
+  responseStatus: number
+  provider: string | null
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -56,6 +65,12 @@ function formatCost(n: number): string {
   if (n >= 1) return `$${n.toFixed(2)}`
   if (n > 0) return `$${n.toFixed(4)}`
   return '$0'
+}
+
+function formatLatency(ms: number): string {
+  if (!ms) return '—'
+  if (ms < 1000) return `${Math.round(ms)}ms`
+  return `${(ms / 1000).toFixed(1)}s`
 }
 
 function formatRelativeTime(dateStr: string | null): string {
@@ -74,11 +89,9 @@ function formatDayLabel(date: string): string {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
-const KPI_RANGE_LABELS: Record<KpiRange, string> = {
-  '24h': 'Today',
-  '7d': '7 days',
-  '30d': '30 days',
-}
+// Map range → days count for chart
+const RANGE_DAYS: Record<KpiRange, string> = { '24h': '7d', '7d': '7d', '30d': '30d' }
+const KPI_RANGE_LABELS: Record<KpiRange, string> = { '24h': 'Today', '7d': '7 days', '30d': '30 days' }
 
 // ─── Main Dashboard ──────────────────────────────────────────────────────────
 
@@ -86,10 +99,12 @@ export default function DashboardScreen() {
   const navigate = useNavigate()
   const [kpiRange, setKpiRange] = useState<KpiRange>('24h')
   const [kpi, setKpi] = useState<KpiData | null>(null)
+  const [recentErrors, setRecentErrors] = useState<RecentError[]>([])
   const [dailyStats, setDailyStats] = useState<DailyUsageStat[]>([])
   const [loading, setLoading] = useState(true)
   const [chartLoading, setChartLoading] = useState(true)
-  const intervalRef = useRef<ReturnType<typeof setInterval>>(undefined)
+  const kpiIntervalRef = useRef<ReturnType<typeof setInterval>>(undefined)
+  const chartIntervalRef = useRef<ReturnType<typeof setInterval>>(undefined)
 
   const fetchKpi = useCallback(async (range: KpiRange) => {
     try {
@@ -97,40 +112,51 @@ export default function DashboardScreen() {
       setKpi({
         totalRequests: summary?.totalRequests ?? 0,
         errorRequests: summary?.errorRequests ?? 0,
-        inputTokens: summary?.inputTokens ?? 0,
-        outputTokens: summary?.outputTokens ?? 0,
+        totalTokens: (summary?.inputTokens ?? 0) + (summary?.outputTokens ?? 0),
         costTotal: summary?.costTotal ?? 0,
+        avgLatencyMs: summary?.avgLatencyMs ?? 0,
       })
+      setRecentErrors(summary?.recentErrors ?? [])
     } finally {
       setLoading(false)
     }
   }, [])
 
-  const fetchChart = useCallback(async () => {
+  const fetchChart = useCallback(async (range: KpiRange) => {
     try {
-      const stats = await goApi.getLogDaily('14d').catch(() => [])
+      const chartRange = RANGE_DAYS[range]
+      const stats = await goApi.getLogDaily(chartRange).catch(() => [])
       setDailyStats(Array.isArray(stats) ? stats : [])
     } finally {
       setChartLoading(false)
     }
   }, [])
 
+  // Refetch everything when range changes
   useEffect(() => {
     setLoading(true)
+    setChartLoading(true)
     fetchKpi(kpiRange)
-  }, [kpiRange, fetchKpi])
+    fetchChart(kpiRange)
 
-  useEffect(() => {
-    fetchChart()
-    intervalRef.current = setInterval(fetchChart, 60_000)
-    return () => { if (intervalRef.current) clearInterval(intervalRef.current) }
-  }, [fetchChart])
+    // Auto-refresh KPI every 30s, chart every 60s
+    if (kpiIntervalRef.current) clearInterval(kpiIntervalRef.current)
+    if (chartIntervalRef.current) clearInterval(chartIntervalRef.current)
+    kpiIntervalRef.current = setInterval(() => fetchKpi(kpiRange), 30_000)
+    chartIntervalRef.current = setInterval(() => fetchChart(kpiRange), 60_000)
+
+    return () => {
+      if (kpiIntervalRef.current) clearInterval(kpiIntervalRef.current)
+      if (chartIntervalRef.current) clearInterval(chartIntervalRef.current)
+    }
+  }, [kpiRange, fetchKpi, fetchChart])
 
   const successRate = kpi && kpi.totalRequests > 0
     ? (((kpi.totalRequests - kpi.errorRequests) / kpi.totalRequests) * 100).toFixed(1)
     : null
 
-  const isHealthy = !kpi || kpi.errorRequests === 0
+  // Only healthy once kpi loaded and no errors
+  const isHealthy = kpi !== null && kpi.errorRequests === 0
 
   return (
     <div className="space-y-4">
@@ -147,13 +173,18 @@ export default function DashboardScreen() {
           <div>
             <h1 className="text-xl font-bold leading-tight">Dashboard</h1>
             <p className="text-xs text-muted-foreground mt-0.5">
-              {loading ? 'Loading...' : isHealthy ? 'System Healthy' : `${kpi?.errorRequests} error${(kpi?.errorRequests ?? 0) > 1 ? 's' : ''}`}
+              {loading
+                ? 'Loading...'
+                : kpi === null
+                  ? 'No data'
+                  : isHealthy
+                    ? 'System Healthy'
+                    : `${kpi.errorRequests} error${kpi.errorRequests > 1 ? 's' : ''} in ${KPI_RANGE_LABELS[kpiRange].toLowerCase()}`}
             </p>
           </div>
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
-          {/* KPI range selector */}
           <div className="flex items-center rounded-md border border-border bg-muted/30 p-0.5 gap-0.5">
             {(['24h', '7d', '30d'] as KpiRange[]).map(r => (
               <button
@@ -179,8 +210,8 @@ export default function DashboardScreen() {
         </div>
       </div>
 
-      {/* ── KPI Cards ── */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+      {/* ── KPI Cards (4 cards: Requests / Success% / Total Tokens / Avg Latency / Cost) ── */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         {loading ? (
           Array.from({ length: 5 }).map((_, i) => (
             <Card key={i}><CardContent className="px-4 py-3"><Skeleton className="h-12 w-full" /></CardContent></Card>
@@ -191,24 +222,33 @@ export default function DashboardScreen() {
             <StatCard
               label="Success Rate"
               value={successRate ? `${successRate}%` : '—'}
-              accent={successRate && parseFloat(successRate) >= 95 ? 'text-emerald-600 dark:text-emerald-400' : successRate && parseFloat(successRate) >= 80 ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'}
+              accent={
+                successRate && parseFloat(successRate) >= 95
+                  ? 'text-emerald-500'
+                  : successRate && parseFloat(successRate) >= 80
+                    ? 'text-amber-500'
+                    : successRate
+                      ? 'text-red-500'
+                      : undefined
+              }
               range={kpiRange}
             />
-            <StatCard label="Input Tokens" value={formatTokens(kpi?.inputTokens ?? 0)} accent="text-primary" range={kpiRange} />
-            <StatCard label="Output Tokens" value={formatTokens(kpi?.outputTokens ?? 0)} accent="text-emerald-600 dark:text-emerald-400" range={kpiRange} />
-            <StatCard label="Est. Cost" value={`~${formatCost(kpi?.costTotal ?? 0)}`} accent="text-amber-600 dark:text-amber-400" range={kpiRange} />
+            <StatCard label="Total Tokens" value={formatTokens(kpi?.totalTokens ?? 0)} accent="text-blue-400" range={kpiRange} />
+            <StatCard label="Avg Latency" value={formatLatency(kpi?.avgLatencyMs ?? 0)} range={kpiRange} />
+            <StatCard label="Est. Cost" value={`~${formatCost(kpi?.costTotal ?? 0)}`} accent="text-amber-500" range={kpiRange} />
           </>
         )}
       </div>
 
-      {/* ── Daily Chart + Live Feed ── */}
+      {/* ── Chart + Live Feed ── */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
-        {/* Left: Daily usage chart */}
-        <div className="lg:col-span-3 space-y-4">
-          <DailyUsageChart data={dailyStats} loading={chartLoading} />
+        <div className="lg:col-span-3 space-y-3">
+          <DailyUsageChart data={dailyStats} loading={chartLoading} range={kpiRange} />
+          {recentErrors.length > 0 && (
+            <ErrorsHint errors={recentErrors} onViewAll={() => navigate('/logs?level=ERROR')} />
+          )}
         </div>
 
-        {/* Right: Live Feed */}
         <div className="lg:col-span-2">
           <LiveFeed />
         </div>
@@ -229,7 +269,7 @@ function StatCard({ label, value, accent, range }: {
     <Card>
       <CardContent className="px-4 py-3 flex flex-col gap-1">
         <span className="text-[10px] text-muted-foreground uppercase font-semibold tracking-wider">{label}</span>
-        <span className={cn('text-2xl font-bold tabular-nums leading-none', accent)}>{value}</span>
+        <span className={cn('text-2xl font-bold tabular-nums leading-none', accent ?? 'text-foreground')}>{value}</span>
         <span className="text-[9px] text-muted-foreground/60">{KPI_RANGE_LABELS[range]}</span>
       </CardContent>
     </Card>
@@ -239,12 +279,18 @@ function StatCard({ label, value, accent, range }: {
 // ─── Daily Usage Chart ───────────────────────────────────────────────────────
 
 const CHART_COLORS = {
-  requests: 'hsl(var(--primary))',
-  errors: '#ef4444',
-  tokens: '#10b981',
+  requests: '#60a5fa',
+  errors: '#f87171',
+  tokens: '#34d399',
 }
 
-function DailyUsageChart({ data, loading }: { data: DailyUsageStat[]; loading: boolean }) {
+const CHART_RANGE_LABELS: Record<KpiRange, string> = {
+  '24h': 'Last 7 days',
+  '7d': 'Last 7 days',
+  '30d': 'Last 30 days',
+}
+
+function DailyUsageChart({ data, loading, range }: { data: DailyUsageStat[]; loading: boolean; range: KpiRange }) {
   const maxTokens = Math.max(...data.map(d => d.totalTokens), 0)
   const tokenScale = maxTokens >= 1_000_000 ? 1_000_000 : maxTokens >= 1_000 ? 1_000 : 1
   const tokenLabel = maxTokens >= 1_000_000 ? 'Tokens (M)' : maxTokens >= 1_000 ? 'Tokens (K)' : 'Tokens'
@@ -265,7 +311,7 @@ function DailyUsageChart({ data, loading }: { data: DailyUsageStat[]; loading: b
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold">Daily Usage</h2>
-          <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Last 14 days</span>
+          <span className="text-[10px] text-muted-foreground uppercase tracking-wider">{CHART_RANGE_LABELS[range]}</span>
         </div>
       </CardHeader>
       <CardContent className="pt-0">
@@ -278,17 +324,17 @@ function DailyUsageChart({ data, loading }: { data: DailyUsageStat[]; loading: b
         ) : (
           <ResponsiveContainer width="100%" height={240}>
             <ComposedChart data={chartData} margin={{ top: 4, right: 8, left: -8, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.07)" vertical={false} />
               <XAxis
                 dataKey="day"
-                tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
+                tick={{ fontSize: 10, fill: 'rgba(156,163,175,1)' }}
                 tickLine={false}
                 axisLine={false}
-                interval="preserveStartEnd"
+                interval={data.length > 14 ? 4 : data.length > 7 ? 1 : 0}
               />
               <YAxis
                 yAxisId="left"
-                tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
+                tick={{ fontSize: 10, fill: 'rgba(156,163,175,1)' }}
                 tickLine={false}
                 axisLine={false}
                 width={32}
@@ -296,40 +342,81 @@ function DailyUsageChart({ data, loading }: { data: DailyUsageStat[]; loading: b
               <YAxis
                 yAxisId="right"
                 orientation="right"
-                tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
+                tick={{ fontSize: 10, fill: 'rgba(156,163,175,1)' }}
                 tickLine={false}
                 axisLine={false}
-                width={38}
+                width={42}
                 tickFormatter={(v) => tokenScale === 1_000_000 ? `${v}M` : tokenScale === 1_000 ? `${v}K` : String(v)}
               />
               <Tooltip
                 contentStyle={{
-                  background: 'hsl(var(--card))',
-                  border: '1px solid hsl(var(--border))',
+                  background: '#1e2329',
+                  border: '1px solid rgba(255,255,255,0.12)',
                   borderRadius: '8px',
                   fontSize: 12,
+                  color: '#f1f5f9',
                 }}
-                labelStyle={{ fontWeight: 600, marginBottom: 4 }}
+                labelStyle={{ fontWeight: 600, marginBottom: 4, color: '#94a3b8' }}
+                cursor={{ fill: 'rgba(255,255,255,0.04)' }}
               />
               <Legend
                 iconType="square"
                 iconSize={8}
-                wrapperStyle={{ fontSize: 11, paddingTop: 8 }}
+                wrapperStyle={{ fontSize: 11, paddingTop: 8, color: 'rgba(156,163,175,1)' }}
               />
-              <Bar yAxisId="left" dataKey="Requests" fill={CHART_COLORS.requests} radius={[3, 3, 0, 0]} maxBarSize={32} />
-              <Bar yAxisId="left" dataKey="Errors" fill={CHART_COLORS.errors} radius={[3, 3, 0, 0]} maxBarSize={32} />
+              <Bar yAxisId="left" dataKey="Requests" fill={CHART_COLORS.requests} radius={[3, 3, 0, 0]} maxBarSize={28} opacity={0.9} />
+              <Bar yAxisId="left" dataKey="Errors" fill={CHART_COLORS.errors} radius={[3, 3, 0, 0]} maxBarSize={28} opacity={0.9} />
               <Line
                 yAxisId="right"
                 type="monotone"
                 dataKey={tokenLabel}
                 stroke={CHART_COLORS.tokens}
-                strokeWidth={2}
+                strokeWidth={2.5}
                 dot={false}
-                activeDot={{ r: 3 }}
+                activeDot={{ r: 4, fill: CHART_COLORS.tokens }}
               />
             </ComposedChart>
           </ResponsiveContainer>
         )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// ─── Errors Hint ──────────────────────────────────────────────────────────────
+
+function ErrorsHint({ errors, onViewAll }: { errors: RecentError[]; onViewAll: () => void }) {
+  return (
+    <Card className="border-red-500/20 bg-red-500/5">
+      <CardContent className="px-4 py-3">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-xs font-semibold text-red-400 flex items-center gap-1.5">
+            <AlertTriangle className="size-3.5" />
+            Recent Errors
+            <Badge variant="destructive" className="text-[9px] px-1.5 py-0 ml-0.5">{errors.length}</Badge>
+          </span>
+          <button
+            onClick={onViewAll}
+            className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-0.5 transition-colors"
+          >
+            View all <ChevronRight className="size-3" />
+          </button>
+        </div>
+        <div className="space-y-1.5">
+          {errors.slice(0, 3).map(err => (
+            <div key={err.id} className="flex items-start gap-2 text-xs">
+              <Badge variant="destructive" className="text-[9px] px-1.5 py-0 shrink-0 mt-0.5">
+                {err.responseStatus || 'ERR'}
+              </Badge>
+              <span className="text-red-300/90 truncate flex-1">
+                {err.errorMessage || 'Unknown error'}
+              </span>
+              <span className="text-muted-foreground shrink-0 whitespace-nowrap">
+                {formatRelativeTime(err.createdAt)}
+              </span>
+            </div>
+          ))}
+        </div>
       </CardContent>
     </Card>
   )
@@ -402,10 +489,10 @@ function LiveFeed() {
             )}
           </h2>
           <div className="flex gap-1">
-            <Button variant="ghost" size="icon" className="size-7" onClick={() => setPaused(p => !p)}>
+            <Button variant="ghost" size="icon" className="size-7" title={paused ? 'Resume' : 'Pause'} onClick={() => setPaused(p => !p)}>
               {paused ? <Play className="size-3" /> : <Pause className="size-3" />}
             </Button>
-            <Button variant="ghost" size="icon" className="size-7" onClick={() => setEntries([])}>
+            <Button variant="ghost" size="icon" className="size-7" title="Clear" onClick={() => setEntries([])}>
               <X className="size-3" />
             </Button>
           </div>
@@ -424,8 +511,8 @@ function LiveFeed() {
                   <th className="py-1.5 w-2"></th>
                   <th className="py-1.5 text-left font-semibold text-muted-foreground text-[10px] uppercase tracking-wider">Model</th>
                   <th className="py-1.5 text-left font-semibold text-muted-foreground text-[10px] uppercase tracking-wider">Conn</th>
-                  <th className="py-1.5 text-right font-semibold text-muted-foreground text-[10px] uppercase tracking-wider whitespace-nowrap">In / Out</th>
-                  <th className="py-1.5 text-right font-semibold text-muted-foreground text-[10px] uppercase tracking-wider">ms</th>
+                  <th className="py-1.5 text-right font-semibold text-muted-foreground text-[10px] uppercase tracking-wider whitespace-nowrap">Tokens</th>
+                  <th className="py-1.5 text-right font-semibold text-muted-foreground text-[10px] uppercase tracking-wider">Dur</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border/30">
@@ -456,15 +543,15 @@ function FeedRow({ entry }: { entry: LogEntry }) {
           <span className="truncate max-w-[55px] text-muted-foreground text-[10px]">{entry.connectionName || '-'}</span>
         </div>
       </td>
-      <td className="py-1.5 text-right whitespace-nowrap">
-        <span className="text-primary">{formatTokens(entry.inputTokens || 0)}↑</span>
-        {' '}
-        <span className="text-emerald-600 dark:text-emerald-400">{formatTokens(entry.outputTokens || 0)}↓</span>
+      <td className="py-1.5 text-right whitespace-nowrap tabular-nums">
+        {(entry.totalTokens || 0) > 0
+          ? <span className="text-emerald-400">{formatTokens(entry.totalTokens || 0)}</span>
+          : <span className="text-muted-foreground/40">—</span>}
       </td>
       <td className="py-1.5 text-right text-muted-foreground whitespace-nowrap font-mono">
         {entry.durationMs
           ? (entry.durationMs < 1000 ? `${entry.durationMs}ms` : `${(entry.durationMs / 1000).toFixed(1)}s`)
-          : formatRelativeTime(entry.timestamp)}
+          : <span className="text-muted-foreground/40">{formatRelativeTime(entry.timestamp)}</span>}
       </td>
     </tr>
   )

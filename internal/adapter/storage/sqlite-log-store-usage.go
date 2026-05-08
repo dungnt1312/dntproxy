@@ -132,7 +132,7 @@ func (s *SQLiteLogStore) ChartData(ctx context.Context, period string) ([]domain
 
 func (s *SQLiteLogStore) hourlyChartData(ctx context.Context, cutoff int64) ([]domain.ChartPoint, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT
-		(strftime('%%H', timestamp_ms/1000, 'unixepoch', 'localtime') || ':00') as bucket,
+		(strftime('%H', timestamp_ms/1000, 'unixepoch', 'localtime') || ':00') as bucket,
 		COALESCE(SUM(total_tokens), 0),
 		COALESCE(SUM(cost_total), 0)
 		FROM request_logs

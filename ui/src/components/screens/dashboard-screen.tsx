@@ -367,14 +367,14 @@ function DailyUsageChart({ data, loading, error, range, onRetry }: {
               />
               <Tooltip
                 contentStyle={{
-                  background: '#1e2329',
-                  border: '1px solid rgba(255,255,255,0.12)',
+                  background: 'hsl(var(--popover))',
+                  border: '1px solid hsl(var(--border))',
                   borderRadius: '8px',
                   fontSize: 12,
-                  color: '#f1f5f9',
+                  color: 'hsl(var(--popover-foreground))',
                 }}
-                labelStyle={{ fontWeight: 600, marginBottom: 4, color: '#94a3b8' }}
-                cursor={{ fill: 'rgba(255,255,255,0.04)' }}
+                labelStyle={{ fontWeight: 600, marginBottom: 4, color: 'hsl(var(--muted-foreground))' }}
+                cursor={{ fill: 'hsl(var(--muted) / 0.3)' }}
               />
               <Legend
                 iconType="square"

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -11,9 +11,62 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Card, CardContent } from "@/components/ui/card";
-import { RefreshCw, ChevronLeft, ChevronRight } from "lucide-react";
+import { RefreshCw, ChevronLeft, ChevronRight, Activity } from "lucide-react";
 import UsageChart from "./usage-chart";
 import UsageStats, { type UsageStatsData } from "./usage-stats";
+
+function LiveRequestCard() {
+  const [recentCount, setRecentCount] = useState(0);
+  const [lastModel, setLastModel] = useState<string>("");
+  const tsRef = useRef<number[]>([]);
+
+  useEffect(() => {
+    const es = new EventSource("/api/logs/stream");
+    es.onmessage = (e) => {
+      try {
+        const msg = JSON.parse(e.data);
+        if (msg.type === "delta" && msg.log?.direction === "response") {
+          const now = Date.now();
+          tsRef.current.push(now);
+          tsRef.current = tsRef.current.filter((t) => now - t < 60_000);
+          setRecentCount(tsRef.current.length);
+          if (msg.log.model) setLastModel(msg.log.model);
+        }
+      } catch {}
+    };
+    const interval = setInterval(() => {
+      const now = Date.now();
+      tsRef.current = tsRef.current.filter((t) => now - t < 60_000);
+      setRecentCount(tsRef.current.length);
+    }, 5_000);
+    return () => {
+      es.close();
+      clearInterval(interval);
+    };
+  }, []);
+
+  return (
+    <Card>
+      <CardContent className="p-4 flex items-center gap-3">
+        <div className="flex items-center justify-center w-9 h-9 rounded-full bg-emerald-500/10 shrink-0">
+          <Activity className="w-4 h-4 text-emerald-500" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-xs text-muted-foreground">Live (last 60s)</p>
+          <p className="text-2xl font-bold tabular-nums">
+            {recentCount}
+            <span className="text-sm font-normal text-muted-foreground ml-1">req</span>
+          </p>
+        </div>
+        {lastModel && (
+          <p className="text-xs text-muted-foreground font-mono truncate max-w-[160px]" title={lastModel}>
+            {lastModel}
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 const PERIODS = [
   { value: "24h", label: "24h" },
@@ -159,6 +212,7 @@ export default function UsageScreen() {
         </TabsList>
 
         <TabsContent value="overview" className="flex flex-col gap-4 mt-4">
+          <LiveRequestCard />
           <UsageChart period={period} refreshKey={refreshKey} />
           <UsageStats data={stats} loading={statsLoading} />
         </TabsContent>

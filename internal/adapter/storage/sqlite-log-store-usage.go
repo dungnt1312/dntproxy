@@ -154,7 +154,7 @@ func (s *SQLiteLogStore) hourlyChartData(ctx context.Context, cutoff int64) ([]d
 	}
 
 	result := make([]domain.ChartPoint, 0, 24)
-	now := time.Now()
+	now := time.Now().Truncate(time.Hour)
 	for i := 23; i >= 0; i-- {
 		h := now.Add(-time.Duration(i) * time.Hour)
 		label := h.Format("15:04")

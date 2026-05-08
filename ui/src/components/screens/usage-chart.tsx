@@ -28,9 +28,10 @@ function fmtCost(n: number): string {
 
 interface UsageChartProps {
   period: string;
+  refreshKey?: number;
 }
 
-export default function UsageChart({ period }: UsageChartProps) {
+export default function UsageChart({ period, refreshKey }: UsageChartProps) {
   const [data, setData] = useState<ChartPoint[]>([]);
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<"tokens" | "cost">("tokens");
@@ -48,7 +49,7 @@ export default function UsageChart({ period }: UsageChartProps) {
     } finally {
       setLoading(false);
     }
-  }, [period]);
+  }, [period, refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     fetchData();

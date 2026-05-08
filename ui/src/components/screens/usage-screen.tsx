@@ -159,7 +159,7 @@ export default function UsageScreen() {
         </TabsList>
 
         <TabsContent value="overview" className="flex flex-col gap-4 mt-4">
-          <UsageChart period={period} />
+          <UsageChart period={period} refreshKey={refreshKey} />
           <UsageStats data={stats} loading={statsLoading} />
         </TabsContent>
 

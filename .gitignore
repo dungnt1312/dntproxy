@@ -27,7 +27,6 @@ temp
 
 # Local worktrees / nested clones
 .worktrees/
-logs/
 rewrite
 
 .claude/worktrees

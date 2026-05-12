@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/dungnt/dntproxy/internal/adapter/compressor"
+	"github.com/dungnt/dntproxy/internal/adapter/shared"
 	"github.com/dungnt/dntproxy/internal/port"
 	"github.com/dungnt/dntproxy/internal/service"
 	"github.com/dungnt/dntproxy/internal/version"
@@ -26,6 +27,11 @@ func NewRouter(store port.CredentialStore, providers port.ProviderRegistry, tunn
 	r.Use(gin.Recovery())
 	r.Use(corsMiddleware())
 	r.Use(requestLogger())
+
+	// Initialize runtime log-bodies flag from persisted settings
+	if s, err := store.GetSettings(); err == nil && s != nil {
+		shared.SetLogBodiesEnabled(s.LogBodies)
+	}
 
 	chatService := service.NewChatService(store, providers)
 	modelAccess := service.NewModelAccessService(store)
@@ -245,6 +251,14 @@ func requestLogger() gin.HandlerFunc {
 }
 
 func apiKeyMiddleware(store port.CredentialStore) gin.HandlerFunc {
+	return apiKeyMiddlewareWithDashboard(store, false)
+}
+
+func dashboardKeyMiddleware(store port.CredentialStore) gin.HandlerFunc {
+	return apiKeyMiddlewareWithDashboard(store, true)
+}
+
+func apiKeyMiddlewareWithDashboard(store port.CredentialStore, requireDashboard bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		settings, err := store.GetSettings()
 		if err != nil || !settings.RequireAPIKey {
@@ -280,6 +294,14 @@ func apiKeyMiddleware(store port.CredentialStore) gin.HandlerFunc {
 		if !valid || apiKey == nil {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
 				"error": gin.H{"message": "Invalid API key"},
+			})
+			return
+		}
+
+		// Dashboard routes require DashboardAccess flag
+		if requireDashboard && !apiKey.DashboardAccess {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+				"error": gin.H{"message": "This API key does not have dashboard access"},
 			})
 			return
 		}

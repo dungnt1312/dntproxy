@@ -1,6 +1,7 @@
 package http
 
 import (
+	"github.com/dungnt/dntproxy/internal/adapter/shared"
 	"github.com/dungnt/dntproxy/internal/domain"
 	"github.com/dungnt/dntproxy/internal/port"
 	"github.com/gin-gonic/gin"
@@ -48,11 +49,16 @@ func apiUpdateSettings(store port.CredentialStore) gin.HandlerFunc {
 			}
 			cfg.Settings.Compression = req.Compression
 			cfg.Settings.Compression.Normalize()
+			cfg.Settings.LogBodies = req.LogBodies
 			updated = cfg.Settings
 		}); err != nil {
 			c.JSON(500, gin.H{"error": "Failed to save config"})
 			return
 		}
+
+		// Update runtime flag for body logging
+		shared.SetLogBodiesEnabled(updated.LogBodies)
+
 		c.JSON(200, updated)
 	}
 }

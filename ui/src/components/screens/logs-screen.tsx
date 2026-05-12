@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, useMemo } from "react";
-import { FileWarning, RefreshCw, Radio } from "lucide-react";
+import { FileWarning, RefreshCw, Radio, Terminal, Table2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { goApi, getStoredApiKey } from "@/lib/go-api";
@@ -10,9 +10,12 @@ import type { LogConnectionSummary, LogEntry, LogFilters } from "@/types/logs";
 import { FilterBar } from "./logs/filter-bar";
 import { LogsTable } from "./logs/logs-table";
 import { LogDetailSheet } from "./logs/log-detail-sheet";
+import { ConsoleViewer } from "./logs/console-viewer";
 import { buildFilterParams, DEFAULT_FILTERS } from "./logs/helpers";
 
 const SSE_BASE = import.meta.env.VITE_GO_API_URL || "/api";
+
+type ViewTab = "table" | "console";
 
 export interface LogsScreenProps {
   initialFilters?: Partial<LogFilters>;
@@ -27,6 +30,7 @@ export default function LogsScreen({
   embedded = false,
   allowedProviders,
 }: LogsScreenProps = {}) {
+  const [viewTab, setViewTab] = useState<ViewTab>("table");
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [connections, setConnections] = useState<LogConnectionSummary[]>([]);
   const [filters, setFilters] = useState<LogFilters>(() => ({
@@ -149,15 +153,13 @@ export default function LogsScreen({
       return;
     }
 
-    const connectSSE = () => {
-      if (eventSourceRef.current) eventSourceRef.current.close();
+	const connectSSE = () => {
+	  if (eventSourceRef.current) eventSourceRef.current.close();
 
-      const params = buildFilterParams(debouncedFilters);
-      // Ensure range is 1h for stream to avoid pulling massive history if they select 30d
-      params.set("range", "1h");
-      const apiKey = getStoredApiKey();
-      if (apiKey) params.set("key", apiKey);
-      const url = `${SSE_BASE}/logs/stream?${params.toString()}`;
+	  const params = buildFilterParams(debouncedFilters);
+	  const apiKey = getStoredApiKey();
+	  if (apiKey) params.set("key", apiKey);
+	  const url = `${SSE_BASE}/logs/stream?${params.toString()}`;
 
       const sse = new EventSource(url);
       eventSourceRef.current = sse;
@@ -242,6 +244,8 @@ export default function LogsScreen({
     [logs, selectedLogId]
   );
 
+  const isConsole = !embedded && viewTab === "console";
+
   return (
     <div className={cn("flex flex-col h-full", embedded ? "gap-3" : "gap-4 p-4 md:p-6")}>
       {/* Header */}
@@ -250,69 +254,114 @@ export default function LogsScreen({
           <div className="flex items-center gap-2">
             <FileWarning className="h-5 w-5 text-amber-600" />
             <h1 className="text-lg font-semibold">Request Logs</h1>
-            {logs.length > 0 && (
+            {viewTab === "table" && logs.length > 0 && (
               <Badge variant="secondary" className="ml-1">
                 {logs.length} total
               </Badge>
             )}
           </div>
           <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border bg-card">
-              <Radio
+            {/* Tab Switcher */}
+            <div className="flex items-center rounded-md border bg-card p-0.5">
+              <button
+                onClick={() => setViewTab("table")}
                 className={cn(
-                  "h-4 w-4",
-                  live ? "text-green-500 animate-pulse" : "text-muted-foreground"
+                  "flex items-center gap-1.5 px-2.5 py-1 rounded text-sm font-medium transition-colors",
+                  viewTab === "table"
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
                 )}
-              />
-              <span className="text-sm font-medium">Live</span>
-              <Switch checked={live} onCheckedChange={setLive} className="ml-1" />
+              >
+                <Table2 className="h-3.5 w-3.5" />
+                Table
+              </button>
+              <button
+                onClick={() => setViewTab("console")}
+                className={cn(
+                  "flex items-center gap-1.5 px-2.5 py-1 rounded text-sm font-medium transition-colors",
+                  viewTab === "console"
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                <Terminal className="h-3.5 w-3.5" />
+                Console
+              </button>
             </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleRefresh}
-              disabled={isRefreshing || live}
-            >
-              <RefreshCw className={cn("mr-2 h-4 w-4", isRefreshing && "animate-spin")} />
-              Refresh
-            </Button>
+
+            {/* Live toggle + Refresh — only for table view */}
+            {viewTab === "table" && (
+              <>
+                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border bg-card">
+                  <Radio
+                    className={cn(
+                      "h-4 w-4",
+                      live ? "text-green-500 animate-pulse" : "text-muted-foreground"
+                    )}
+                  />
+                  <span className="text-sm font-medium">Live</span>
+                  <Switch checked={live} onCheckedChange={setLive} className="ml-1" />
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleRefresh}
+                  disabled={isRefreshing || live}
+                >
+                  <RefreshCw className={cn("mr-2 h-4 w-4", isRefreshing && "animate-spin")} />
+                  Refresh
+                </Button>
+              </>
+            )}
           </div>
         </div>
       )}
 
-      {/* Filter Bar */}
-      <FilterBar
-        filters={filters}
-        onFiltersChange={setFilters}
-        connections={connections}
-        hiddenFilters={hiddenFilters}
-        embedded={embedded}
-        allowedProviders={allowedProviders}
-        live={live}
-        onLiveChange={setLive}
-        onRefresh={handleRefresh}
-        isRefreshing={isRefreshing}
-        hasActiveFilters={hasActiveFilters}
-        onClearFilters={clearFilters}
-      />
+      {/* Console View */}
+      {isConsole && (
+        <div className="flex-1 min-h-0 relative">
+          <ConsoleViewer filters={debouncedFilters} />
+        </div>
+      )}
 
-      {/* Logs Table */}
-      <LogsTable
-        logs={logs}
-        isLoading={isLoading}
-        page={page}
-        limit={limit}
-        onPageChange={setPage}
-        onLogSelect={setSelectedLogId}
-        hasActiveFilters={hasActiveFilters}
-      />
+      {/* Table View (also used for embedded mode) */}
+      {!isConsole && (
+        <>
+          {/* Filter Bar */}
+          <FilterBar
+            filters={filters}
+            onFiltersChange={setFilters}
+            connections={connections}
+            hiddenFilters={hiddenFilters}
+            embedded={embedded}
+            allowedProviders={allowedProviders}
+            live={live}
+            onLiveChange={setLive}
+            onRefresh={handleRefresh}
+            isRefreshing={isRefreshing}
+            hasActiveFilters={hasActiveFilters}
+            onClearFilters={clearFilters}
+          />
 
-      {/* Detail Sheet */}
-      <LogDetailSheet
-        log={selectedLog}
-        open={!!selectedLogId}
-        onOpenChange={(open) => !open && closeDetail()}
-      />
+          {/* Logs Table */}
+          <LogsTable
+            logs={logs}
+            isLoading={isLoading}
+            page={page}
+            limit={limit}
+            onPageChange={setPage}
+            onLogSelect={setSelectedLogId}
+            hasActiveFilters={hasActiveFilters}
+          />
+
+          {/* Detail Sheet */}
+          <LogDetailSheet
+            log={selectedLog}
+            open={!!selectedLogId}
+            onOpenChange={(open) => !open && closeDetail()}
+          />
+        </>
+      )}
     </div>
   );
 }

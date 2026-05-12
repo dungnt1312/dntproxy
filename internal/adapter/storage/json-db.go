@@ -126,6 +126,18 @@ func (db *JsonDB) readFromDisk() (*domain.AppConfig, error) {
 		}
 	}
 
+	// Migrate: existing keys without dashboardAccess field get it set to true
+	// (backward compat — all pre-existing keys were implicitly admin).
+	// Only runs once; flag is persisted on next Save/Update call.
+	if !cfg.Settings.DashboardAccessMigrated {
+		for i := range cfg.APIKeys {
+			if cfg.APIKeys[i].IsActive {
+				cfg.APIKeys[i].DashboardAccess = true
+			}
+		}
+		cfg.Settings.DashboardAccessMigrated = true
+	}
+
 	db.cache = &cfg
 	return &cfg, nil
 }

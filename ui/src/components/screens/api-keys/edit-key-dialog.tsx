@@ -27,6 +27,7 @@ interface EditKeyDialogProps {
 export function EditKeyDialog({ apiKey, open, onOpenChange, onSave, connections, models }: EditKeyDialogProps) {
   const [name, setName] = useState('')
   const [isActive, setIsActive] = useState(true)
+  const [dashboardAccess, setDashboardAccess] = useState(false)
   const [restricted, setRestricted] = useState(false)
   const [allowedConnectionIds, setAllowedConnectionIds] = useState<string[]>([])
   const [allowedModels, setAllowedModels] = useState<string[]>([])
@@ -37,6 +38,7 @@ export function EditKeyDialog({ apiKey, open, onOpenChange, onSave, connections,
     if (!apiKey) return
     setName(apiKey.name)
     setIsActive(apiKey.isActive)
+    setDashboardAccess(apiKey.dashboardAccess)
     setAllowedConnectionIds(apiKey.allowedConnectionIds)
     setAllowedModels(apiKey.allowedModels)
     setRestricted(apiKey.allowedConnectionIds.length > 0 || apiKey.allowedModels.length > 0)
@@ -50,6 +52,7 @@ export function EditKeyDialog({ apiKey, open, onOpenChange, onSave, connections,
       await onSave(apiKey.id, {
         name: name.trim(),
         isActive,
+        dashboardAccess,
         allowedConnectionIds: restricted ? allowedConnectionIds : [],
         allowedModels: restricted ? allowedModels : [],
       })
@@ -76,6 +79,19 @@ export function EditKeyDialog({ apiKey, open, onOpenChange, onSave, connections,
               <Switch id="editKeyActive" checked={isActive} onCheckedChange={setIsActive} />
               <Label htmlFor="editKeyActive" className="pb-0.5">{isActive ? 'Active' : 'Inactive'}</Label>
             </div>
+          </div>
+          <div className="flex items-center justify-between rounded-lg border p-3">
+            <div className="space-y-0.5">
+              <Label htmlFor="editDashboardAccess">Dashboard Access</Label>
+              <p className="text-xs text-muted-foreground">
+                Allow this key to access the management dashboard
+              </p>
+            </div>
+            <Switch
+              id="editDashboardAccess"
+              checked={dashboardAccess}
+              onCheckedChange={setDashboardAccess}
+            />
           </div>
           <PermissionsEditor
             value={{ allowedConnectionIds, allowedModels }}

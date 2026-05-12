@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/dungnt/dntproxy/internal/domain"
@@ -42,7 +43,20 @@ func MaskedToken(token string) string {
 var (
 	logRawBodies     bool
 	logRawBodiesOnce sync.Once
+	logBodiesEnabled atomic.Bool // controlled by Settings.LogBodies (UI toggle)
 )
+
+// SetLogBodiesEnabled updates the runtime flag from settings.
+// Called at startup and whenever settings are updated via API.
+func SetLogBodiesEnabled(enabled bool) {
+	logBodiesEnabled.Store(enabled)
+}
+
+// ShouldLogBodies returns true when body logging is enabled,
+// either via the DNTPROXY_LOG_RAW_BODIES env var or the Settings.LogBodies flag.
+func ShouldLogBodies() bool {
+	return ShouldLogRawBodies() || logBodiesEnabled.Load()
+}
 
 // ShouldLogRawBodies returns true when the DNTPROXY_LOG_RAW_BODIES env var
 // is set to "1" or "true", indicating a dev environment where full request
@@ -87,8 +101,12 @@ func LoggedBodyMaxBytes() int {
 }
 
 // PrepareLoggedBody sanitizes and truncates a body for persistent logs.
+// Returns empty string if body logging is disabled (neither env var nor setting).
 // When DNTPROXY_LOG_RAW_BODIES is enabled, sanitization is skipped, but size is still capped.
 func PrepareLoggedBody(b []byte) string {
+	if !ShouldLogBodies() {
+		return ""
+	}
 	maxBytes := LoggedBodyMaxBytes()
 	if ShouldLogRawBodies() {
 		return TruncateBody(b, maxBytes)

@@ -40,7 +40,7 @@ async function goRequest<T = unknown>(
     headers,
   });
 
-  if (res.status === 401) {
+  if (res.status === 401 || res.status === 403) {
     on401Callback?.();
     throw new Error("Unauthorized");
   }
@@ -75,7 +75,7 @@ export async function goFetch(
     headers,
   });
 
-  if (res.status === 401) {
+  if (res.status === 401 || res.status === 403) {
     on401Callback?.();
     throw new Error("Unauthorized");
   }
@@ -104,7 +104,7 @@ export async function goStreamFetch(
     headers,
   });
 
-  if (res.status === 401) {
+  if (res.status === 401 || res.status === 403) {
     on401Callback?.();
     throw new Error("Unauthorized");
   }
@@ -212,6 +212,7 @@ function mapSettings(go: any) {
     compressionEnabled: Boolean(go?.compression?.enabled),
     compressionMinLength: Number(go?.compression?.minContentLength ?? 500),
     compressionLogSavings: go?.compression?.logSavings !== false,
+    logBodies: Boolean(go.logBodies),
   };
 }
 
@@ -365,6 +366,7 @@ export const goApi: any = {
         minContentLength: Number(data.compressionMinLength ?? 500),
         logSavings: data.compressionLogSavings !== false,
       },
+      logBodies: Boolean(data.logBodies ?? false),
     };
     return goRequest("/settings", {
       method: "PUT",
@@ -389,6 +391,10 @@ export const goApi: any = {
     const params = toSearchParams(filters);
     const query = params.toString() ? `?${params.toString()}` : "";
     return goRequest(`/logs${query}`);
+  },
+
+  getLogDetail: (id: string) => {
+    return goRequest<import("../types/logs").LogEntry>(`/logs/detail/${encodeURIComponent(id)}`);
   },
 
   getLogSummary: (filters?: Record<string, unknown>) => {
@@ -527,7 +533,7 @@ export const goApi: any = {
 
   // Auth
   validateKey: (key: string) =>
-    goRequest<{ valid: boolean }>("/auth/validate-key", {
+    goRequest<{ valid: boolean; dashboardAccess?: boolean }>("/auth/validate-key", {
       method: "POST",
       body: JSON.stringify({ key }),
     }),

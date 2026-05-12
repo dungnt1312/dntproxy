@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { motion } from "framer-motion";
-import { Settings, ShieldAlert, RotateCcw, Save, Loader2, Sparkles } from "lucide-react";
+import { Settings, ShieldAlert, RotateCcw, Save, Loader2, Sparkles, FileText } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -32,6 +32,7 @@ interface SettingsData {
   compressionEnabled: boolean;
   compressionMinLength: number;
   compressionLogSavings: boolean;
+  logBodies: boolean;
 }
 
 const DEFAULT_SETTINGS: SettingsData = {
@@ -42,6 +43,7 @@ const DEFAULT_SETTINGS: SettingsData = {
   compressionEnabled: false,
   compressionMinLength: 500,
   compressionLogSavings: true,
+  logBodies: false,
 };
 
 const containerVariants = {
@@ -104,6 +106,7 @@ export default function SettingsScreen() {
         compressionEnabled: settings.compressionEnabled,
         compressionMinLength: settings.compressionMinLength,
         compressionLogSavings: settings.compressionLogSavings,
+        logBodies: settings.logBodies,
       });
       setSettings(json);
       setInitialSettings(json);
@@ -263,6 +266,39 @@ export default function SettingsScreen() {
                 onCheckedChange={(v) =>
                   updateField("compressionLogSavings", v)
                 }
+              />
+            </div>
+          </CardContent>
+        </Card>
+      </motion.div>
+
+      {/* Request Body Logging */}
+      <motion.div variants={itemVariants}>
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <FileText className="size-5 text-blue-600" />
+              <CardTitle className="text-base">Request Body Logging</CardTitle>
+            </div>
+            <CardDescription>
+              Store full request and response bodies in the logs database for
+              debugging. Disabled by default to improve performance and reduce
+              storage.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4 p-6 pt-0">
+            <div className="flex items-center justify-between gap-4">
+              <div className="space-y-0.5">
+                <Label htmlFor="logBodies">Save request/response bodies</Label>
+                <p className="text-xs text-muted-foreground">
+                  When enabled, request and response payloads are persisted in
+                  SQLite and viewable in log detail. May increase DB size.
+                </p>
+              </div>
+              <Switch
+                id="logBodies"
+                checked={settings.logBodies}
+                onCheckedChange={(v) => updateField("logBodies", v)}
               />
             </div>
           </CardContent>

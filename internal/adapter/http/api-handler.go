@@ -20,7 +20,7 @@ import (
 //   - backup-handler.go      — backup export/import
 func RegisterAPIRoutes(r *gin.Engine, store port.CredentialStore, providers port.ProviderRegistry, onComboDelete func(string)) {
 	api := r.Group("/api")
-	api.Use(apiKeyMiddleware(store))
+	api.Use(dashboardKeyMiddleware(store))
 	{
 		// Debug endpoint
 		api.GET("/debug/providers", apiDebugProviders(store))
@@ -80,6 +80,7 @@ func RegisterAPIRoutes(r *gin.Engine, store port.CredentialStore, providers port
 
 		// Logs
 		api.GET("/logs", apiGetLogs)
+		api.GET("/logs/detail/:id", apiGetLogByID)
 		api.GET("/logs/summary", apiGetLogSummary)
 		api.GET("/logs/connections", apiGetLogConnections)
 		api.GET("/logs/daily", apiGetLogDaily)

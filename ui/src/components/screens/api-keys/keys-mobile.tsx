@@ -42,17 +42,27 @@ export function KeysMobile({
                   <p className="text-xs text-muted-foreground mt-0.5">{formatDate(apiKey.createdAt)}</p>
                 </div>
               </div>
-              <Badge
-                variant="outline"
-                className={cn(
-                  'shrink-0 font-medium',
-                  apiKey.isActive
-                    ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
-                    : 'bg-gray-500/10 text-gray-500 dark:text-gray-400 border-gray-500/20'
+              <div className="flex items-center gap-1.5 shrink-0">
+                <Badge
+                  variant="outline"
+                  className={cn(
+                    'shrink-0 font-medium',
+                    apiKey.isActive
+                      ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
+                      : 'bg-gray-500/10 text-gray-500 dark:text-gray-400 border-gray-500/20'
+                  )}
+                >
+                  {apiKey.isActive ? 'Active' : 'Inactive'}
+                </Badge>
+                {apiKey.dashboardAccess && (
+                  <Badge
+                    variant="outline"
+                    className="shrink-0 font-medium bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20"
+                  >
+                    Dashboard
+                  </Badge>
                 )}
-              >
-                {apiKey.isActive ? 'Active' : 'Inactive'}
-              </Badge>
+              </div>
             </div>
 
             <div className="flex items-center gap-1.5">

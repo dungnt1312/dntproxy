@@ -20,6 +20,16 @@ func apiGetLogs(c *gin.Context) {
 	c.JSON(200, logs)
 }
 
+func apiGetLogByID(c *gin.Context) {
+	id := c.Param("id")
+	entry, err := logger.Get().GetByID(id)
+	if err != nil {
+		c.JSON(404, gin.H{"error": "Log entry not found"})
+		return
+	}
+	c.JSON(200, entry)
+}
+
 func apiGetLogSummary(c *gin.Context) {
 	summary, err := logger.Get().Summary(parseLogQuery(c))
 	if err != nil {
@@ -139,6 +149,7 @@ func apiCreatePrice(c *gin.Context) {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
+	logger.Get().InvalidatePriceCache()
 	log.Printf("[LOG] Price created: %s/%s", price.Provider, price.ModelPattern)
 	c.JSON(201, price)
 }
@@ -155,6 +166,7 @@ func apiUpdatePrice(c *gin.Context) {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
+	logger.Get().InvalidatePriceCache()
 	log.Printf("[LOG] Price updated: %s", id)
 	c.JSON(200, price)
 }
@@ -165,6 +177,7 @@ func apiDeletePrice(c *gin.Context) {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
+	logger.Get().InvalidatePriceCache()
 	log.Printf("[LOG] Price deleted: %s", id)
 	c.JSON(200, gin.H{"ok": true})
 }

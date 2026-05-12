@@ -30,6 +30,7 @@ func apiCreateKey(store port.CredentialStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req struct {
 			Name                 string   `json:"name"`
+			DashboardAccess      *bool    `json:"dashboardAccess"`
 			AllowedConnectionIDs []string `json:"allowedConnectionIds"`
 			AllowedModels        []string `json:"allowedModels"`
 		}
@@ -44,6 +45,12 @@ func apiCreateKey(store port.CredentialStore) gin.HandlerFunc {
 			return
 		}
 
+		// Default dashboardAccess to false if not specified
+		dashboardAccess := false
+		if req.DashboardAccess != nil {
+			dashboardAccess = *req.DashboardAccess
+		}
+
 		keyBytes := make([]byte, 24)
 		if _, err := rand.Read(keyBytes); err != nil {
 			c.JSON(500, gin.H{"error": "failed to generate secure API key"})
@@ -56,6 +63,7 @@ func apiCreateKey(store port.CredentialStore) gin.HandlerFunc {
 			Name:                 req.Name,
 			Key:                  key,
 			IsActive:             true,
+			DashboardAccess:      dashboardAccess,
 			CreatedAt:            time.Now().UTC().Format(time.RFC3339),
 			AllowedConnectionIDs: req.AllowedConnectionIDs,
 			AllowedModels:        req.AllowedModels,
@@ -101,6 +109,7 @@ func apiUpdateKey(store port.CredentialStore) gin.HandlerFunc {
 		var req struct {
 			Name                 *string  `json:"name"`
 			IsActive             *bool    `json:"isActive"`
+			DashboardAccess      *bool    `json:"dashboardAccess"`
 			AllowedConnectionIDs []string `json:"allowedConnectionIds"`
 			AllowedModels        []string `json:"allowedModels"`
 		}
@@ -124,6 +133,9 @@ func apiUpdateKey(store port.CredentialStore) gin.HandlerFunc {
 					}
 					if req.IsActive != nil {
 						cfg.APIKeys[i].IsActive = *req.IsActive
+					}
+					if req.DashboardAccess != nil {
+						cfg.APIKeys[i].DashboardAccess = *req.DashboardAccess
 					}
 					// Always update these (nil in JSON → empty slice → unrestricted)
 					cfg.APIKeys[i].AllowedConnectionIDs = req.AllowedConnectionIDs
@@ -191,8 +203,9 @@ func apiValidateKey(store port.CredentialStore) gin.HandlerFunc {
 			c.JSON(400, gin.H{"valid": false, "error": "key is required"})
 			return
 		}
-		if store.ValidateAPIKey(req.Key) {
-			c.JSON(200, gin.H{"valid": true})
+		apiKey, valid := store.GetAPIKeyByValue(req.Key)
+		if valid && apiKey != nil {
+			c.JSON(200, gin.H{"valid": true, "dashboardAccess": apiKey.DashboardAccess})
 		} else {
 			c.JSON(200, gin.H{"valid": false})
 		}

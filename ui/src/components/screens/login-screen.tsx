@@ -23,9 +23,11 @@ export default function LoginScreen({ onSuccess }: LoginScreenProps) {
 
     try {
       const res = await goApi.validateKey(key.trim());
-      if (res.valid) {
+      if (res.valid && res.dashboardAccess) {
         setStoredApiKey(key.trim());
         onSuccess();
+      } else if (res.valid && !res.dashboardAccess) {
+        setError("This key does not have dashboard access");
       } else {
         setError("Invalid API key");
       }

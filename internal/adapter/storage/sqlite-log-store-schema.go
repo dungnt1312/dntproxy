@@ -54,6 +54,8 @@ func (s *SQLiteLogStore) migrate(ctx context.Context) error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_logs_time ON request_logs(timestamp_ms DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_logs_connection_time ON request_logs(connection_id, timestamp_ms DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_logs_provider_time ON request_logs(provider, timestamp_ms DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_logs_level_time ON request_logs(level, timestamp_ms DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_logs_request ON request_logs(request_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_logs_usage_time ON request_logs(total_tokens, timestamp_ms DESC)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_model_prices_lookup ON model_prices(provider, model_pattern)`,
@@ -81,9 +83,13 @@ func (s *SQLiteLogStore) migrate(ctx context.Context) error {
 func (s *SQLiteLogStore) seedPrices(ctx context.Context) error {
 	now := time.Now().UnixMilli()
 	defaults := []domain.ModelPrice{
+		{Provider: "kiro", ModelPattern: "%opus%", InputPer1M: 15, OutputPer1M: 75, Currency: "USD", SourceNote: "Estimated from public Anthropic API token pricing; Kiro billing may differ."},
 		{Provider: "kiro", ModelPattern: "%sonnet%", InputPer1M: 3, OutputPer1M: 15, Currency: "USD", SourceNote: "Estimated from public Anthropic API token pricing; Kiro billing may differ."},
 		{Provider: "kiro", ModelPattern: "%haiku%", InputPer1M: 0.8, OutputPer1M: 4, Currency: "USD", SourceNote: "Estimated from public Anthropic API token pricing; Kiro billing may differ."},
 		{Provider: "kiro", ModelPattern: "%deepseek%", InputPer1M: 0.28, OutputPer1M: 0.42, Currency: "USD", SourceNote: "Estimated from public DeepSeek API token pricing; Kiro billing may differ."},
+		{Provider: "anthropic", ModelPattern: "%opus%", InputPer1M: 15, OutputPer1M: 75, Currency: "USD", SourceNote: "Estimated from public Anthropic API token pricing."},
+		{Provider: "anthropic", ModelPattern: "%sonnet%", InputPer1M: 3, OutputPer1M: 15, Currency: "USD", SourceNote: "Estimated from public Anthropic API token pricing."},
+		{Provider: "anthropic", ModelPattern: "%haiku%", InputPer1M: 0.8, OutputPer1M: 4, Currency: "USD", SourceNote: "Estimated from public Anthropic API token pricing."},
 		{Provider: "openai", ModelPattern: "%gpt-5%", InputPer1M: 1.25, OutputPer1M: 10, Currency: "USD", SourceNote: "Default estimate; edit prices if your provider differs."},
 		{Provider: "openai-compatible", ModelPattern: "%", InputPer1M: 0, OutputPer1M: 0, Currency: "USD", SourceNote: "Unknown provider price. Configure this before relying on cost."},
 	}

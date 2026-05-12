@@ -3,6 +3,7 @@ import { Key, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
 import {
   Dialog,
   DialogContent,
@@ -24,6 +25,7 @@ interface GenerateDialogProps {
 
 export function GenerateDialog({ open, onOpenChange, onGenerate, connections, models }: GenerateDialogProps) {
   const [keyName, setKeyName] = useState('')
+  const [dashboardAccess, setDashboardAccess] = useState(false)
   const [restricted, setRestricted] = useState(false)
   const [allowedConnectionIds, setAllowedConnectionIds] = useState<string[]>([])
   const [allowedModels, setAllowedModels] = useState<string[]>([])
@@ -37,10 +39,12 @@ export function GenerateDialog({ open, onOpenChange, onGenerate, connections, mo
       setGenerating(true)
       await onGenerate({
         name: keyName.trim(),
+        dashboardAccess,
         allowedConnectionIds: restricted ? allowedConnectionIds : [],
         allowedModels: restricted ? allowedModels : [],
       })
       setKeyName('')
+      setDashboardAccess(false)
       setRestricted(false)
       setAllowedConnectionIds([])
       setAllowedModels([])
@@ -52,6 +56,7 @@ export function GenerateDialog({ open, onOpenChange, onGenerate, connections, mo
   const handleClose = () => {
     onOpenChange(false)
     setKeyName('')
+    setDashboardAccess(false)
     setRestricted(false)
     setAllowedConnectionIds([])
     setAllowedModels([])
@@ -83,6 +88,19 @@ export function GenerateDialog({ open, onOpenChange, onGenerate, connections, mo
             <p className="text-xs text-muted-foreground">
               A descriptive name to help you identify this key later
             </p>
+          </div>
+          <div className="flex items-center justify-between rounded-lg border p-3">
+            <div className="space-y-0.5">
+              <Label htmlFor="dashboardAccess">Dashboard Access</Label>
+              <p className="text-xs text-muted-foreground">
+                Allow this key to access the management dashboard
+              </p>
+            </div>
+            <Switch
+              id="dashboardAccess"
+              checked={dashboardAccess}
+              onCheckedChange={setDashboardAccess}
+            />
           </div>
           <PermissionsEditor
             value={{ allowedConnectionIds, allowedModels }}

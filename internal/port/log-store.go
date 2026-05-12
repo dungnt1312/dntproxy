@@ -11,6 +11,7 @@ type LogStore interface {
 	Insert(ctx context.Context, entry *domain.LogEntry) error
 	BatchInsert(ctx context.Context, entries []*domain.LogEntry) error
 	List(ctx context.Context, query domain.LogQuery) ([]domain.LogEntry, error)
+	GetByID(ctx context.Context, id string) (*domain.LogEntry, error)
 	Summary(ctx context.Context, query domain.LogQuery) (*domain.LogSummary, error)
 	ConnectionSummaries(ctx context.Context, query domain.LogQuery) ([]domain.LogConnectionSummary, error)
 	DailyStats(ctx context.Context, query domain.LogQuery) ([]domain.DailyUsageStat, error)

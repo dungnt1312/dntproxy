@@ -17,6 +17,21 @@ func (l *Logger) List(query domain.LogQuery) ([]domain.LogEntry, error) {
 	return l.GetAll(), nil
 }
 
+func (l *Logger) GetByID(id string) (*domain.LogEntry, error) {
+	if l.store != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return l.store.GetByID(ctx, id)
+	}
+	// Fallback: search in-memory ring buffer
+	for _, entry := range l.GetAll() {
+		if entry.ID == id {
+			return &entry, nil
+		}
+	}
+	return nil, fmt.Errorf("log entry not found: %s", id)
+}
+
 func (l *Logger) Summary(query domain.LogQuery) (*domain.LogSummary, error) {
 	if l.store != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

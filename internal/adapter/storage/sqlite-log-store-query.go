@@ -9,7 +9,7 @@ import (
 	"github.com/dungnt/dntproxy/internal/domain"
 )
 
-// List returns recent logs that match the query.
+// List returns recent logs that match the query (without request/response bodies for performance).
 func (s *SQLiteLogStore) List(ctx context.Context, query domain.LogQuery) ([]domain.LogEntry, error) {
 	where, args := buildLogWhere(query)
 	limit := normalizeLimit(query.Limit)
@@ -20,8 +20,7 @@ func (s *SQLiteLogStore) List(ctx context.Context, query domain.LogQuery) ([]dom
 		COALESCE(connection_id, ''), COALESCE(connection_name, ''), COALESCE(model, ''),
 		COALESCE(request_id, ''), COALESCE(message, ''), COALESCE(error, ''), body_size,
 		input_tokens, output_tokens, total_tokens, COALESCE(usage_source, ''),
-		cost_input, cost_output, cost_total, currency, COALESCE(metadata_json, ''),
-		COALESCE(request_body, ''), COALESCE(response_body, '')
+		cost_input, cost_output, cost_total, currency, COALESCE(metadata_json, '')
 		FROM request_logs `+where+` ORDER BY timestamp_ms DESC LIMIT ?`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list logs: %w", err)
@@ -30,13 +29,31 @@ func (s *SQLiteLogStore) List(ctx context.Context, query domain.LogQuery) ([]dom
 
 	logs := make([]domain.LogEntry, 0)
 	for rows.Next() {
-		entry, err := scanLogEntry(rows)
+		entry, err := scanLogEntryLight(rows)
 		if err != nil {
 			return nil, err
 		}
 		logs = append(logs, *entry)
 	}
 	return logs, rows.Err()
+}
+
+// GetByID returns a single log entry with full body content for detail view.
+func (s *SQLiteLogStore) GetByID(ctx context.Context, id string) (*domain.LogEntry, error) {
+	row := s.db.QueryRowContext(ctx, `SELECT id, timestamp_ms, timestamp, level, provider, direction,
+		COALESCE(method, ''), COALESCE(path, ''), status_code, duration_ms,
+		COALESCE(connection_id, ''), COALESCE(connection_name, ''), COALESCE(model, ''),
+		COALESCE(request_id, ''), COALESCE(message, ''), COALESCE(error, ''), body_size,
+		input_tokens, output_tokens, total_tokens, COALESCE(usage_source, ''),
+		cost_input, cost_output, cost_total, currency, COALESCE(metadata_json, ''),
+		COALESCE(request_body, ''), COALESCE(response_body, '')
+		FROM request_logs WHERE id = ?`, id)
+
+	entry, err := scanLogEntry(row)
+	if err != nil {
+		return nil, fmt.Errorf("get log by id: %w", err)
+	}
+	return entry, nil
 }
 
 // Summary returns aggregate request, error, token, cost, and latency totals.
@@ -217,6 +234,19 @@ func scanLogEntry(row logScanner) (*domain.LogEntry, error) {
 		&entry.OutputTokens, &entry.TotalTokens, &entry.UsageSource, &entry.CostInput,
 		&entry.CostOutput, &entry.CostTotal, &entry.Currency, &entry.MetadataJSON,
 		&entry.RequestBody, &entry.ResponseBody); err != nil {
+		return nil, err
+	}
+	return &entry, nil
+}
+
+func scanLogEntryLight(row logScanner) (*domain.LogEntry, error) {
+	var entry domain.LogEntry
+	if err := row.Scan(&entry.ID, &entry.TimestampMs, &entry.Timestamp, &entry.Level,
+		&entry.Provider, &entry.Direction, &entry.Method, &entry.Path, &entry.StatusCode,
+		&entry.DurationMs, &entry.ConnectionID, &entry.ConnectionName, &entry.Model,
+		&entry.RequestID, &entry.Message, &entry.Error, &entry.BodySize, &entry.InputTokens,
+		&entry.OutputTokens, &entry.TotalTokens, &entry.UsageSource, &entry.CostInput,
+		&entry.CostOutput, &entry.CostTotal, &entry.Currency, &entry.MetadataJSON); err != nil {
 		return nil, err
 	}
 	return &entry, nil

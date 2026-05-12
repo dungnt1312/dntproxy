@@ -5,6 +5,7 @@ export interface ApiKey {
   name: string
   key: string
   isActive: boolean
+  dashboardAccess: boolean
   createdAt: string
   updatedAt: string
   allowedConnectionIds: string[]
@@ -13,6 +14,7 @@ export interface ApiKey {
 
 export interface ApiKeyCreatePayload {
   name: string
+  dashboardAccess?: boolean
   allowedConnectionIds: string[]
   allowedModels: string[]
 }
@@ -20,6 +22,7 @@ export interface ApiKeyCreatePayload {
 export interface ApiKeyUpdatePayload {
   name?: string
   isActive?: boolean
+  dashboardAccess?: boolean
   allowedConnectionIds: string[]
   allowedModels: string[]
 }

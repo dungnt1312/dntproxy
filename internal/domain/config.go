@@ -41,6 +41,10 @@ type Settings struct {
 	TunnelRunning  bool   `json:"tunnelRunning,omitempty"`
 	// Compression settings
 	Compression CompressionSettings `json:"compression,omitempty"`
+	// Logging settings
+	LogBodies bool `json:"logBodies"` // persist request/response bodies in SQLite (default: false)
+	// Migration flags
+	DashboardAccessMigrated bool `json:"dashboardAccessMigrated,omitempty"`
 }
 
 // APIKey represents a generated API key.
@@ -49,6 +53,7 @@ type APIKey struct {
 	Name                 string   `json:"name"`
 	Key                  string   `json:"key"`
 	IsActive             bool     `json:"isActive"`
+	DashboardAccess      bool     `json:"dashboardAccess"`                // true = can access /api/* dashboard
 	CreatedAt            string   `json:"createdAt,omitempty"`
 	AllowedConnectionIDs []string `json:"allowedConnectionIds,omitempty"` // nil/empty = unrestricted
 	AllowedModels        []string `json:"allowedModels,omitempty"`        // nil/empty = unrestricted

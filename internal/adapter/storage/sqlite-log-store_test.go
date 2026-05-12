@@ -48,6 +48,23 @@ func TestSQLiteLogStoreInsertListSummaryAndRetention(t *testing.T) {
 			TotalTokens:    1100,
 			UsageSource:    "provider_metrics",
 		},
+		{
+			ID:             "usage-opus-1",
+			Timestamp:      now.Format(time.RFC3339Nano),
+			TimestampMs:    now.UnixMilli(),
+			Level:          "INFO",
+			Provider:       "KIRO",
+			Direction:      "usage",
+			ConnectionID:   "conn-1",
+			ConnectionName: "Main",
+			Model:          "claude-opus-4.6",
+			RequestID:      "req-opus-1",
+			Message:        "Usage",
+			InputTokens:    1000,
+			OutputTokens:   100,
+			TotalTokens:    1100,
+			UsageSource:    "provider_metrics",
+		},
 	}
 
 	for i := range entries {
@@ -60,16 +77,21 @@ func TestSQLiteLogStoreInsertListSummaryAndRetention(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List() error = %v", err)
 	}
-	if len(logs) != 2 {
-		t.Fatalf("List() len = %d, want 2", len(logs))
+	if len(logs) != 3 {
+		t.Fatalf("List() len = %d, want 3", len(logs))
+	}
+	for _, entry := range logs {
+		if entry.Model == "claude-opus-4.6" && entry.CostTotal <= 0 {
+			t.Fatalf("opus log cost = %f, want > 0", entry.CostTotal)
+		}
 	}
 
 	summary, err := store.Summary(ctx, domain.LogQuery{Range: "24h"})
 	if err != nil {
 		t.Fatalf("Summary() error = %v", err)
 	}
-	if summary.Requests != 1 || summary.TotalTokens != 1100 || summary.CostTotal <= 0 {
-		t.Fatalf("Summary() = %+v, want requests=1 tokens=1100 cost>0", summary)
+	if summary.Requests != 1 || summary.TotalTokens != 2200 || summary.CostTotal <= 0 {
+		t.Fatalf("Summary() = %+v, want requests=1 tokens=2200 cost>0", summary)
 	}
 
 	if err := store.PurgeOlderThan(ctx, now.Add(time.Second).UnixMilli()); err != nil {

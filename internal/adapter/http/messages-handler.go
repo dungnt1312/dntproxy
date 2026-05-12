@@ -116,7 +116,8 @@ func messagesHandler(chatService port.ChatService, store port.CredentialStore, c
 		}
 
 		// Use chatService (always gets OpenAI SSE stream back)
-		result := chatService.HandleChat(openaiBody, antReq.Model, requestID)
+		policy := extractAPIKeyPolicy(c)
+		result := chatService.HandleChat(openaiBody, antReq.Model, requestID, policy)
 
 		if result.Stream == nil {
 			writeAnthropicError(c, result.StatusCode, "api_error", result.Error)

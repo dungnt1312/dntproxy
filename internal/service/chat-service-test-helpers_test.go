@@ -115,6 +115,10 @@ func (s *testCredentialStore) ValidateAPIKey(key string) bool {
 	return false
 }
 
+func (s *testCredentialStore) GetAPIKeyByValue(key string) (*domain.APIKey, bool) {
+	return nil, false
+}
+
 func (s *testCredentialStore) GetSettings() (*domain.Settings, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

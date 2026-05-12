@@ -62,6 +62,7 @@ func RegisterAPIRoutes(r *gin.Engine, store port.CredentialStore, providers port
 		// API Keys
 		api.GET("/keys", apiListKeys(store))
 		api.POST("/keys", apiCreateKey(store))
+		api.PUT("/keys/:id", apiUpdateKey(store))
 		api.DELETE("/keys/:id", apiDeleteKey(store))
 
 		// Model registry management

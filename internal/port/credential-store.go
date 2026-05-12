@@ -30,6 +30,9 @@ type CredentialStore interface {
 	GetAPIKeys() ([]domain.APIKey, error)
 	// ValidateAPIKey checks if a key string is valid and active.
 	ValidateAPIKey(key string) bool
+	// GetAPIKeyByValue returns the full APIKey object for a given key string.
+	// Returns nil, false if not found or inactive.
+	GetAPIKeyByValue(key string) (*domain.APIKey, bool)
 
 	// GetSettings returns app settings.
 	GetSettings() (*domain.Settings, error)

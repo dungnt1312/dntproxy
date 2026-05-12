@@ -46,7 +46,7 @@ func TestHandleChat_PinnedConnection(t *testing.T) {
 	registry.RegisterExecutor("kiro", executor)
 	service := NewChatService(store, registry)
 
-	result := service.HandleChat([]byte(`{"messages":[]}`), "pinned-combo", "req-1")
+	result := service.HandleChat([]byte(`{"messages":[]}`), "pinned-combo", "req-1", nil)
 
 	if result.StatusCode != 200 {
 		t.Errorf("Expected status 200, got %d: %s", result.StatusCode, result.Error)
@@ -103,7 +103,7 @@ func TestHandleChat_PinnedConnectionUnavailable(t *testing.T) {
 	registry.RegisterExecutor("kiro", executor)
 	service := NewChatService(store, registry)
 
-	result := service.HandleChat([]byte(`{"messages":[]}`), "pinned-unavailable", "req-1")
+	result := service.HandleChat([]byte(`{"messages":[]}`), "pinned-unavailable", "req-1", nil)
 
 	if result.StatusCode != 200 {
 		t.Errorf("Expected status 200, got %d: %s", result.StatusCode, result.Error)
@@ -159,7 +159,7 @@ func TestHandleChat_MixedPinnedAndAuto(t *testing.T) {
 	registry.RegisterExecutor("kiro", executor)
 	service := NewChatService(store, registry)
 
-	result := service.HandleChat([]byte(`{"messages":[]}`), "mixed-combo", "req-1")
+	result := service.HandleChat([]byte(`{"messages":[]}`), "mixed-combo", "req-1", nil)
 
 	if result.StatusCode != 200 {
 		t.Errorf("Expected status 200, got %d: %s", result.StatusCode, result.Error)

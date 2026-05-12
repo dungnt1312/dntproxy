@@ -45,11 +45,13 @@ type Settings struct {
 
 // APIKey represents a generated API key.
 type APIKey struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Key       string `json:"key"`
-	IsActive  bool   `json:"isActive"`
-	CreatedAt string `json:"createdAt,omitempty"`
+	ID                   string   `json:"id"`
+	Name                 string   `json:"name"`
+	Key                  string   `json:"key"`
+	IsActive             bool     `json:"isActive"`
+	CreatedAt            string   `json:"createdAt,omitempty"`
+	AllowedConnectionIDs []string `json:"allowedConnectionIds,omitempty"` // nil/empty = unrestricted
+	AllowedModels        []string `json:"allowedModels,omitempty"`        // nil/empty = unrestricted
 }
 
 // DefaultConfig returns a new AppConfig with sensible defaults.

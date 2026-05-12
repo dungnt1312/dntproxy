@@ -329,6 +329,21 @@ func (db *JsonDB) ValidateAPIKey(key string) bool {
 	return false
 }
 
+// GetAPIKeyByValue returns the full APIKey object for a given key string.
+// Returns nil, false if not found or inactive.
+func (db *JsonDB) GetAPIKeyByValue(key string) (*domain.APIKey, bool) {
+	cfg, err := db.Load()
+	if err != nil {
+		return nil, false
+	}
+	for i, k := range cfg.APIKeys {
+		if k.Key == key && k.IsActive {
+			return &cfg.APIKeys[i], true
+		}
+	}
+	return nil, false
+}
+
 // GetSettings returns app settings.
 func (db *JsonDB) GetSettings() (*domain.Settings, error) {
 	cfg, err := db.Load()

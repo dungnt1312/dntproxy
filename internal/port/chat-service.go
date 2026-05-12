@@ -12,8 +12,15 @@ type ChatResult struct {
 	Error string
 }
 
+// APIKeyPolicy holds restrictions from the API key for a single request.
+type APIKeyPolicy struct {
+	AllowedConnectionIDs []string // nil/empty = unrestricted
+	AllowedModels        []string // nil/empty = unrestricted
+}
+
 // ChatService defines the chat orchestration contract.
 type ChatService interface {
 	// HandleChat processes a chat completion request.
-	HandleChat(body []byte, modelStr string, requestID string) *ChatResult
+	// policy may be nil if no API key restrictions apply.
+	HandleChat(body []byte, modelStr string, requestID string, policy *APIKeyPolicy) *ChatResult
 }

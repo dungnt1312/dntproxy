@@ -217,6 +217,10 @@ func (m *mockCredentialStore) ValidateAPIKey(key string) bool {
 	return false
 }
 
+func (m *mockCredentialStore) GetAPIKeyByValue(key string) (*domain.APIKey, bool) {
+	return nil, false
+}
+
 func (m *mockCredentialStore) GetSettings() (*domain.Settings, error) {
 	return nil, nil
 }

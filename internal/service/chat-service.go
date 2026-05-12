@@ -54,11 +54,28 @@ func NewChatServiceWithDeps(
 }
 
 // HandleChat processes a chat completion request.
-// Unified flow: resolve → combo/single → weighted random connection → execute.
-func (s *ChatService) HandleChat(body []byte, modelStr string, requestID string) *port.ChatResult {
+// Unified flow: resolve → policy check → combo/single → weighted random connection → execute.
+func (s *ChatService) HandleChat(body []byte, modelStr string, requestID string, policy *port.APIKeyPolicy) *port.ChatResult {
 	routing, err := s.resolver.ResolveRouting(modelStr)
 	if err != nil {
 		return &port.ChatResult{StatusCode: http.StatusBadRequest, Error: fmt.Sprintf("resolve model: %s", err)}
+	}
+
+	// Check model allowlist from API key policy
+	if policy != nil && len(policy.AllowedModels) > 0 {
+		if !isModelAllowed(modelStr, routing.Models, policy.AllowedModels) {
+			return &port.ChatResult{StatusCode: http.StatusForbidden, Error: fmt.Sprintf("Model %q not allowed for this API key", modelStr)}
+		}
+	}
+
+	// Merge connection restrictions: combo + API key policy
+	allowedConnIDs := routing.AllowedConnectionIDs
+	if policy != nil && len(policy.AllowedConnectionIDs) > 0 {
+		allowedConnIDs = intersectConnectionIDs(allowedConnIDs, policy.AllowedConnectionIDs)
+		// If both have restrictions but intersection is empty, no connections can serve this request
+		if len(routing.AllowedConnectionIDs) > 0 && len(allowedConnIDs) == 0 {
+			return &port.ChatResult{StatusCode: http.StatusForbidden, Error: "No connections available: combo and API key restrictions have no overlap"}
+		}
 	}
 
 	// Determine combo strategy
@@ -87,7 +104,7 @@ func (s *ChatService) HandleChat(body []byte, modelStr string, requestID string)
 	// Unified: every request goes through comboHandler.
 	// For single models, this is just a loop of 1.
 	result, err := s.comboHandler.HandleCombo(routing.Models, comboName, strategy, func(qualifiedModel string) (*ComboResult, error) {
-		return s.executeOnProvider(body, qualifiedModel, requestID, routing.AllowedConnectionIDs)
+		return s.executeOnProvider(body, qualifiedModel, requestID, allowedConnIDs)
 	})
 
 	if err != nil && logger.IsDevMode() {
@@ -132,6 +149,22 @@ func (s *ChatService) executeOnProvider(body []byte, qualifiedModel string, requ
 	}
 	provider := parsed.Provider
 	model := parsed.Model
+
+	// Validate pinned connection against allowed list
+	if parsed.ConnectionID != "" && len(allowedConnectionIDs) > 0 {
+		allowed := false
+		for _, id := range allowedConnectionIDs {
+			if id == parsed.ConnectionID {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			msg := fmt.Sprintf("Connection %q not allowed for this API key", parsed.ConnectionID)
+			reqlog.End(http.StatusForbidden, msg)
+			return &ComboResult{OK: false, StatusCode: http.StatusForbidden, Error: msg}, nil
+		}
+	}
 
 	reqlog.Route(provider, model)
 
@@ -246,4 +279,55 @@ func mapSelectionErrorToComboResult(err error) *ComboResult {
 // ClearComboRotation clears the rotation state for a deleted combo.
 func (s *ChatService) ClearComboRotation(comboName string) {
 	s.comboHandler.ClearRotation(comboName)
+}
+
+// intersectConnectionIDs returns the intersection of two connection ID lists.
+// If either is nil/empty, returns the other (no restriction from that side).
+// If both are non-empty, returns only IDs present in both.
+func intersectConnectionIDs(a, b []string) []string {
+	if len(a) == 0 {
+		return b
+	}
+	if len(b) == 0 {
+		return a
+	}
+	set := make(map[string]bool, len(a))
+	for _, id := range a {
+		set[id] = true
+	}
+	var result []string
+	for _, id := range b {
+		if set[id] {
+			result = append(result, id)
+		}
+	}
+	return result
+}
+
+// isModelAllowed checks if the requested model is in the allowed list.
+// Matches against: the original model string, combo name, alias, or any resolved "provider/model" string.
+func isModelAllowed(modelStr string, resolvedModels []string, allowedModels []string) bool {
+	if len(allowedModels) == 0 {
+		return true
+	}
+	// Check original model string (could be alias, combo name, or provider/model)
+	for _, allowed := range allowedModels {
+		if allowed == modelStr {
+			return true
+		}
+	}
+	// Check each resolved model (provider/model format, possibly with @connectionId)
+	for _, resolved := range resolvedModels {
+		// Strip @connectionId for comparison
+		clean := resolved
+		if atIdx := strings.Index(resolved, "@"); atIdx >= 0 {
+			clean = resolved[:atIdx]
+		}
+		for _, allowed := range allowedModels {
+			if allowed == clean || allowed == resolved {
+				return true
+			}
+		}
+	}
+	return false
 }

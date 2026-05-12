@@ -275,11 +275,21 @@ func apiKeyMiddleware(store port.CredentialStore) gin.HandlerFunc {
 			return
 		}
 
-		if !store.ValidateAPIKey(key) {
+		apiKey, valid := store.GetAPIKeyByValue(key)
+		if !valid || apiKey == nil {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
 				"error": gin.H{"message": "Invalid API key"},
 			})
 			return
+		}
+
+		// Inject policy into context for downstream handlers
+		c.Set("apiKeyID", apiKey.ID)
+		if len(apiKey.AllowedConnectionIDs) > 0 {
+			c.Set("apiKeyAllowedConnectionIDs", apiKey.AllowedConnectionIDs)
+		}
+		if len(apiKey.AllowedModels) > 0 {
+			c.Set("apiKeyAllowedModels", apiKey.AllowedModels)
 		}
 
 		c.Next()
@@ -292,4 +302,26 @@ func extractAPIKey(r *http.Request) string {
 		return strings.TrimPrefix(auth, "Bearer ")
 	}
 	return ""
+}
+
+// extractAPIKeyPolicy reads API key policy from Gin context (set by apiKeyMiddleware).
+// Returns nil if no restrictions apply.
+func extractAPIKeyPolicy(c *gin.Context) *port.APIKeyPolicy {
+	var connIDs []string
+	var models []string
+
+	if v, ok := c.Get("apiKeyAllowedConnectionIDs"); ok {
+		connIDs, _ = v.([]string)
+	}
+	if v, ok := c.Get("apiKeyAllowedModels"); ok {
+		models, _ = v.([]string)
+	}
+
+	if len(connIDs) == 0 && len(models) == 0 {
+		return nil
+	}
+	return &port.APIKeyPolicy{
+		AllowedConnectionIDs: connIDs,
+		AllowedModels:        models,
+	}
 }

@@ -58,7 +58,10 @@ func chatHandler(chatService port.ChatService, store port.CredentialStore, comp 
 
 		log.Printf("[CHAT] POST /v1/chat/completions | model=%s", partial.Model)
 
-		result := chatService.HandleChat(body, partial.Model, requestID)
+		// Extract API key policy from context (set by apiKeyMiddleware)
+		policy := extractAPIKeyPolicy(c)
+
+		result := chatService.HandleChat(body, partial.Model, requestID, policy)
 
 		if result.Stream != nil {
 			c.Header("Content-Type", "text/event-stream")

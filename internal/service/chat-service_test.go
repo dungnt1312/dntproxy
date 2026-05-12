@@ -35,7 +35,7 @@ func TestHandleChat_ComboFallback_NoDuplicateExecution(t *testing.T) {
 
 	svc := NewChatService(store, registry)
 
-	result := svc.HandleChat([]byte(`{"model":"coder-combo","messages":[{"role":"user","content":"hi"}]}`), "coder-combo", "req-1")
+	result := svc.HandleChat([]byte(`{"model":"coder-combo","messages":[{"role":"user","content":"hi"}]}`), "coder-combo", "req-1", nil)
 	if result.StatusCode != 200 || result.Stream == nil {
 		t.Fatalf("expected combo success stream, got status=%d err=%q", result.StatusCode, result.Error)
 	}
@@ -75,7 +75,7 @@ func TestHandleChat_Client400_DoesNotFallbackOrCooldown(t *testing.T) {
 
 	svc := NewChatService(store, registry)
 
-	result := svc.HandleChat([]byte(`{"model":"kiro/model-a","messages":[]}`), "kiro/model-a", "req-2")
+	result := svc.HandleChat([]byte(`{"model":"kiro/model-a","messages":[]}`), "kiro/model-a", "req-2", nil)
 	if result.StatusCode != 400 {
 		t.Fatalf("expected 400, got %d (%s)", result.StatusCode, result.Error)
 	}
@@ -114,7 +114,7 @@ func TestHandleChat_RateLimit_FallbackToNextAccount(t *testing.T) {
 
 	svc := NewChatService(store, registry)
 
-	result := svc.HandleChat([]byte(`{"model":"kiro/model-a","messages":[]}`), "kiro/model-a", "req-3")
+	result := svc.HandleChat([]byte(`{"model":"kiro/model-a","messages":[]}`), "kiro/model-a", "req-3", nil)
 	if result.StatusCode != 200 || result.Stream == nil {
 		t.Fatalf("expected 200 with stream, got status=%d err=%q", result.StatusCode, result.Error)
 	}
@@ -151,7 +151,7 @@ func TestHandleChat_UnsupportedModel_Returns400WithoutExecution(t *testing.T) {
 
 	svc := NewChatService(store, registry)
 
-	result := svc.HandleChat([]byte(`{"model":"kiro/model-b","messages":[]}`), "kiro/model-b", "req-4")
+	result := svc.HandleChat([]byte(`{"model":"kiro/model-b","messages":[]}`), "kiro/model-b", "req-4", nil)
 	if result.StatusCode != 400 {
 		t.Fatalf("expected 400 for unsupported model, got %d (%s)", result.StatusCode, result.Error)
 	}
@@ -186,7 +186,7 @@ func TestHandleChat_AliasResolution(t *testing.T) {
 
 	svc := NewChatService(store, registry)
 
-	result := svc.HandleChat([]byte(`{"model":"sonnet","messages":[{"role":"user","content":"hi"}]}`), "sonnet", "req-5")
+	result := svc.HandleChat([]byte(`{"model":"sonnet","messages":[{"role":"user","content":"hi"}]}`), "sonnet", "req-5", nil)
 	if result.StatusCode != 200 || result.Stream == nil {
 		t.Fatalf("expected alias resolution success, got status=%d err=%q", result.StatusCode, result.Error)
 	}

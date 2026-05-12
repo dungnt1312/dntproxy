@@ -330,11 +330,23 @@ export const goApi: any = {
       (Array.isArray(keys) ? keys : []).map((key) => ({
         ...key,
         updatedAt: key.updatedAt || key.createdAt || new Date().toISOString(),
+        allowedConnectionIds: Array.isArray(key.allowedConnectionIds)
+          ? key.allowedConnectionIds
+          : [],
+        allowedModels: Array.isArray(key.allowedModels) ? key.allowedModels : [],
       })),
     ),
 
-  createKey: (name: string) =>
-    goRequest("/keys", { method: "POST", body: JSON.stringify({ name }) }),
+  createKey: (payload: string | Record<string, unknown>) => {
+    const body = typeof payload === "string" ? { name: payload } : payload;
+    return goRequest("/keys", { method: "POST", body: JSON.stringify(body) });
+  },
+
+  updateKey: (id: string, payload: Record<string, unknown>) =>
+    goRequest(`/keys/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
 
   deleteKey: (id: string) => goRequest(`/keys/${id}`, { method: "DELETE" }),
 

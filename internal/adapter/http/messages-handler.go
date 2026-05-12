@@ -2,7 +2,9 @@ package http
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -14,6 +16,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
+
+const maxOpenAISSELineSize = 1024 * 1024
+
+var errStopOpenAISSE = errors.New("stop openai sse")
 
 // --- Anthropic Messages API types ---
 
@@ -74,9 +80,13 @@ func messagesHandler(chatService port.ChatService, store port.CredentialStore, c
 	return func(c *gin.Context) {
 		requestID := uuid.New().String()
 
-		body, err := io.ReadAll(io.LimitReader(c.Request.Body, maxChatBodySize))
+		body, err := io.ReadAll(io.LimitReader(c.Request.Body, maxChatBodySize+1))
 		if err != nil {
 			writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", "Failed to read body")
+			return
+		}
+		if len(body) > maxChatBodySize {
+			writeAnthropicError(c, http.StatusRequestEntityTooLarge, "invalid_request_error", "Request body exceeds 10MB limit")
 			return
 		}
 
@@ -117,7 +127,7 @@ func messagesHandler(chatService port.ChatService, store port.CredentialStore, c
 
 		// Use chatService (always gets OpenAI SSE stream back)
 		policy := extractAPIKeyPolicy(c)
-		result := chatService.HandleChat(openaiBody, antReq.Model, requestID, policy)
+		result := chatService.HandleChat(openaiBody, antReq.Model, requestID, policy, compressionMetadata(stats))
 
 		if result.Stream == nil {
 			writeAnthropicError(c, result.StatusCode, "api_error", result.Error)
@@ -173,24 +183,10 @@ func handleStreamingMessages(c *gin.Context, stream io.ReadCloser, model string,
 	var toolCallBlocks []toolCallBlock
 	outputTokens := 0
 
-	scanner := bufio.NewScanner(stream)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-
-	for scanner.Scan() {
-		line := scanner.Text()
-
-		if !strings.HasPrefix(line, "data: ") {
-			continue
-		}
-
-		data := strings.TrimPrefix(line, "data: ")
-		if data == "[DONE]" {
-			break
-		}
-
+	streamErr := readOpenAISSEData(stream, func(data string) error {
 		var chunk openaiSSEChunk
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-			continue
+			return nil
 		}
 
 		if len(chunk.Choices) == 0 {
@@ -198,7 +194,7 @@ func handleStreamingMessages(c *gin.Context, stream io.ReadCloser, model string,
 			if chunk.Usage != nil {
 				outputTokens = chunk.Usage.CompletionTokens
 			}
-			continue
+			return nil
 		}
 
 		choice := chunk.Choices[0]
@@ -250,7 +246,7 @@ func handleStreamingMessages(c *gin.Context, stream io.ReadCloser, model string,
 					c.Writer.Flush()
 				}
 			}
-			continue
+			return nil
 		}
 
 		// Handle text content
@@ -312,9 +308,28 @@ func handleStreamingMessages(c *gin.Context, stream io.ReadCloser, model string,
 
 		select {
 		case <-c.Request.Context().Done():
-			return
+			return c.Request.Context().Err()
 		default:
 		}
+		return nil
+	})
+
+	if streamErr != nil {
+		if errors.Is(streamErr, context.Canceled) {
+			return
+		}
+		writeAnthropicSSE(c.Writer, "error", map[string]interface{}{
+			"type": "error",
+			"error": map[string]interface{}{
+				"type":    "api_error",
+				"message": "Stream read failed: " + streamErr.Error(),
+			},
+		})
+		c.Writer.Flush()
+		return
+	}
+	if c.Request.Context().Err() != nil {
+		return
 	}
 
 	// Send message_stop
@@ -335,22 +350,10 @@ func handleNonStreamingMessages(c *gin.Context, stream io.ReadCloser, model stri
 	inputTokens := 0
 	outputTokens := 0
 
-	scanner := bufio.NewScanner(stream)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-
-	for scanner.Scan() {
-		line := scanner.Text()
-		if !strings.HasPrefix(line, "data: ") {
-			continue
-		}
-		data := strings.TrimPrefix(line, "data: ")
-		if data == "[DONE]" {
-			break
-		}
-
+	streamErr := readOpenAISSEData(stream, func(data string) error {
 		var chunk openaiSSEChunk
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-			continue
+			return nil
 		}
 
 		if chunk.Usage != nil {
@@ -359,7 +362,7 @@ func handleNonStreamingMessages(c *gin.Context, stream io.ReadCloser, model stri
 		}
 
 		if len(chunk.Choices) == 0 {
-			continue
+			return nil
 		}
 
 		choice := chunk.Choices[0]
@@ -383,6 +386,11 @@ func handleNonStreamingMessages(c *gin.Context, stream io.ReadCloser, model stri
 		if choice.FinishReason != nil {
 			finishReason = mapOpenAIFinishToAnthropic(*choice.FinishReason)
 		}
+		return nil
+	})
+	if streamErr != nil {
+		writeAnthropicError(c, http.StatusBadGateway, "api_error", "Stream read failed: "+streamErr.Error())
+		return
 	}
 
 	// Build Anthropic response
@@ -753,6 +761,45 @@ func writeAnthropicSSE(w gin.ResponseWriter, eventType string, data interface{})
 		return
 	}
 	fmt.Fprintf(w, "event: %s\ndata: %s\n\n", eventType, string(jsonData))
+}
+
+func readOpenAISSEData(r io.Reader, handle func(data string) error) error {
+	reader := bufio.NewReaderSize(r, 64*1024)
+	line := make([]byte, 0, 64*1024)
+	for {
+		fragment, err := reader.ReadSlice('\n')
+		if len(fragment) > 0 {
+			if len(line)+len(fragment) > maxOpenAISSELineSize {
+				return fmt.Errorf("SSE line exceeds %d bytes", maxOpenAISSELineSize)
+			}
+			line = append(line, fragment...)
+		}
+		if err == bufio.ErrBufferFull {
+			continue
+		}
+		if len(line) > 0 {
+			text := strings.TrimRight(string(line), "\r\n")
+			line = line[:0]
+			if strings.HasPrefix(text, "data: ") {
+				data := strings.TrimPrefix(text, "data: ")
+				if data == "[DONE]" {
+					return nil
+				}
+				if err := handle(data); err != nil {
+					if errors.Is(err, errStopOpenAISSE) {
+						return nil
+					}
+					return err
+				}
+			}
+		}
+		if err != nil {
+			if err == io.EOF {
+				return nil
+			}
+			return err
+		}
+	}
 }
 
 func writeAnthropicError(c *gin.Context, status int, errType string, message string) {

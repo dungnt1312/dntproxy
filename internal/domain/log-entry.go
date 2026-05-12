@@ -32,6 +32,17 @@ type LogEntry struct {
 	MetadataJSON   string  `json:"metadataJson,omitempty"`
 }
 
+// CompressionLogMetadata stores per-request token compression savings.
+type CompressionLogMetadata struct {
+	OriginalBytes       int            `json:"originalBytes"`
+	CompressedBytes     int            `json:"compressedBytes"`
+	SavedBytes          int            `json:"savedBytes"`
+	TokensSavedEstimate int            `json:"tokensSavedEstimate"`
+	Ratio               float64        `json:"ratio"`
+	Detections          map[string]int `json:"detections,omitempty"`
+	Skipped             int            `json:"skipped,omitempty"`
+}
+
 // LogQuery filters log list and summary requests.
 type LogQuery struct {
 	ConnectionID string

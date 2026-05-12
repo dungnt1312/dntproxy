@@ -24,6 +24,7 @@ type AccountSelectionErrorKind string
 const (
 	SelectionErrNoActiveCredentials AccountSelectionErrorKind = "no_active_credentials"
 	SelectionErrUnsupportedModel    AccountSelectionErrorKind = "unsupported_model"
+	SelectionErrNoAllowedConnection AccountSelectionErrorKind = "no_allowed_connection"
 	SelectionErrRateLimited         AccountSelectionErrorKind = "rate_limited"
 	SelectionErrModelLocked         AccountSelectionErrorKind = "model_locked"
 	SelectionErrUnavailable         AccountSelectionErrorKind = "unavailable"
@@ -44,6 +45,8 @@ func (e *AccountSelectionError) Error() string {
 		return fmt.Sprintf("no active credentials for provider: %s", e.Provider)
 	case SelectionErrUnsupportedModel:
 		return fmt.Sprintf("no accounts support model %q for provider: %s", e.Model, e.Provider)
+	case SelectionErrNoAllowedConnection:
+		return fmt.Sprintf("no allowed connections for provider: %s", e.Provider)
 	case SelectionErrRateLimited:
 		return fmt.Sprintf("all accounts rate limited for provider: %s", e.Provider)
 	case SelectionErrModelLocked:
@@ -189,6 +192,7 @@ func (s *AccountSelector) SelectCredentials(
 
 	// Filter to only available connections
 	var available []domain.ProviderConnection
+	allowedByPolicyCount := 0
 	supportedCount := 0
 	rateLimitedSupportedCount := 0
 	lockedSupportedCount := 0
@@ -214,6 +218,7 @@ func (s *AccountSelector) SelectCredentials(
 				continue
 			}
 		}
+		allowedByPolicyCount++
 
 		// Skip connections that don't support this model.
 		// Exception: OpenAI OAuth connections (ChatGPT tokens) use the Codex Responses API
@@ -249,6 +254,13 @@ func (s *AccountSelector) SelectCredentials(
 			}
 		}
 		if supportedCount == 0 {
+			if len(allowedConnectionIDs) > 0 && allowedByPolicyCount == 0 {
+				return nil, &AccountSelectionError{
+					Kind:     SelectionErrNoAllowedConnection,
+					Provider: provider,
+					Model:    model,
+				}
+			}
 			return nil, &AccountSelectionError{
 				Kind:     SelectionErrUnsupportedModel,
 				Provider: provider,

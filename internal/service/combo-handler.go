@@ -24,11 +24,13 @@ func NewComboHandler() *ComboHandler {
 
 // ComboResult represents the result of trying a single model in a combo.
 type ComboResult struct {
-	OK         bool
-	Stream     io.ReadCloser
-	StatusCode int
-	Error      string
-	RetryAfter string
+	OK            bool
+	Stream        io.ReadCloser
+	StatusCode    int
+	Error         string
+	RetryAfter    string
+	AllowFallback bool
+	Terminal      bool
 }
 
 // HandleCombo tries models in order (or round-robin) until one succeeds.
@@ -75,7 +77,7 @@ func (ch *ComboHandler) HandleCombo(
 			}
 		}
 
-		if !shouldComboFallback(result.StatusCode) {
+		if result.Terminal || (!result.AllowFallback && !shouldComboFallback(result.StatusCode)) {
 			if logger.IsDevMode() {
 				log.Printf("[COMBO] Model %s failed (no fallback), status=%d", modelStr, result.StatusCode)
 			}

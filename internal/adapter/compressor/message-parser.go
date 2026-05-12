@@ -9,6 +9,7 @@ func walkAndCompress(body []byte, c *Compressor) ([]byte, Stats) {
 	stats := Stats{
 		OriginalBytes: len(body),
 		Detections:    make(map[string]int),
+		LogSavings:    opts.LogSavings,
 	}
 
 	var raw map[string]json.RawMessage

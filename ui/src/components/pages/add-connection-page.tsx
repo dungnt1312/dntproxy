@@ -7,6 +7,7 @@ import {
     ExternalLink,
     Globe,
     GitBranch,
+    KeyRound,
     Loader2,
     Play,
     Search,
@@ -19,6 +20,7 @@ import { ProviderLogoIcon } from '../connections/helpers';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { getProviderMeta } from '@/lib/provider-registry';
@@ -26,6 +28,7 @@ import { getProviderMeta } from '@/lib/provider-registry';
 export default function AddConnectionPage() {
     const navigate = useNavigate();
     const [provider, setProvider] = useState('kiro');
+    const [providerSearch, setProviderSearch] = useState('');
     const [importMode, setImportMode] = useState<ImportMode>('detect');
     const [form, setForm] = useState({
         refreshToken: '',
@@ -104,6 +107,33 @@ export default function AddConnectionPage() {
         };
     }, []);
 
+    const clearKiroPolling = useCallback(() => {
+        if (pollTimerRef.current) {
+            clearTimeout(pollTimerRef.current);
+            pollTimerRef.current = null;
+        }
+        setDeviceCode(null);
+        setPolling(false);
+    }, []);
+
+    const clearOpenAIPolling = useCallback(() => {
+        if (openaiPollRef.current) {
+            clearInterval(openaiPollRef.current);
+            openaiPollRef.current = null;
+        }
+        setOpenaiOAuthSession(null);
+        setOpenaiManualCallback('');
+    }, []);
+
+    const clearQwenPolling = useCallback(() => {
+        if (qwenPollRef.current) {
+            clearTimeout(qwenPollRef.current);
+            qwenPollRef.current = null;
+        }
+        setQwenDeviceCode(null);
+        setQwenPolling(false);
+    }, []);
+
     const resetForm = () => {
         setForm({
             refreshToken: '',
@@ -119,28 +149,13 @@ export default function AddConnectionPage() {
         setQwenForm({ name: '', apiKey: '', baseUrl: '', supportedModels: '' });
         setAnthropicForm({ name: '', apiKey: '', baseUrl: '', supportedModels: '' });
         setGeminiForm({ name: '', apiKey: '', baseUrl: '', supportedModels: '' });
-        setQwenDeviceCode(null);
-        setQwenPolling(false);
-        if (qwenPollRef.current) {
-            clearTimeout(qwenPollRef.current);
-            qwenPollRef.current = null;
-        }
+        clearQwenPolling();
         setIdcForm({ startUrl: '', region: '' });
-        setDeviceCode(null);
-        setPolling(false);
+        clearKiroPolling();
         setSocialLogin(null);
         setSocialCallbackUrl('');
-        setOpenaiOAuthSession(null);
-        setOpenaiManualCallback('');
-        if (openaiPollRef.current) {
-            clearInterval(openaiPollRef.current);
-            openaiPollRef.current = null;
-        }
+        clearOpenAIPolling();
         setError('');
-        if (pollTimerRef.current) {
-            clearTimeout(pollTimerRef.current);
-            pollTimerRef.current = null;
-        }
     };
 
     const parseSupportedModels = (str: string) =>
@@ -271,7 +286,8 @@ export default function AddConnectionPage() {
     };
 
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
+        const input = e.currentTarget;
+        const file = input.files?.[0];
         if (!file) return;
         setLoading(true);
         setError('');
@@ -292,6 +308,7 @@ export default function AddConnectionPage() {
         } catch (e: any) {
             setError(e.message);
         } finally {
+            input.value = '';
             setLoading(false);
         }
     };
@@ -515,48 +532,58 @@ export default function AddConnectionPage() {
             name: 'AWS / Kiro',
             icon: <ProviderLogoIcon provider="kiro" size={24} />,
             description: 'Amazon CodeWhisperer / Kiro',
+            auth: 'OAuth, import',
+            recommended: true,
         },
         {
             id: 'openai',
             name: 'OpenAI',
             icon: <ProviderLogoIcon provider="openai" size={24} />,
             description: 'ChatGPT, GPT-4, o-series',
+            auth: 'OAuth, API key',
+            recommended: true,
         },
         {
             id: 'qwen',
             name: 'Qwen',
             icon: <ProviderLogoIcon provider="qwen" size={24} />,
             description: 'Alibaba Qwen models',
+            auth: 'OAuth, API key',
         },
         {
             id: 'glm',
             name: 'GLM',
             icon: <ProviderLogoIcon provider="glm" size={24} />,
             description: 'Zhipu AI / GLM',
+            auth: 'API key',
         },
         {
             id: 'minimax',
             name: 'MiniMax',
             icon: <ProviderLogoIcon provider="minimax" size={24} />,
             description: 'MiniMax M2 series',
+            auth: 'API key',
         },
         {
             id: 'anthropic',
             name: 'Anthropic',
             icon: <ProviderLogoIcon provider="anthropic" size={24} />,
             description: 'Claude via Anthropic API',
+            auth: 'API key',
         },
         {
             id: 'gemini',
             name: 'Gemini',
             icon: <ProviderLogoIcon provider="gemini" size={24} />,
             description: 'Google Gemini models',
+            auth: 'API key',
         },
         {
             id: 'openai-compatible',
             name: 'Custom',
             icon: <ProviderLogoIcon provider="openai-compatible" size={24} />,
             description: 'OpenAI-compatible API',
+            auth: 'Base URL, API key',
         },
     ];
 
@@ -599,7 +626,21 @@ export default function AddConnectionPage() {
         },
     ];
 
+    const providerQuery = providerSearch.trim().toLowerCase();
+    const filteredProviderTabs = providerQuery
+        ? providerTabs.filter((p) =>
+              [p.name, p.description, p.auth, p.id].join(' ').toLowerCase().includes(providerQuery),
+          )
+        : providerTabs;
     const selectedProvider = providerTabs.find((p) => p.id === provider);
+    const selectedProviderHidden =
+        Boolean(providerQuery) && !filteredProviderTabs.some((p) => p.id === provider);
+
+    const handleProviderSelect = (providerId: string) => {
+        setProvider(providerId);
+        resetForm();
+        setProviderSearch('');
+    };
 
     const renderApiKeyProviderForm = ({
         providerId,
@@ -704,40 +745,117 @@ export default function AddConnectionPage() {
                 </div>
             </div>
 
-            {/* Provider tabs */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
-                {providerTabs.map((p) => (
-                    <button
-                        key={p.id}
-                        onClick={() => {
-                            setProvider(p.id);
-                            resetForm();
-                        }}
-                        className={cn(
-                            'flex flex-col items-center gap-1.5 p-4 rounded-xl text-sm font-medium transition-all cursor-pointer border',
-                            provider === p.id
-                                ? 'bg-primary/5 border-primary/30 text-foreground shadow-sm ring-1 ring-primary/10'
-                                : 'bg-card border-border text-muted-foreground hover:bg-muted hover:text-foreground hover:border-primary/20',
-                        )}
-                    >
-                        <div
-                            className={cn(
-                                'flex h-9 w-9 items-center justify-center rounded-lg transition-colors',
-                                provider === p.id ? 'bg-primary/10' : 'bg-muted/60',
-                            )}
-                        >
-                            {p.icon}
-                        </div>
-                        <span className="text-xs font-semibold">{p.name}</span>
-                        <span className="text-[10px] text-muted-foreground text-center leading-tight">
-                            {p.description}
+            {/* Provider picker */}
+            <div className="space-y-3 rounded-xl border bg-muted/20 p-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                        <p className="text-sm font-semibold">Choose provider</p>
+                        <p className="text-xs text-muted-foreground">
+                            Pick the account type first; the setup form below changes automatically.
+                        </p>
+                    </div>
+                    <div className="relative w-full sm:w-72">
+                        <Search
+                            size={14}
+                            className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                        />
+                        <Input
+                            type="text"
+                            name="provider-picker-filter"
+                            value={providerSearch}
+                            onChange={(e) => setProviderSearch(e.target.value)}
+                            placeholder="Search providers or auth..."
+                            className="h-8 pl-9 text-sm"
+                            autoComplete="new-password"
+                            data-1p-ignore
+                        />
+                    </div>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+                    {filteredProviderTabs.map((p) => {
+                        const isSelected = provider === p.id;
+
+                        return (
+                            <button
+                                type="button"
+                                key={p.id}
+                                onClick={(event) => {
+                                    event.preventDefault();
+                                    handleProviderSelect(p.id);
+                                }}
+                                className={cn(
+                                    'group flex min-h-28 items-start gap-3 rounded-lg border p-3 text-left transition-all cursor-pointer',
+                                    isSelected
+                                        ? 'bg-background border-primary/40 text-foreground shadow-sm ring-1 ring-primary/10'
+                                        : 'bg-card border-border text-muted-foreground hover:bg-background hover:text-foreground hover:border-primary/20',
+                                )}
+                            >
+                                <div
+                                    className={cn(
+                                        'flex h-10 w-10 shrink-0 items-center justify-center rounded-lg transition-colors',
+                                        isSelected ? 'bg-primary/10' : 'bg-muted/70 group-hover:bg-muted',
+                                    )}
+                                >
+                                    {p.icon}
+                                </div>
+                                <div className="min-w-0 flex-1 space-y-1">
+                                    <div className="flex items-center gap-2">
+                                        <span className="truncate text-sm font-semibold">{p.name}</span>
+                                        {p.recommended && (
+                                            <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
+                                                Fast
+                                            </Badge>
+                                        )}
+                                    </div>
+                                    <p className="text-xs leading-snug text-muted-foreground">{p.description}</p>
+                                    <p className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                                        <KeyRound size={11} /> {p.auth}
+                                    </p>
+                                </div>
+                            </button>
+                        );
+                    })}
+                </div>
+                {filteredProviderTabs.length === 0 && (
+                    <div className="rounded-lg border border-dashed bg-background py-8 text-center text-sm text-muted-foreground">
+                        No providers match "{providerSearch.trim()}".
+                    </div>
+                )}
+                {selectedProviderHidden && selectedProvider && (
+                    <div className="flex flex-col gap-2 rounded-lg border bg-background px-3 py-2 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+                        <span>
+                            Current setup is still {selectedProvider.name}, but it is hidden by this search.
                         </span>
-                    </button>
-                ))}
+                        <Button
+                            type="button"
+                            variant="link"
+                            className="h-auto justify-start p-0 text-xs"
+                            onClick={() => setProviderSearch('')}
+                        >
+                            Show selected provider
+                        </Button>
+                    </div>
+                )}
             </div>
 
             {/* Content */}
             <div className="rounded-xl border bg-card">
+                {selectedProvider && (
+                    <div className="flex flex-col gap-3 border-b bg-muted/20 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="flex min-w-0 items-center gap-3">
+                            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-background">
+                                {selectedProvider.icon}
+                            </div>
+                            <div className="min-w-0">
+                                <p className="truncate text-sm font-semibold">{selectedProvider.name} setup</p>
+                                <p className="truncate text-xs text-muted-foreground">{selectedProvider.description}</p>
+                            </div>
+                        </div>
+                        <Badge variant="outline" className="w-fit gap-1 text-xs">
+                            <KeyRound size={12} /> {selectedProvider.auth}
+                        </Badge>
+                    </div>
+                )}
                 <div className="p-6">
                     {/* Kiro */}
                     {provider === 'kiro' && (
@@ -748,14 +866,13 @@ export default function AddConnectionPage() {
                                     <button
                                         key={m.id}
                                         onClick={() => {
+                                            clearKiroPolling();
                                             setImportMode(m.id);
-                                            setDeviceCode(null);
-                                            setPolling(false);
                                             setSocialLogin(null);
                                             setError('');
                                         }}
                                         className={cn(
-                                            'flex flex-col items-center gap-1 p-3 rounded-lg text-xs font-medium transition-all cursor-pointer border',
+                                            'flex min-h-20 flex-col items-center justify-center gap-1 rounded-lg border p-3 text-center text-xs font-medium transition-all cursor-pointer',
                                             importMode === m.id
                                                 ? 'bg-primary/5 border-primary/30 text-primary ring-1 ring-primary/10'
                                                 : 'bg-transparent border-transparent text-muted-foreground hover:bg-muted hover:border-border',
@@ -763,6 +880,7 @@ export default function AddConnectionPage() {
                                     >
                                         {m.icon}
                                         <span>{m.label}</span>
+                                        <span className="text-[10px] font-normal text-muted-foreground">{m.desc}</span>
                                     </button>
                                 ))}
                             </div>
@@ -1075,9 +1193,8 @@ export default function AddConnectionPage() {
                                     <button
                                         key={mode}
                                         onClick={() => {
+                                            clearOpenAIPolling();
                                             setOpenaiMode(mode);
-                                            setOpenaiOAuthSession(null);
-                                            setOpenaiManualCallback('');
                                             setError('');
                                         }}
                                         className={cn(
@@ -1517,20 +1634,29 @@ export default function AddConnectionPage() {
                             <div className="flex gap-1 p-1 bg-muted rounded-lg w-fit mx-auto">
                                 {(
                                     [
-                                        ['oauth', '🔓 OAuth (Free)'],
-                                        ['apikey', '🔑 API Key'],
+                                        ['oauth', 'OAuth (Free)'],
+                                        ['apikey', 'API Key'],
                                     ] as const
                                 ).map(([mode, label]) => (
                                     <button
                                         key={mode}
-                                        onClick={() => setQwenMode(mode)}
+                                        onClick={() => {
+                                            clearQwenPolling();
+                                            setQwenMode(mode);
+                                            setError('');
+                                        }}
                                         className={cn(
-                                            'flex-1 text-xs py-2 px-4 rounded-md transition-all font-medium',
+                                            'flex flex-1 items-center justify-center text-xs py-2 px-4 rounded-md transition-all font-medium',
                                             qwenMode === mode
                                                 ? 'bg-background text-foreground shadow-sm'
                                                 : 'text-muted-foreground hover:text-foreground',
                                         )}
                                     >
+                                        {mode === 'oauth' ? (
+                                            <Globe size={13} className="mr-1.5" />
+                                        ) : (
+                                            <KeyRound size={13} className="mr-1.5" />
+                                        )}
                                         {label}
                                     </button>
                                 ))}

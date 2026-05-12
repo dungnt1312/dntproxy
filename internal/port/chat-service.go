@@ -1,6 +1,10 @@
 package port
 
-import "io"
+import (
+	"io"
+
+	"github.com/dungnt/dntproxy/internal/domain"
+)
 
 // ChatResult is the result of a chat completion request.
 type ChatResult struct {
@@ -18,9 +22,14 @@ type APIKeyPolicy struct {
 	AllowedModels        []string // nil/empty = unrestricted
 }
 
+// RequestMetadata carries optional per-request observability data.
+type RequestMetadata struct {
+	Compression *domain.CompressionLogMetadata
+}
+
 // ChatService defines the chat orchestration contract.
 type ChatService interface {
 	// HandleChat processes a chat completion request.
 	// policy may be nil if no API key restrictions apply.
-	HandleChat(body []byte, modelStr string, requestID string, policy *APIKeyPolicy) *ChatResult
+	HandleChat(body []byte, modelStr string, requestID string, policy *APIKeyPolicy, metadata ...RequestMetadata) *ChatResult
 }

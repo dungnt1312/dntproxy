@@ -128,6 +128,7 @@ bun run dev
 - **Combo Strategies**: `fallback` and `round-robin` model rotation across providers.
 - **Request Translation**: OpenAI `/v1/chat/completions` to provider-specific protocols (EventStream, Chat API).
 - **CLI & UI Management**: Full configuration via CLI commands and React web UI.
+- **API Key Permissions**: Dashboard can restrict proxy API keys by allowed connections and models.
 - **Cloudflare Tunnel**: One-command public URL exposure with auto-downloaded cloudflared binary.
 - **Structured Logging**: SQLite request logs with 30-day retention, usage tracking, and cost estimation.
 - **Model Registry**: 30+ pre-configured models with context windows and pricing data.

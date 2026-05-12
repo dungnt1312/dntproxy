@@ -30,7 +30,8 @@ import { KeysTable } from './api-keys/keys-table'
 import { KeysMobile } from './api-keys/keys-mobile'
 import { GenerateDialog } from './api-keys/generate-dialog'
 import { ShowKeyDialog } from './api-keys/show-key-dialog'
-import type { ApiKey } from './api-keys/keys-table'
+import { EditKeyDialog } from './api-keys/edit-key-dialog'
+import type { ApiKey, ApiKeyCreatePayload, ApiKeyUpdatePayload, ConnectionOption, ModelOption } from './api-keys/types'
 
 function formatDate(dateStr: string) {
   const date = new Date(dateStr)
@@ -65,6 +66,8 @@ const itemVariants = {
 
 export default function ApiKeysScreen() {
   const [keys, setKeys] = useState<ApiKey[]>([])
+  const [connections, setConnections] = useState<ConnectionOption[]>([])
+  const [models, setModels] = useState<ModelOption[]>([])
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
   const [generateOpen, setGenerateOpen] = useState(false)
@@ -72,30 +75,40 @@ export default function ApiKeysScreen() {
   const [createdKey, setCreatedKey] = useState('')
   const [createdKeyName, setCreatedKeyName] = useState('')
   const [deleteTarget, setDeleteTarget] = useState<ApiKey | null>(null)
+  const [editTarget, setEditTarget] = useState<ApiKey | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [revealedKeys, setRevealedKeys] = useState<Set<string>>(new Set())
 
-  const fetchKeys = useCallback(async () => {
+  const fetchData = useCallback(async () => {
     try {
       setLoading(true)
-      const json = await goApi.getKeys()
-      setKeys(json)
+      const [keysData, connectionsData, modelsData] = await Promise.all([
+        goApi.getKeys(),
+        goApi.getConnections(),
+        goApi.getModels(),
+      ])
+      setKeys(keysData)
+      setConnections(Array.isArray(connectionsData) ? connectionsData : [])
+      setModels(Array.isArray(modelsData) ? modelsData : [])
     } catch {
-      toast.error('Failed to load API keys')
+      toast.error('Failed to load API key data')
     } finally {
       setLoading(false)
     }
   }, [])
 
   useEffect(() => {
-    fetchKeys()
-  }, [fetchKeys])
+    fetchData()
+  }, [fetchData])
 
   const filteredKeys = useMemo(() => {
     const q = searchQuery.trim().toLowerCase()
     if (!q) return keys
     return keys.filter((k) =>
-      k.name.toLowerCase().includes(q) || k.key.toLowerCase().includes(q)
+      k.name.toLowerCase().includes(q) ||
+      k.key.toLowerCase().includes(q) ||
+      k.allowedConnectionIds.some((id) => id.toLowerCase().includes(q)) ||
+      k.allowedModels.some((model) => model.toLowerCase().includes(q))
     )
   }, [keys, searchQuery])
 
@@ -114,14 +127,25 @@ export default function ApiKeysScreen() {
     })
   }
 
-  const handleGenerate = async (name: string) => {
-    const json = await goApi.createKey(name)
+  const handleGenerate = async (payload: ApiKeyCreatePayload) => {
+    const json = await goApi.createKey(payload)
     setCreatedKey(json.key)
     setCreatedKeyName(json.name)
     setGenerateOpen(false)
     setShowKeyOpen(true)
     toast.success('API key generated successfully')
-    await fetchKeys()
+    await fetchData()
+  }
+
+  const handleUpdate = async (id: string, payload: ApiKeyUpdatePayload) => {
+    try {
+      await goApi.updateKey(id, payload)
+      await fetchData()
+      toast.success('API key updated')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to update API key')
+      throw error
+    }
   }
 
   const handleDelete = async () => {
@@ -130,7 +154,7 @@ export default function ApiKeysScreen() {
       setDeleting(true)
       await goApi.deleteKey(deleteTarget.id)
       setDeleteTarget(null)
-      await fetchKeys()
+      await fetchData()
       toast.success(`Key "${deleteTarget.name}" deleted`)
     } catch {
       toast.error('Failed to delete API key')
@@ -229,6 +253,7 @@ export default function ApiKeysScreen() {
                       revealedKeys={revealedKeys}
                       onToggleReveal={toggleReveal}
                       onDelete={setDeleteTarget}
+                      onEdit={setEditTarget}
                       formatDate={formatDate}
                       maskKey={maskKey}
                     />
@@ -237,6 +262,7 @@ export default function ApiKeysScreen() {
                       revealedKeys={revealedKeys}
                       onToggleReveal={toggleReveal}
                       onDelete={setDeleteTarget}
+                      onEdit={setEditTarget}
                       formatDate={formatDate}
                       maskKey={maskKey}
                     />
@@ -273,6 +299,17 @@ export default function ApiKeysScreen() {
         open={generateOpen}
         onOpenChange={setGenerateOpen}
         onGenerate={handleGenerate}
+        connections={connections}
+        models={models}
+      />
+
+      <EditKeyDialog
+        apiKey={editTarget}
+        open={!!editTarget}
+        onOpenChange={(open) => { if (!open) setEditTarget(null) }}
+        onSave={handleUpdate}
+        connections={connections}
+        models={models}
       />
 
       <ShowKeyDialog

@@ -28,6 +28,7 @@ func NewRouter(store port.CredentialStore, providers port.ProviderRegistry, tunn
 	r.Use(requestLogger())
 
 	chatService := service.NewChatService(store, providers)
+	modelAccess := service.NewModelAccessService(store)
 
 	// Build compressor — re-reads settings at most once per second
 	comp := compressor.NewWithLoader(func() compressor.Options {
@@ -49,7 +50,7 @@ func NewRouter(store port.CredentialStore, providers port.ProviderRegistry, tunn
 	{
 		v1.POST("/chat/completions", chatHandler(chatService, store, comp))
 		v1.POST("/messages", messagesHandler(chatService, store, comp))
-		v1.GET("/models", modelsHandler(store))
+		v1.GET("/models", modelsHandler(modelAccess))
 	}
 
 	// Dashboard API endpoints

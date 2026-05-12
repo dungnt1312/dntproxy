@@ -1,15 +1,17 @@
-import { Eye, EyeOff, Trash2 } from 'lucide-react'
+import { Edit3, Eye, EyeOff, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { CopyButton } from './copy-button'
-import type { ApiKey } from './keys-table'
+import { PermissionSummary } from './permission-summary'
+import type { ApiKey } from './types'
 
 interface KeysMobileProps {
   keys: ApiKey[]
   revealedKeys: Set<string>
   onToggleReveal: (id: string) => void
   onDelete: (key: ApiKey) => void
+  onEdit: (key: ApiKey) => void
   formatDate: (dateStr: string) => string
   maskKey: (key: string) => string
 }
@@ -19,6 +21,7 @@ export function KeysMobile({
   revealedKeys,
   onToggleReveal,
   onDelete,
+  onEdit,
   formatDate,
   maskKey,
 }: KeysMobileProps) {
@@ -67,7 +70,21 @@ export function KeysMobile({
               <CopyButton text={apiKey.key} label="Key" />
             </div>
 
+            <div className="flex items-center justify-between gap-2 text-xs">
+              <span className="text-muted-foreground">Access</span>
+              <PermissionSummary apiKey={apiKey} />
+            </div>
+
             <div className="flex items-center justify-end gap-1 pt-1 border-t">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs"
+                onClick={() => onEdit(apiKey)}
+              >
+                <Edit3 className="size-3" />
+                Edit
+              </Button>
               <Button
                 variant="ghost"
                 size="sm"

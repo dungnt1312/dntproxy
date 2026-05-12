@@ -1,4 +1,4 @@
-import { Eye, EyeOff, Trash2 } from 'lucide-react'
+import { Edit3, Eye, EyeOff, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -12,21 +12,15 @@ import {
 } from '@/components/ui/table'
 import { cn } from '@/lib/utils'
 import { CopyButton } from './copy-button'
-
-export interface ApiKey {
-  id: string
-  name: string
-  key: string
-  isActive: boolean
-  createdAt: string
-  updatedAt: string
-}
+import { PermissionSummary } from './permission-summary'
+import type { ApiKey } from './types'
 
 interface KeysTableProps {
   keys: ApiKey[]
   revealedKeys: Set<string>
   onToggleReveal: (id: string) => void
   onDelete: (key: ApiKey) => void
+  onEdit: (key: ApiKey) => void
   formatDate: (dateStr: string) => string
   maskKey: (key: string) => string
 }
@@ -36,6 +30,7 @@ export function KeysTable({
   revealedKeys,
   onToggleReveal,
   onDelete,
+  onEdit,
   formatDate,
   maskKey,
 }: KeysTableProps) {
@@ -47,6 +42,7 @@ export function KeysTable({
             <TableHead>Name</TableHead>
             <TableHead>Key</TableHead>
             <TableHead>Status</TableHead>
+            <TableHead>Access</TableHead>
             <TableHead>Created</TableHead>
             <TableHead className="text-right">Actions</TableHead>
           </TableRow>
@@ -99,11 +95,27 @@ export function KeysTable({
                     {apiKey.isActive ? 'Active' : 'Inactive'}
                   </Badge>
                 </TableCell>
+                <TableCell>
+                  <PermissionSummary apiKey={apiKey} />
+                </TableCell>
                 <TableCell className="text-muted-foreground text-sm">
                   {formatDate(apiKey.createdAt)}
                 </TableCell>
                 <TableCell className="text-right">
                   <div className="flex items-center justify-end gap-1">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="size-8"
+                          onClick={() => onEdit(apiKey)}
+                        >
+                          <Edit3 className="size-3.5" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Edit key</TooltipContent>
+                    </Tooltip>
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <Button

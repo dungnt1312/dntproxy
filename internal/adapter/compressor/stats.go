@@ -47,7 +47,7 @@ func (ct ContentType) String() string {
 // Options configures compressor behaviour.
 type Options struct {
 	Enabled          bool
-	MinContentLength int  // default 500
+	MinContentLength int // default 500
 	LogSavings       bool
 }
 
@@ -58,4 +58,5 @@ type Stats struct {
 	TokensSaved     int            // (orig-comp)/4
 	Detections      map[string]int // content-type name → count
 	Skipped         int
+	LogSavings      bool
 }

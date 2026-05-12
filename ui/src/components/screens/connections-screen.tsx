@@ -13,8 +13,20 @@ import { toast } from 'sonner';
 import { getProviderLabel, getProviderMeta, PROVIDER_ORDER } from '@/lib/provider-registry';
 import { ConnectionStats } from './connections/connection-stats';
 import { ConnectionGroup } from './connections/connection-group';
+import {
+    ConnectionStatusFilter,
+    type ConnectionStatusFilter as ConnectionStatusFilterValue,
+} from './connections/connection-status-filter';
 import { useQuotaFetch } from './connections/use-quota-fetch';
 import type { Connection, ConnectionGroup as ConnectionGroupType } from '@/types/connections';
+
+function connectionNeedsAttention(c: Connection) {
+    if (!c.isActive) return false;
+    const rateLimited = c.rateLimitedUntil && new Date(c.rateLimitedUntil) > new Date();
+    const expired = c.expiresAt && new Date(c.expiresAt) < new Date();
+
+    return Boolean(rateLimited || expired || (c.backoffLevel ?? 0) > 0 || c.lastError);
+}
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -30,6 +42,7 @@ export default function ConnectionsScreen() {
         name: string;
     } | null>(null);
     const [searchQuery, setSearchQuery] = useState('');
+    const [statusFilter, setStatusFilter] = useState<ConnectionStatusFilterValue>('active');
     const [autoRefreshQuota, setAutoRefreshQuota] = useState(false);
     const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
 
@@ -41,20 +54,20 @@ export default function ConnectionsScreen() {
     const connectionStats = useMemo(() => {
         const total = conns.length;
         const active = conns.filter((c) => c.isActive).length;
-        const needsAttention = conns.filter((c) => {
-            if (!c.isActive) return false;
-            const rl = c.rateLimitedUntil && new Date(c.rateLimitedUntil) > new Date();
-            const exp = c.expiresAt && new Date(c.expiresAt) < new Date();
-            return rl || exp || (c.backoffLevel ?? 0) > 0 || !!c.lastError;
-        }).length;
-        return { total, active, needsAttention };
+        const inactive = total - active;
+        const needsAttention = conns.filter(connectionNeedsAttention).length;
+        return { total, active, inactive, needsAttention };
     }, [conns]);
 
     // ── Filter ────────────────────────────────────────────────────────────────
     const filteredConns = useMemo(() => {
         const q = searchQuery.trim().toLowerCase();
-        if (!q) return conns;
         return conns.filter((c) => {
+            if (statusFilter === 'active' && !c.isActive) return false;
+            if (statusFilter === 'inactive' && c.isActive) return false;
+            if (statusFilter === 'issues' && !connectionNeedsAttention(c)) return false;
+            if (!q) return true;
+
             const providerLabel = getProviderLabel(c.provider).toLowerCase();
             const hay = [
                 c.name,
@@ -70,7 +83,14 @@ export default function ConnectionsScreen() {
                 .toLowerCase();
             return hay.includes(q);
         });
-    }, [conns, searchQuery]);
+    }, [conns, searchQuery, statusFilter]);
+
+    const hasActiveFilters = statusFilter !== 'all' || searchQuery.trim().length > 0;
+
+    const clearFilters = useCallback(() => {
+        setSearchQuery('');
+        setStatusFilter('all');
+    }, []);
 
     // ── Group connections by provider (dynamic, no "other" bucket) ──────────────
     const groupedConns = useMemo(() => {
@@ -179,29 +199,52 @@ export default function ConnectionsScreen() {
 
             {/* Toolbar */}
             {conns.length > 0 && (
-                <div className="flex flex-col sm:flex-row sm:items-center gap-3 rounded-lg border bg-muted/30 p-3">
-                    <div className="relative flex-1 min-w-0">
-                        <Search
-                            size={14}
-                            className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                        />
-                        <Input
-                            type="search"
-                            value={searchQuery}
-                            onChange={(e) => setSearchQuery(e.target.value)}
-                            placeholder="Search by name, email, or model…"
-                            className="pl-9 h-8 text-sm"
-                            autoComplete="off"
-                            data-1p-ignore
+                <div className="flex flex-col gap-3 rounded-lg border bg-muted/30 p-3">
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+                        <div className="relative flex-1 min-w-0">
+                            <Search
+                                size={14}
+                                className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                            />
+                            <Input
+                                type="search"
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                placeholder="Search by name, email, provider, or model..."
+                                className="h-8 pl-9 text-sm"
+                                autoComplete="off"
+                                data-1p-ignore
+                            />
+                        </div>
+                        <ConnectionStatusFilter
+                            value={statusFilter}
+                            total={connectionStats.total}
+                            active={connectionStats.active}
+                            inactive={connectionStats.inactive}
+                            issues={connectionStats.needsAttention}
+                            onChange={setStatusFilter}
                         />
                     </div>
-                    <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors select-none shrink-0">
-                        <Switch
-                            checked={autoRefreshQuota}
-                            onCheckedChange={setAutoRefreshQuota}
-                        />
-                        Auto-refresh loaded quotas
-                    </label>
+                    <div className="flex flex-col gap-2 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+                        <span>
+                            Showing {filteredConns.length} of {conns.length} connections
+                            {statusFilter !== 'all' ? ` (${statusFilter})` : ''}
+                        </span>
+                        <div className="flex flex-wrap items-center gap-3">
+                            {hasActiveFilters && (
+                                <Button variant="link" onClick={clearFilters} className="h-auto p-0 text-xs">
+                                    Clear filters
+                                </Button>
+                            )}
+                            <label className="flex cursor-pointer items-center gap-2 hover:text-foreground transition-colors select-none">
+                                <Switch
+                                    checked={autoRefreshQuota}
+                                    onCheckedChange={setAutoRefreshQuota}
+                                />
+                                Auto-refresh loaded quotas
+                            </label>
+                        </div>
+                    </div>
                 </div>
             )}
 
@@ -235,8 +278,10 @@ export default function ConnectionsScreen() {
                 </div>
             ) : filteredConns.length === 0 ? (
                 <div className="flex flex-col items-center justify-center rounded-lg border py-12 text-center">
-                    <p className="text-sm text-muted-foreground">No connections matching "{searchQuery.trim()}"</p>
-                    <Button variant="link" onClick={() => setSearchQuery('')} className="mt-2 text-sm">
+                    <p className="text-sm text-muted-foreground">
+                        No connections match the current search and status filter.
+                    </p>
+                    <Button variant="link" onClick={clearFilters} className="mt-2 text-sm">
                         Clear filters
                     </Button>
                 </div>

@@ -3,6 +3,8 @@ package http
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/dungnt/dntproxy/internal/domain"
@@ -33,6 +35,12 @@ func apiCreateKey(store port.CredentialStore) gin.HandlerFunc {
 		}
 		if err := c.ShouldBindJSON(&req); err != nil || req.Name == "" {
 			c.JSON(400, gin.H{"error": "name required"})
+			return
+		}
+		req.AllowedConnectionIDs = uniqueNonEmpty(req.AllowedConnectionIDs)
+		req.AllowedModels = uniqueNonEmpty(req.AllowedModels)
+		if err := validateAllowedConnectionIDs(store, req.AllowedConnectionIDs); err != nil {
+			c.JSON(400, gin.H{"error": err.Error()})
 			return
 		}
 
@@ -100,6 +108,12 @@ func apiUpdateKey(store port.CredentialStore) gin.HandlerFunc {
 			c.JSON(400, gin.H{"error": "invalid request body"})
 			return
 		}
+		req.AllowedConnectionIDs = uniqueNonEmpty(req.AllowedConnectionIDs)
+		req.AllowedModels = uniqueNonEmpty(req.AllowedModels)
+		if err := validateAllowedConnectionIDs(store, req.AllowedConnectionIDs); err != nil {
+			c.JSON(400, gin.H{"error": err.Error()})
+			return
+		}
 
 		found := false
 		if err := store.Update(func(cfg *domain.AppConfig) {
@@ -128,6 +142,44 @@ func apiUpdateKey(store port.CredentialStore) gin.HandlerFunc {
 		}
 		c.JSON(200, gin.H{"ok": true})
 	}
+}
+
+func uniqueNonEmpty(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
+}
+
+func validateAllowedConnectionIDs(store port.CredentialStore, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+
+	cfg, err := store.Load()
+	if err != nil {
+		return err
+	}
+	existing := make(map[string]struct{}, len(cfg.ProviderConnections))
+	for _, conn := range cfg.ProviderConnections {
+		existing[conn.ID] = struct{}{}
+	}
+	for _, id := range ids {
+		if _, ok := existing[id]; !ok {
+			return fmt.Errorf("unknown connection id: %s", id)
+		}
+	}
+	return nil
 }
 
 func apiValidateKey(store port.CredentialStore) gin.HandlerFunc {

@@ -1,6 +1,13 @@
 import type { LogFilters } from "@/types/logs";
 
-export { StatusBadge, formatDateTime, formatLatency } from "./helpers.tsx";
+export {
+  StatusBadge,
+  formatCompressionRatio,
+  formatDateTime,
+  formatLatency,
+  formatTokenCount,
+  getCompressionMetadata,
+} from "./helpers.tsx";
 
 export function buildFilterParams(filters: LogFilters): URLSearchParams {
   const params = new URLSearchParams();

@@ -3,9 +3,9 @@
 This document summarizes the current `dntproxy` codebase.
 
 ## Overall Scale
-- Backend (Go): ~7200 LOC
-- Frontend (React): ~2800 LOC
-- Core files: ~90 Go files, ~90 TypeScript/TSX files
+- Backend (Go): ~18,500 source lines across 124 non-test files, plus ~1,700 test lines
+- Frontend (React): ~21,600 source lines across 146 TypeScript/TSX files
+- Core files: 124 non-test Go files, 146 TypeScript/TSX files
 
 ## Directory Structure
 
@@ -40,7 +40,7 @@ Web admin UI (React, Vite, TypeScript).
   - `playground/`: Chat interface components (ModelSelector, ParameterControls, MessageList, InputArea)
   - `logs/`: Log viewer components (LogTable, LogFilters, LogStats, LogDetails)
   - `profiles/`: Profile management (ProfileList, ProfileForm, ProfileCard)
-  - `api-keys/`: API key management (KeyList, KeyGenerator, KeyCard)
+  - `api-keys/`: API key management, generation, edit dialog, and connection/model permission editor.
   - `dashboard/`: Dashboard widgets (StatsCard, QuickActions, RecentActivity)
   - `connections/`: Connection management (ConnectionCard, ConnectionForm, ConnectionList, QuotaPanel)
   - `layout/`: Shared layout components (Sidebar, Header, Footer)
@@ -49,6 +49,7 @@ Web admin UI (React, Vite, TypeScript).
 - **API Client**: Unified `goApi` usage across all components
 - **File Size**: All screen orchestrators now <400 lines, component modules <200 lines
 - **Connections UI**: Collapsible provider groups, grid layout, inline editing modal, quota panel with real-time fetching, logs viewer integration, provider logos.
+- **API Keys UI**: Generate/edit dntproxy API keys with unrestricted access or connection/model allowlists.
 - **Tunnel UI**: Enable/disable controls, real-time status polling, URL sharing, security warnings, CLI documentation.
 - **Playground UI**: Enhanced chat interface with model selection, parameter controls, message history.
 - **Logs Dashboard**: Local SQLite database (`logs.db`) for 30-day structured request/provider history, connection filters, usage tokens, estimated cost summaries, and bounded response payload previews.
@@ -93,6 +94,8 @@ Web admin UI (React, Vite, TypeScript).
 - Combo strategies (fallback, round-robin)
 - Multi-account fallback with exponential backoff
 - Model-level locks to prevent retry loops
+- API key model allowlists are enforced per resolved model attempt; shared combos are filtered to allowed members instead of allowing every combo member by combo name.
+- API key connection allowlists distinguish policy-denied connections from unsupported models so combos can skip unavailable members without reaching forbidden pinned connections.
 
 ### Observability
 - Structured SQLite logging with 30-day retention
@@ -111,11 +114,13 @@ Web admin UI (React, Vite, TypeScript).
 ### API Compatibility
 - OpenAI Chat Completions (`/v1/chat/completions`)
 - Anthropic Messages API (`/v1/messages`)
+- `/v1/messages` enforces the same 10 MB request body limit as chat completions and reports stream read failures without emitting a normal stop event.
 - Model listing (`/v1/models`)
 - Health check (`/health`)
 
 ### UI Components
 - Connections management with provider grouping
+- API key permission management with connection/model allowlists
 - Real-time quota display
 - Inline connection editing
 - Logs viewer with filtering

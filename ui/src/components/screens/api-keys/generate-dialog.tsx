@@ -11,24 +11,39 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { PermissionsEditor } from './permissions-editor'
+import type { ApiKeyCreatePayload, ConnectionOption, ModelOption } from './types'
 
 interface GenerateDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  onGenerate: (name: string) => Promise<void>
+  onGenerate: (payload: ApiKeyCreatePayload) => Promise<void>
+  connections: ConnectionOption[]
+  models: ModelOption[]
 }
 
-export function GenerateDialog({ open, onOpenChange, onGenerate }: GenerateDialogProps) {
+export function GenerateDialog({ open, onOpenChange, onGenerate, connections, models }: GenerateDialogProps) {
   const [keyName, setKeyName] = useState('')
+  const [restricted, setRestricted] = useState(false)
+  const [allowedConnectionIds, setAllowedConnectionIds] = useState<string[]>([])
+  const [allowedModels, setAllowedModels] = useState<string[]>([])
   const [generating, setGenerating] = useState(false)
+  const restrictedWithoutSelection = restricted && allowedConnectionIds.length === 0 && allowedModels.length === 0
 
   const handleGenerate = async () => {
     if (!keyName.trim()) return
 
     try {
       setGenerating(true)
-      await onGenerate(keyName.trim())
+      await onGenerate({
+        name: keyName.trim(),
+        allowedConnectionIds: restricted ? allowedConnectionIds : [],
+        allowedModels: restricted ? allowedModels : [],
+      })
       setKeyName('')
+      setRestricted(false)
+      setAllowedConnectionIds([])
+      setAllowedModels([])
     } finally {
       setGenerating(false)
     }
@@ -37,11 +52,14 @@ export function GenerateDialog({ open, onOpenChange, onGenerate }: GenerateDialo
   const handleClose = () => {
     onOpenChange(false)
     setKeyName('')
+    setRestricted(false)
+    setAllowedConnectionIds([])
+    setAllowedModels([])
   }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="max-w-3xl">
         <DialogHeader>
           <DialogTitle>Generate New API Key</DialogTitle>
           <DialogDescription>
@@ -66,12 +84,26 @@ export function GenerateDialog({ open, onOpenChange, onGenerate }: GenerateDialo
               A descriptive name to help you identify this key later
             </p>
           </div>
+          <PermissionsEditor
+            value={{ allowedConnectionIds, allowedModels }}
+            onChange={(next) => {
+              setAllowedConnectionIds(next.allowedConnectionIds)
+              setAllowedModels(next.allowedModels)
+            }}
+            restricted={restricted}
+            onRestrictedChange={setRestricted}
+            connections={connections}
+            models={models}
+          />
+          {restrictedWithoutSelection && (
+            <p className="text-xs text-destructive">Select at least one connection or model, or use unrestricted access.</p>
+          )}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={handleClose}>
             Cancel
           </Button>
-          <Button onClick={handleGenerate} disabled={generating || !keyName.trim()}>
+          <Button onClick={handleGenerate} disabled={generating || !keyName.trim() || restrictedWithoutSelection}>
             {generating ? (
               <>
                 <Loader2 className="size-4 animate-spin" />

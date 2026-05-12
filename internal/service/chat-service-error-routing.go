@@ -58,6 +58,8 @@ func mapSelectionErrorToChatResult(err error) *port.ChatResult {
 	switch selErr.Kind {
 	case SelectionErrNoActiveCredentials:
 		return &port.ChatResult{StatusCode: http.StatusNotFound, Error: selErr.Error()}
+	case SelectionErrNoAllowedConnection:
+		return &port.ChatResult{StatusCode: http.StatusForbidden, Error: selErr.Error()}
 	case SelectionErrUnsupportedModel:
 		return &port.ChatResult{StatusCode: http.StatusBadRequest, Error: selErr.Error()}
 	case SelectionErrRateLimited, SelectionErrModelLocked:

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/dungnt/dntproxy/internal/adapter/compressor"
+	"github.com/dungnt/dntproxy/internal/domain"
 	"github.com/dungnt/dntproxy/internal/port"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -61,7 +62,7 @@ func chatHandler(chatService port.ChatService, store port.CredentialStore, comp 
 		// Extract API key policy from context (set by apiKeyMiddleware)
 		policy := extractAPIKeyPolicy(c)
 
-		result := chatService.HandleChat(body, partial.Model, requestID, policy)
+		result := chatService.HandleChat(body, partial.Model, requestID, policy, compressionMetadata(stats))
 
 		if result.Stream != nil {
 			c.Header("Content-Type", "text/event-stream")
@@ -119,6 +120,28 @@ func chatHandler(chatService port.ChatService, store port.CredentialStore, comp 
 		c.JSON(result.StatusCode, gin.H{
 			"error": gin.H{"message": result.Error},
 		})
+	}
+}
+
+func compressionMetadata(stats compressor.Stats) port.RequestMetadata {
+	if !stats.LogSavings || stats.CompressedBytes <= 0 || stats.CompressedBytes >= stats.OriginalBytes {
+		return port.RequestMetadata{}
+	}
+	savedBytes := stats.OriginalBytes - stats.CompressedBytes
+	ratio := 0.0
+	if stats.OriginalBytes > 0 {
+		ratio = float64(stats.CompressedBytes) / float64(stats.OriginalBytes)
+	}
+	return port.RequestMetadata{
+		Compression: &domain.CompressionLogMetadata{
+			OriginalBytes:       stats.OriginalBytes,
+			CompressedBytes:     stats.CompressedBytes,
+			SavedBytes:          savedBytes,
+			TokensSavedEstimate: stats.TokensSaved,
+			Ratio:               ratio,
+			Detections:          stats.Detections,
+			Skipped:             stats.Skipped,
+		},
 	}
 }
 

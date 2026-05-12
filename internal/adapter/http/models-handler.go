@@ -3,7 +3,7 @@ package http
 import (
 	"net/http"
 
-	"github.com/dungnt/dntproxy/internal/port"
+	"github.com/dungnt/dntproxy/internal/service"
 	"github.com/gin-gonic/gin"
 )
 
@@ -15,96 +15,39 @@ type modelObject struct {
 	OwnedBy string `json:"owned_by"`
 }
 
-func modelsHandler(store port.CredentialStore) gin.HandlerFunc {
+func modelsHandler(modelAccess *service.ModelAccessService) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		policy := extractAPIKeyPolicy(c)
+		pool, err := modelAccess.BuildPool(policy)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to build model pool"})
+			return
+		}
+
 		var models []modelObject
 
-		cfg, err := store.Load()
-		if err == nil && cfg != nil {
-			seen := make(map[string]bool)
-
-			for _, conn := range cfg.ProviderConnections {
-				if !conn.IsActive {
-					continue
-				}
-				if len(conn.SupportedModels) == 0 {
-					// No restriction — add all registry models for this provider
-					if cfg.ModelRegistry != nil {
-						for key, m := range cfg.ModelRegistry.Models {
-							if m.Provider == conn.Provider && m.IsActive && !seen[key] {
-								seen[key] = true
-								models = append(models, modelObject{
-									ID:      key,
-									Object:  "model",
-									Created: 1700000000,
-									OwnedBy: m.Provider,
-								})
-							}
-						}
-					}
-				} else {
-					for _, modelID := range conn.SupportedModels {
-						key := conn.Provider + "/" + modelID
-						if seen[key] {
-							continue
-						}
-						seen[key] = true
-						ownedBy := conn.Provider
-						models = append(models, modelObject{
-							ID:      key,
-							Object:  "model",
-							Created: 1700000000,
-							OwnedBy: ownedBy,
-						})
-					}
-				}
-			}
-
-			// If no connections at all, fall back to full registry
-			if len(cfg.ProviderConnections) == 0 && cfg.ModelRegistry != nil {
-				for key, m := range cfg.ModelRegistry.Models {
-					if m.IsActive && !seen[key] {
-						seen[key] = true
-						models = append(models, modelObject{
-							ID:      key,
-							Object:  "model",
-							Created: 1700000000,
-							OwnedBy: m.Provider,
-						})
-					}
-				}
-			}
+		for _, m := range pool.Models {
+			models = append(models, newModelObject(m.QualifiedID, m.Provider))
 		}
-
-		// Add combos as models
-		combos, err := store.GetCombos()
-		if err == nil {
-			for _, combo := range combos {
-				models = append(models, modelObject{
-					ID:      combo.Name,
-					Object:  "model",
-					Created: 1700000000,
-					OwnedBy: "combo",
-				})
-			}
+		for _, combo := range pool.Combos {
+			models = append(models, newModelObject(combo.Name, "combo"))
 		}
-
-		// Add aliases as models
-		aliases, err := store.GetModelAliases()
-		if err == nil {
-			for alias := range aliases {
-				models = append(models, modelObject{
-					ID:      alias,
-					Object:  "model",
-					Created: 1700000000,
-					OwnedBy: "alias",
-				})
-			}
+		for _, alias := range pool.Aliases {
+			models = append(models, newModelObject(alias.Name, "alias"))
 		}
 
 		c.JSON(http.StatusOK, gin.H{
 			"object": "list",
 			"data":   models,
 		})
+	}
+}
+
+func newModelObject(id string, ownedBy string) modelObject {
+	return modelObject{
+		ID:      id,
+		Object:  "model",
+		Created: 1700000000,
+		OwnedBy: ownedBy,
 	}
 }

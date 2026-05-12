@@ -27,6 +27,16 @@ export interface LogEntry {
   metadataJson?: string
 }
 
+export interface CompressionMetadata {
+  originalBytes: number
+  compressedBytes: number
+  savedBytes: number
+  tokensSavedEstimate: number
+  ratio: number
+  detections?: Record<string, number>
+  skipped?: number
+}
+
 export interface LogSummary {
   requests: number
   errors: number

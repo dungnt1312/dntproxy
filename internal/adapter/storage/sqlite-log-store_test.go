@@ -25,7 +25,7 @@ func TestSQLiteLogStoreInsertListSummaryAndRetention(t *testing.T) {
 			TimestampMs: now.UnixMilli(),
 			Level:       "INFO",
 			Provider:    "CLIENT",
-			Direction:   "inbound",
+			Direction:   "response",
 			StatusCode:  200,
 			RequestID:   "req-1",
 			Message:     "Client request",

@@ -1,6 +1,7 @@
 package logger
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
@@ -64,6 +65,9 @@ type RequestLog struct {
 	// Bodies (optional, dev mode only)
 	RequestBody  string
 	ResponseBody string
+
+	// Metadata
+	Compression *domain.CompressionLogMetadata
 }
 
 // NewRequestLog creates a new request log with a unique ID.
@@ -148,6 +152,16 @@ func (r *RequestLog) SetBodies(reqBody, respBody string) {
 	}
 }
 
+// AttachCompression records request compression savings for persisted metadata.
+func (r *RequestLog) AttachCompression(meta *domain.CompressionLogMetadata) {
+	if meta == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.Compression = meta
+}
+
 // End finalises the request log and emits terminal + structured log entries.
 func (r *RequestLog) End(statusCode int, errMsg string) {
 	r.mu.Lock()
@@ -210,6 +224,7 @@ func (r *RequestLog) emitStructuredLogs() {
 		Currency:       r.Currency,
 		RequestBody:    r.RequestBody,
 		ResponseBody:   r.ResponseBody,
+		MetadataJSON:   r.buildMetadataJSON(),
 	}
 
 	if r.ResolvedProvider == "" {
@@ -217,6 +232,19 @@ func (r *RequestLog) emitStructuredLogs() {
 	}
 
 	appLogger.AddEntry(entry)
+}
+
+func (r *RequestLog) buildMetadataJSON() string {
+	if r.Compression == nil {
+		return ""
+	}
+	b, err := json.Marshal(map[string]interface{}{
+		"compression": r.Compression,
+	})
+	if err != nil {
+		return ""
+	}
+	return string(b)
 }
 
 func (r *RequestLog) buildMessage() string {
@@ -266,16 +294,35 @@ func (r *RequestLog) buildMessage() string {
 // on close to finalize the request log.
 type requestLogStreamWrapper struct {
 	io.ReadCloser
-	reqlog *RequestLog
-	once   sync.Once
+	reqlog    *RequestLog
+	once      sync.Once
+	readErrMu sync.Mutex
+	readErr   error
+}
+
+func (w *requestLogStreamWrapper) Read(p []byte) (int, error) {
+	n, err := w.ReadCloser.Read(p)
+	if err != nil && err != io.EOF {
+		w.readErrMu.Lock()
+		w.readErr = err
+		w.readErrMu.Unlock()
+	}
+	return n, err
 }
 
 func (w *requestLogStreamWrapper) Close() error {
 	err := w.ReadCloser.Close()
 	w.once.Do(func() {
+		w.readErrMu.Lock()
+		readErr := w.readErr
+		w.readErrMu.Unlock()
+
 		status := 200
 		errMsg := ""
-		if err != nil {
+		if readErr != nil {
+			status = 502
+			errMsg = readErr.Error()
+		} else if err != nil {
 			status = 502
 			errMsg = err.Error()
 		}

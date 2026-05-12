@@ -36,6 +36,8 @@ export function ConnectionGroup({
     onEditConnection,
 }: ConnectionGroupProps) {
     const hasActiveItems = group.items.some((c) => c.isActive);
+    const activeCount = group.items.filter((c) => c.isActive).length;
+    const inactiveCount = group.items.length - activeCount;
 
     return (
         <div>
@@ -60,6 +62,22 @@ export function ConnectionGroup({
                     <Badge variant="secondary" className="text-[10px] h-5">
                         {group.items.length}
                     </Badge>
+                    {activeCount > 0 && (
+                        <Badge
+                            variant="outline"
+                            className="hidden h-5 border-emerald-500/20 bg-emerald-500/10 text-[10px] text-emerald-600 sm:inline-flex"
+                        >
+                            {activeCount} active
+                        </Badge>
+                    )}
+                    {inactiveCount > 0 && (
+                        <Badge
+                            variant="outline"
+                            className="hidden h-5 border-border bg-muted/40 text-[10px] text-muted-foreground sm:inline-flex"
+                        >
+                            {inactiveCount} inactive
+                        </Badge>
+                    )}
                     <ChevronDown
                         className={`h-4 w-4 text-muted-foreground transition-transform ${isCollapsed ? '-rotate-90' : ''}`}
                     />

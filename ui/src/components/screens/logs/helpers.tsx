@@ -1,4 +1,5 @@
 import { Badge } from "@/components/ui/badge";
+import type { CompressionMetadata, LogEntry } from "@/types/logs";
 
 export function StatusBadge({ status, level }: { status?: number; level: string }) {
   if (level === "ERROR" || (status && status >= 400)) {
@@ -31,7 +32,29 @@ export function formatDateTime(dateStr: string) {
 }
 
 export function formatLatency(ms: number | undefined | null) {
-  if (ms == null) return "—";
+  if (ms == null) return "-";
   if (ms < 1000) return `${ms}ms`;
   return `${(ms / 1000).toFixed(2)}s`;
+}
+
+export function formatTokenCount(value: number | undefined | null) {
+  if (!value) return "0";
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
+  return value.toLocaleString();
+}
+
+export function getCompressionMetadata(log: LogEntry): CompressionMetadata | null {
+  if (!log.metadataJson) return null;
+  try {
+    const meta = JSON.parse(log.metadataJson);
+    return meta?.compression ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export function formatCompressionRatio(meta: CompressionMetadata | null) {
+  if (!meta || !Number.isFinite(meta.ratio)) return "-";
+  return `${Math.round((1 - meta.ratio) * 100)}%`;
 }

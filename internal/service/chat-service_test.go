@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/dungnt/dntproxy/internal/domain"
+	"github.com/dungnt/dntproxy/internal/port"
 )
 
 func TestHandleChat_ComboFallback_NoDuplicateExecution(t *testing.T) {
@@ -155,8 +156,8 @@ func TestHandleChat_UnsupportedModel_Returns400WithoutExecution(t *testing.T) {
 	if result.StatusCode != 400 {
 		t.Fatalf("expected 400 for unsupported model, got %d (%s)", result.StatusCode, result.Error)
 	}
-	if !strings.Contains(result.Error, "support model") {
-		t.Fatalf("expected unsupported-model message, got %q", result.Error)
+	if !strings.Contains(result.Error, "No connections available") && !strings.Contains(result.Error, "support model") {
+		t.Fatalf("expected unsupported/unavailable model message, got %q", result.Error)
 	}
 	if len(exec.calls) != 0 {
 		t.Fatalf("executor must not be called for unsupported model, calls=%+v", exec.calls)
@@ -194,6 +195,186 @@ func TestHandleChat_AliasResolution(t *testing.T) {
 
 	if len(exec.calls) != 1 || exec.calls[0].Model != "claude-sonnet" {
 		t.Fatalf("expected execution with resolved model 'claude-sonnet', calls=%+v", exec.calls)
+	}
+}
+
+func TestHandleChat_ModelPolicyFiltersComboMembers(t *testing.T) {
+	store := newTestCredentialStore(&domain.AppConfig{
+		ProviderConnections: []domain.ProviderConnection{{
+			ID:       "conn-1",
+			Name:     "primary",
+			Provider: "kiro",
+			Weight:   100,
+			IsActive: true,
+		}},
+		Combos: []domain.Combo{{
+			Name:   "coder-combo",
+			Models: []string{"kiro/model-a", "kiro/model-b"},
+		}},
+		Settings: domain.Settings{ComboStrategy: "fallback"},
+	})
+
+	exec := newFakeExecutor(map[string]fakeExecuteResponse{
+		"conn-1|model-b": {Status: 200, Body: "data: [DONE]\n\n"},
+	})
+	registry := newTestProviderRegistry()
+	registry.RegisterExecutor("kiro", exec)
+
+	svc := NewChatService(store, registry)
+	result := svc.HandleChat(
+		[]byte(`{"model":"coder-combo","messages":[]}`),
+		"coder-combo",
+		"req-policy-1",
+		&port.APIKeyPolicy{AllowedModels: []string{"kiro/model-b"}},
+	)
+
+	if result.StatusCode != 200 || result.Stream == nil {
+		t.Fatalf("expected filtered combo success, got status=%d err=%q", result.StatusCode, result.Error)
+	}
+	result.Stream.Close()
+	if len(exec.calls) != 1 || exec.calls[0].Model != "model-b" {
+		t.Fatalf("expected only allowed model-b execution, calls=%+v", exec.calls)
+	}
+}
+
+func TestHandleChat_ModelPolicyRejectsComboWithNoAllowedMembers(t *testing.T) {
+	store := newTestCredentialStore(&domain.AppConfig{
+		ProviderConnections: []domain.ProviderConnection{{
+			ID:       "conn-1",
+			Name:     "primary",
+			Provider: "kiro",
+			Weight:   100,
+			IsActive: true,
+		}},
+		Combos: []domain.Combo{{
+			Name:   "coder-combo",
+			Models: []string{"kiro/model-a", "kiro/model-b"},
+		}},
+	})
+	exec := newFakeExecutor(map[string]fakeExecuteResponse{})
+	registry := newTestProviderRegistry()
+	registry.RegisterExecutor("kiro", exec)
+
+	svc := NewChatService(store, registry)
+	result := svc.HandleChat(
+		[]byte(`{"model":"coder-combo","messages":[]}`),
+		"coder-combo",
+		"req-policy-2",
+		&port.APIKeyPolicy{AllowedModels: []string{"kiro/model-c"}},
+	)
+
+	if result.StatusCode != 403 {
+		t.Fatalf("expected 403, got %d (%s)", result.StatusCode, result.Error)
+	}
+	if len(exec.calls) != 0 {
+		t.Fatalf("executor must not be called for forbidden combo, calls=%+v", exec.calls)
+	}
+}
+
+func TestHandleChat_ModelPolicyAllowsDirectAliasByAliasName(t *testing.T) {
+	store := newTestCredentialStore(&domain.AppConfig{
+		ProviderConnections: []domain.ProviderConnection{{
+			ID:       "conn-1",
+			Name:     "primary",
+			Provider: "kiro",
+			Weight:   100,
+			IsActive: true,
+		}},
+		ModelAliases: domain.AliasMap{
+			"sonnet": "kiro/claude-sonnet",
+		},
+	})
+	exec := newFakeExecutor(map[string]fakeExecuteResponse{
+		"conn-1|claude-sonnet": {Status: 200, Body: "data: [DONE]\n\n"},
+	})
+	registry := newTestProviderRegistry()
+	registry.RegisterExecutor("kiro", exec)
+
+	svc := NewChatService(store, registry)
+	result := svc.HandleChat(
+		[]byte(`{"model":"sonnet","messages":[]}`),
+		"sonnet",
+		"req-policy-3",
+		&port.APIKeyPolicy{AllowedModels: []string{"sonnet"}},
+	)
+
+	if result.StatusCode != 200 || result.Stream == nil {
+		t.Fatalf("expected alias policy success, got status=%d err=%q", result.StatusCode, result.Error)
+	}
+	result.Stream.Close()
+}
+
+func TestHandleChat_ConnectionPolicySkipsUnavailableComboMember(t *testing.T) {
+	store := newTestCredentialStore(&domain.AppConfig{
+		ProviderConnections: []domain.ProviderConnection{
+			{ID: "conn-kiro", Name: "kiro", Provider: "kiro", Weight: 100, IsActive: true},
+			{ID: "conn-openai", Name: "openai", Provider: "openai", Weight: 100, IsActive: true},
+		},
+		Combos: []domain.Combo{{
+			Name:   "mixed-combo",
+			Models: []string{"kiro/model-a", "openai/model-b"},
+		}},
+	})
+	kiroExec := newFakeExecutor(map[string]fakeExecuteResponse{})
+	openaiExec := newFakeExecutor(map[string]fakeExecuteResponse{
+		"conn-openai|model-b": {Status: 200, Body: "data: [DONE]\n\n"},
+	})
+	registry := newTestProviderRegistry()
+	registry.RegisterExecutor("kiro", kiroExec)
+	registry.RegisterExecutor("openai", openaiExec)
+
+	svc := NewChatService(store, registry)
+	result := svc.HandleChat(
+		[]byte(`{"model":"mixed-combo","messages":[]}`),
+		"mixed-combo",
+		"req-policy-4",
+		&port.APIKeyPolicy{AllowedConnectionIDs: []string{"conn-openai"}},
+	)
+
+	if result.StatusCode != 200 || result.Stream == nil {
+		t.Fatalf("expected fallback to allowed OpenAI connection, got status=%d err=%q", result.StatusCode, result.Error)
+	}
+	result.Stream.Close()
+	if len(kiroExec.calls) != 0 {
+		t.Fatalf("kiro executor should not run without allowed connection, calls=%+v", kiroExec.calls)
+	}
+	if len(openaiExec.calls) != 1 || openaiExec.calls[0].ConnectionID != "conn-openai" {
+		t.Fatalf("expected openai execution on conn-openai, calls=%+v", openaiExec.calls)
+	}
+}
+
+func TestHandleChat_DisallowedPinnedConnectionFallsThrough(t *testing.T) {
+	store := newTestCredentialStore(&domain.AppConfig{
+		ProviderConnections: []domain.ProviderConnection{
+			{ID: "conn-primary", Name: "primary", Provider: "kiro", Weight: 100, IsActive: true},
+			{ID: "conn-backup", Name: "backup", Provider: "kiro", Weight: 100, IsActive: true},
+		},
+		Combos: []domain.Combo{{
+			Name:   "pinned-combo",
+			Models: []string{"kiro/model-a@conn-primary", "kiro/model-b"},
+		}},
+	})
+	exec := newFakeExecutor(map[string]fakeExecuteResponse{
+		"conn-backup|model-b": {Status: 200, Body: "data: [DONE]\n\n"},
+	})
+	registry := newTestProviderRegistry()
+	registry.RegisterExecutor("kiro", exec)
+
+	svc := NewChatService(store, registry)
+	result := svc.HandleChat(
+		[]byte(`{"model":"pinned-combo","messages":[]}`),
+		"pinned-combo",
+		"req-policy-5",
+		&port.APIKeyPolicy{AllowedConnectionIDs: []string{"conn-backup"}},
+	)
+
+	// Disallowed pinned member is filtered out at route planning; combo falls through to model-b.
+	if result.StatusCode != 200 || result.Stream == nil {
+		t.Fatalf("expected fallback to model-b on conn-backup, got status=%d err=%q", result.StatusCode, result.Error)
+	}
+	result.Stream.Close()
+	if len(exec.calls) != 1 || exec.calls[0].Model != "model-b" {
+		t.Fatalf("expected only model-b execution, calls=%+v", exec.calls)
 	}
 }
 

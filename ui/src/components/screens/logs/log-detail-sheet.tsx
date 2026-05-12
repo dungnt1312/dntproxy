@@ -7,7 +7,14 @@ import {
   SheetTitle,
   SheetDescription,
 } from "@/components/ui/sheet";
-import { StatusBadge, formatDateTime, formatLatency } from "./helpers";
+import {
+  StatusBadge,
+  formatCompressionRatio,
+  formatDateTime,
+  formatLatency,
+  formatTokenCount,
+  getCompressionMetadata,
+} from "./helpers";
 import { PayloadViewer } from "./PayloadViewer";
 import type { LogEntry } from "@/types/logs";
 
@@ -18,6 +25,8 @@ export interface LogDetailSheetProps {
 }
 
 export function LogDetailSheet({ log, open, onOpenChange }: LogDetailSheetProps) {
+  const compression = log ? getCompressionMetadata(log) : null;
+
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="w-full sm:max-w-xl overflow-y-auto p-0">
@@ -62,7 +71,23 @@ export function LogDetailSheet({ log, open, onOpenChange }: LogDetailSheetProps)
                   {log.totalTokens != null && (
                     <div>
                       <span className="text-muted-foreground text-xs block mb-1">Tokens Usage</span>
-                      <span className="font-medium">{log.totalTokens.toLocaleString()} Total</span>
+                      <span className="font-medium">
+                        {formatTokenCount(log.inputTokens)} in / {formatTokenCount(log.outputTokens)} out
+                      </span>
+                      <span className="text-muted-foreground text-xs block">
+                        {formatTokenCount(log.totalTokens)} total
+                      </span>
+                    </div>
+                  )}
+                  {compression && (
+                    <div>
+                      <span className="text-muted-foreground text-xs block mb-1">Compact</span>
+                      <span className="font-medium">
+                        {formatCompressionRatio(compression)} saved
+                      </span>
+                      <span className="text-muted-foreground text-xs block">
+                        ~{formatTokenCount(compression.tokensSavedEstimate)} tokens
+                      </span>
                     </div>
                   )}
                   {(log.method || log.path) && (

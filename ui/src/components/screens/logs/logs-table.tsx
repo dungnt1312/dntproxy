@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, Clock, Zap, FileWarning } from "lucide-react";
+import { ChevronLeft, ChevronRight, Clock, FileWarning, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -12,7 +12,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { StatusBadge, formatDateTime, formatLatency } from "./helpers";
+import {
+  StatusBadge,
+  formatCompressionRatio,
+  formatDateTime,
+  formatLatency,
+  formatTokenCount,
+  getCompressionMetadata,
+} from "./helpers";
 import type { LogEntry } from "@/types/logs";
 
 export interface LogsTableProps {
@@ -81,58 +88,73 @@ export function LogsTable({
               <TableHead className="w-[140px]">Model</TableHead>
               <TableHead className="w-[140px] hidden lg:table-cell">Connection</TableHead>
               <TableHead className="min-w-[200px]">Path</TableHead>
+              <TableHead className="w-[92px]">In/Out</TableHead>
+              <TableHead className="w-[86px]">Compact</TableHead>
               <TableHead className="w-[80px]">Latency</TableHead>
               <TableHead className="w-[40px] hidden xl:table-cell"></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {displayedLogs.map((log) => (
-              <TableRow
-                key={log.id}
-                className="cursor-pointer hover:bg-muted/50 transition-colors"
-                onClick={() => onLogSelect(log.id)}
-              >
-                <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
-                  {formatDateTime(log.timestamp)}
-                </TableCell>
-                <TableCell>
-                  <Badge variant="outline" className="font-mono text-[10px]">
-                    {log.method || "—"}
-                  </Badge>
-                </TableCell>
-                <TableCell>
-                  <StatusBadge status={log.statusCode} level={log.level} />
-                </TableCell>
-                <TableCell className="text-xs">{log.provider || "—"}</TableCell>
-                <TableCell className="text-xs max-w-[140px] truncate" title={log.model || ""}>
-                  {log.model || "—"}
-                </TableCell>
-                <TableCell className="text-xs hidden lg:table-cell max-w-[140px] truncate" title={log.connectionName || ""}>
-                  {log.connectionName || "—"}
-                </TableCell>
-                <TableCell className="font-mono text-xs max-w-[200px] truncate" title={log.path || log.message}>
-                  {log.path || log.message || "—"}
-                </TableCell>
-                <TableCell className="text-xs">
-                  <div className="flex items-center gap-1">
-                    <Zap
-                      className={cn(
-                        "h-3 w-3",
-                        log.durationMs && log.durationMs > 3000
-                          ? "text-amber-500"
-                          : "text-muted-foreground"
-                      )}
-                    />
-                    {formatLatency(log.durationMs)}
-                  </div>
-                </TableCell>
-                <TableCell className="hidden xl:table-cell">
-                  {log.level === "ERROR" && (
-                    <FileWarning className="h-4 w-4 text-rose-500" />
-                  )}
-                </TableCell>
-              </TableRow>
-            ))}
+            {displayedLogs.map((log) => {
+              const compression = getCompressionMetadata(log);
+              return (
+                <TableRow
+                  key={log.id}
+                  className="cursor-pointer hover:bg-muted/50 transition-colors"
+                  onClick={() => onLogSelect(log.id)}
+                >
+                  <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+                    {formatDateTime(log.timestamp)}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="outline" className="font-mono text-[10px]">
+                      {log.method || "-"}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    <StatusBadge status={log.statusCode} level={log.level} />
+                  </TableCell>
+                  <TableCell className="text-xs">{log.provider || "-"}</TableCell>
+                  <TableCell className="text-xs max-w-[140px] truncate" title={log.model || ""}>
+                    {log.model || "-"}
+                  </TableCell>
+                  <TableCell className="text-xs hidden lg:table-cell max-w-[140px] truncate" title={log.connectionName || ""}>
+                    {log.connectionName || "-"}
+                  </TableCell>
+                  <TableCell className="font-mono text-xs max-w-[200px] truncate" title={log.path || log.message}>
+                    {log.path || log.message || "-"}
+                  </TableCell>
+                  <TableCell className="text-xs font-mono whitespace-nowrap">
+                    {formatTokenCount(log.inputTokens)} / {formatTokenCount(log.outputTokens)}
+                  </TableCell>
+                  <TableCell className="text-xs">
+                    {compression ? (
+                      <Badge variant="outline" className="font-mono text-[10px] text-emerald-700 border-emerald-200 bg-emerald-50 dark:text-emerald-300 dark:border-emerald-800 dark:bg-emerald-950/30">
+                        -{formatCompressionRatio(compression)}
+                      </Badge>
+                    ) : (
+                      <span className="text-muted-foreground">-</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-xs">
+                    <div className="flex items-center gap-1">
+                      <Zap
+                        className={cn(
+                          "h-3 w-3",
+                          log.durationMs && log.durationMs > 3000
+                            ? "text-amber-500"
+                            : "text-muted-foreground",
+                        )}
+                      />
+                      {formatLatency(log.durationMs)}
+                    </div>
+                  </TableCell>
+                  <TableCell className="hidden xl:table-cell">
+                    {log.level === "ERROR" && <FileWarning className="h-4 w-4 text-rose-500" />}
+                  </TableCell>
+                </TableRow>
+              );
+            })}
           </TableBody>
         </Table>
       </div>
@@ -142,7 +164,7 @@ export function LogsTable({
           <Separator />
           <div className="flex items-center justify-between px-4 py-3 shrink-0 bg-card">
             <p className="text-xs text-muted-foreground">
-              Showing {Math.min(startIdx + 1, total)}–{Math.min(endIdx, total)} of {total}
+              Showing {Math.min(startIdx + 1, total)}-{Math.min(endIdx, total)} of {total}
             </p>
             <div className="flex items-center gap-1">
               <Button

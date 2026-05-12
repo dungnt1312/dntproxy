@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Bot, Loader2, Send, Settings2, Terminal, Trash2, Zap } from "lucide-react";
 import { toast } from "sonner";
 
@@ -16,7 +16,8 @@ import { ModelSelector } from "./playground/model-selector";
 import { AttachmentInput } from "./playground/attachment-input";
 import { ChatView } from "./playground/chat-view";
 import { PlaygroundLogView } from "./playground/log-view";
-import { useChatStream } from "./playground/use-chat-stream";
+import { useChatQueue } from "./playground/use-chat-queue";
+import { usePlaygroundModelSelection } from "./playground/use-playground-model-selection";
 
 const DEFAULT_PARAMS: ChatParams = { temperature: 1, topP: 1, maxTokens: 4096, systemPrompt: "" };
 
@@ -25,14 +26,8 @@ export default function PlaygroundScreen() {
   const [connections, setConnections] = useState<Connection[]>([]);
   const [loadingModels, setLoadingModels] = useState(true);
 
-  const [selectedProvider, setSelectedProvider] = useState("");
-  const [selectedModel, setSelectedModel] = useState("");
-  const [selectedAccount, setSelectedAccount] = useState("auto");
-
-  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
-  const [sending, setSending] = useState(false);
   const [params, setParams] = useState<ChatParams>(DEFAULT_PARAMS);
 
   const [requestLogs, setRequestLogs] = useState<RequestLog[]>([]);
@@ -41,13 +36,19 @@ export default function PlaygroundScreen() {
   const [activeTab, setActiveTab] = useState("chat");
   const scrollAnchorRef = useRef<HTMLDivElement | null>(null);
 
-  const finalModelString = useMemo(() => {
-    if (!selectedProvider || !selectedModel) return "";
-    const base = `${selectedProvider}/${selectedModel}`;
-    return selectedAccount && selectedAccount !== "auto" ? `${base}@${selectedAccount}` : base;
-  }, [selectedProvider, selectedModel, selectedAccount]);
+  const {
+    selectedProvider,
+    selectedModel,
+    selectedAccount,
+    setSelectedModel,
+    setSelectedAccount,
+    finalModelString,
+    supportsImages,
+    initializeSelection,
+    handleProviderChange,
+  } = usePlaygroundModelSelection(models);
 
-  const { send, abort } = useChatStream(finalModelString, params, (log) => {
+  const { messages, sending, queuedCount, enqueueTurn, clearQueue } = useChatQueue((log) => {
     setRequestLogs((prev) => [log, ...prev].slice(0, 50));
   });
 
@@ -62,11 +63,7 @@ export default function PlaygroundScreen() {
         const availableModels = Array.isArray(modelsData) ? modelsData : [];
         setModels(availableModels);
         setConnections(Array.isArray(connectionsData) ? connectionsData.filter((c: Connection) => c.isActive) : []);
-        if (availableModels.length > 0) {
-          const first = availableModels[0];
-          setSelectedProvider(first.provider);
-          setSelectedModel(first.id.includes("/") ? first.id.split("/").slice(1).join("/") : first.id);
-        }
+        initializeSelection(availableModels);
       } catch {
         toast.error("Failed to load models and connections");
       } finally {
@@ -78,16 +75,30 @@ export default function PlaygroundScreen() {
 
   useEffect(() => {
     scrollAnchorRef.current?.scrollIntoView({ behavior: sending ? "auto" : "smooth" });
-  }, [messages.length, sending]);
+  }, [messages, sending]);
 
-  const handleSend = async () => {
-    await send(input, attachments, messages, setMessages, setSending, setInput, setAttachments);
+  const handleSend = () => {
+    const content = input.trim();
+    if ((!content && attachments.length === 0) || !finalModelString) return;
+    if (attachments.length > 0 && !supportsImages) {
+      toast.error("Selected model does not support image input");
+      return;
+    }
+
+    const userMessage: Message = {
+      id: crypto.randomUUID(),
+      role: "user",
+      content,
+      attachments: attachments.length > 0 ? [...attachments] : undefined,
+    };
+
+    setInput("");
+    setAttachments([]);
+    enqueueTurn(userMessage, finalModelString, params);
   };
 
   const handleClear = () => {
-    abort();
-    setSending(false);
-    setMessages([]);
+    clearQueue();
     setAttachments([]);
     setSelectedLogId(null);
   };
@@ -107,14 +118,14 @@ export default function PlaygroundScreen() {
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button variant="outline" size="icon" onClick={() => setShowParams(!showParams)} className={showParams ? "bg-accent" : ""}>
+                  <Button aria-label="Toggle parameters" variant="outline" size="icon" onClick={() => setShowParams(!showParams)} className={showParams ? "bg-accent" : ""}>
                     <Settings2 className="h-4 w-4" />
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent><p>Toggle parameters</p></TooltipContent>
               </Tooltip>
             </TooltipProvider>
-            <Button variant="outline" size="icon" onClick={handleClear}><Trash2 className="h-4 w-4" /></Button>
+            <Button aria-label="Clear chat" variant="outline" size="icon" onClick={handleClear}><Trash2 className="h-4 w-4" /></Button>
           </div>
         </div>
 
@@ -124,7 +135,7 @@ export default function PlaygroundScreen() {
           selectedProvider={selectedProvider}
           selectedModel={selectedModel}
           selectedAccount={selectedAccount}
-          onProviderChange={setSelectedProvider}
+          onProviderChange={handleProviderChange}
           onModelChange={setSelectedModel}
           onAccountChange={setSelectedAccount}
           disabled={loadingModels}
@@ -164,9 +175,19 @@ export default function PlaygroundScreen() {
 
           <div className="border-t bg-background/95 px-4 py-3 backdrop-blur-sm md:px-6">
             <div className="mx-auto max-w-3xl space-y-2">
-              <AttachmentInput attachments={attachments} onAttachmentsChange={setAttachments} disabled={sending || !finalModelString} />
+              <AttachmentInput attachments={attachments} onAttachmentsChange={setAttachments} disabled={!finalModelString || !supportsImages} />
+              {!supportsImages && (
+                <p className="text-xs text-muted-foreground">Image input is disabled for this model.</p>
+              )}
+              {(sending || queuedCount > 0) && (
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  {sending && <span>Streaming current request</span>}
+                  {queuedCount > 0 && <Badge variant="secondary">{queuedCount} queued</Badge>}
+                </div>
+              )}
               <div className="flex gap-2">
                 <Textarea
+                  aria-label="Chat message"
                   value={input}
                   onChange={(event) => setInput(event.target.value)}
                   onKeyDown={(event) => {
@@ -178,9 +199,9 @@ export default function PlaygroundScreen() {
                   placeholder="Type your message…"
                   className="min-h-[44px] resize-none rounded-xl"
                   rows={1}
-                  disabled={sending || !finalModelString}
+                  disabled={!finalModelString}
                 />
-                <Button onClick={handleSend} disabled={sending || (!input.trim() && attachments.length === 0) || !finalModelString} size="icon" className="h-[44px] w-[44px] shrink-0 rounded-xl">
+                <Button aria-label={sending ? "Queue message" : "Send message"} onClick={handleSend} disabled={(!input.trim() && attachments.length === 0) || !finalModelString} size="icon" className="h-[44px] w-[44px] shrink-0 rounded-xl">
                   {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                 </Button>
               </div>

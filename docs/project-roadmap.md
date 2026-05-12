@@ -52,6 +52,7 @@ This roadmap captures the progress and next milestones for `dntproxy`.
 ## Phase 8: Polish & Production (🚧 In Progress)
 - [x] **Chat Flow Hardening**: Enforce API key model allowlists per combo member, classify connection-policy fallback correctly, and harden Anthropic-compatible stream/body-limit behavior.
 - [x] **API Key Permission UI**: Add dashboard create/edit controls for connection and model allowlists on proxy API keys.
+- [x] **Models Page Redesign**: Improve registry scanning, alias creation, combo editing, partial-load errors, and remove legacy Models page drift.
 - [ ] **Graceful Shutdown**: Listen for SIGTERM / SIGINT and handle open persistent SSE connections gracefully.
 - [ ] **Cross-Platform Delivery**: Enhance build configuration (Makefiles, CI, Goreleaser).
 - [ ] **Dockerization**: Provide an official `Dockerfile` and `docker-compose.yml` pattern.

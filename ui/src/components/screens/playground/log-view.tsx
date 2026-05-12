@@ -65,8 +65,8 @@ export function PlaygroundLogView({ logs, selectedLogId, onSelectLog, onClear }:
         </Button>
       </div>
 
-      <div className="flex flex-1 min-h-0">
-        <ScrollArea className="flex-1 max-w-md border-r">
+      <div className="flex flex-1 min-h-0 flex-col md:flex-row">
+        <ScrollArea className="max-h-64 flex-1 border-b md:max-h-none md:max-w-md md:border-b-0 md:border-r">
           <div className="p-2 space-y-2">
             {logs.map((log) => (
               <button
@@ -111,6 +111,7 @@ export function PlaygroundLogView({ logs, selectedLogId, onSelectLog, onClear }:
                 <Button
                   variant="ghost"
                   size="sm"
+                  aria-label="Copy selected log"
                   onClick={() => copyToClipboard(JSON.stringify(selectedLog, null, 2))}
                   className="text-xs"
                 >
@@ -119,7 +120,7 @@ export function PlaygroundLogView({ logs, selectedLogId, onSelectLog, onClear }:
                 </Button>
               </div>
 
-              {selectedLog.totalTokens && (
+              {selectedLog.totalTokens !== undefined && (
                 <div className="grid grid-cols-3 gap-3">
                   <Card><CardContent className="pt-4 text-center"><p className="text-2xl font-bold">{selectedLog.inputTokens || "-"}</p><p className="text-xs text-muted-foreground">Input tokens</p></CardContent></Card>
                   <Card><CardContent className="pt-4 text-center"><p className="text-2xl font-bold">{selectedLog.outputTokens || "-"}</p><p className="text-xs text-muted-foreground">Output tokens</p></CardContent></Card>

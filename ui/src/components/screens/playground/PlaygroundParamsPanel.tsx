@@ -27,6 +27,7 @@ export function PlaygroundParamsPanel({
               Temperature: {params.temperature.toFixed(2)}
             </Label>
             <Slider
+              aria-label="Temperature"
               value={[params.temperature]}
               onValueChange={([v]) =>
                 setParams((p) => ({ ...p, temperature: v }))
@@ -40,6 +41,7 @@ export function PlaygroundParamsPanel({
           <div className="space-y-2">
             <Label className="text-xs">Top P: {params.topP.toFixed(2)}</Label>
             <Slider
+              aria-label="Top P"
               value={[params.topP]}
               onValueChange={([v]) => setParams((p) => ({ ...p, topP: v }))}
               min={0}
@@ -51,6 +53,7 @@ export function PlaygroundParamsPanel({
           <div className="space-y-2">
             <Label className="text-xs">Max Tokens</Label>
             <input
+              aria-label="Max tokens"
               type="number"
               value={params.maxTokens}
               onChange={(e) =>
@@ -85,8 +88,9 @@ export function PlaygroundParamsPanel({
             <Shield className="h-3 w-3" />
             System Prompt
           </Label>
-          <Textarea
-            value={params.systemPrompt}
+            <Textarea
+              aria-label="System prompt"
+              value={params.systemPrompt}
             onChange={(e) =>
               setParams((p) => ({ ...p, systemPrompt: e.target.value }))
             }

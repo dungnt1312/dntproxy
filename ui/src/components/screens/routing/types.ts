@@ -1,11 +1,21 @@
 export interface UiModel {
   id: string;
   name: string;
+  modelId?: string;
   displayName?: string;
   provider: string;
+  connectionId?: string;
+  connectionName?: string;
   isActive?: boolean;
   models?: string[];
   connections?: Array<{ id: string; name: string; provider: string }>;
+}
+
+export interface RoutingLoadErrors {
+  models?: string;
+  aliases?: string;
+  combos?: string;
+  connections?: string;
 }
 
 export type AliasMap = Record<string, string>;

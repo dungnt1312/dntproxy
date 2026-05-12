@@ -9,6 +9,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
+import { buildPlaygroundModelId, getSelectableModelValue } from './stream-utils'
 
 interface Model {
   id: string
@@ -88,37 +89,22 @@ export function ModelSelector({
 
   // Build final model string for API
   const finalModelString = useMemo(() => {
-    if (!selectedProvider || !selectedModel) return ''
-    
-    // Combo and alias don't need provider prefix
-    if (selectedProvider === 'combo' || selectedProvider === 'alias') {
-      return selectedModel
-    }
-    
-    const base = `${selectedProvider}/${selectedModel}`
-    if (selectedAccount && selectedAccount !== 'auto') {
-      return `${base}@${selectedAccount}`
-    }
-    return base
+    return buildPlaygroundModelId(selectedProvider, selectedModel, selectedAccount)
   }, [selectedProvider, selectedModel, selectedAccount])
 
   return (
     <div className="space-y-4">
       {/* Compact horizontal flow */}
-      <div className="flex items-center gap-2 flex-wrap">
+      <div className="grid gap-2 md:flex md:flex-wrap md:items-center">
         {/* Provider */}
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground font-medium">Provider:</span>
+        <div className="grid gap-1 md:flex md:items-center md:gap-2">
+          <span id="playground-provider-label" className="text-xs text-muted-foreground font-medium">Provider</span>
           <Select 
             value={selectedProvider} 
-            onValueChange={(val) => {
-              onProviderChange(val)
-              onModelChange('')
-              onAccountChange('auto')
-            }}
+            onValueChange={onProviderChange}
             disabled={disabled}
           >
-            <SelectTrigger className="h-8 w-[140px]">
+            <SelectTrigger aria-labelledby="playground-provider-label" className="h-8 w-full md:w-[140px]">
               <SelectValue placeholder="Select..." />
             </SelectTrigger>
             <SelectContent>
@@ -135,11 +121,11 @@ export function ModelSelector({
 
         {selectedProvider && (
           <>
-            <ChevronRight className="h-4 w-4 text-muted-foreground" />
+            <ChevronRight className="hidden h-4 w-4 text-muted-foreground md:block" />
             
             {/* Model */}
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground font-medium">Model:</span>
+            <div className="grid gap-1 md:flex md:items-center md:gap-2">
+              <span id="playground-model-label" className="text-xs text-muted-foreground font-medium">Model</span>
               <Select 
                 value={selectedModel} 
                 onValueChange={(val) => {
@@ -147,15 +133,13 @@ export function ModelSelector({
                 }}
                 disabled={disabled}
               >
-                <SelectTrigger className="h-8 w-[200px]">
+                <SelectTrigger aria-labelledby="playground-model-label" className="h-8 w-full md:w-[240px]">
                   <SelectValue placeholder="Select model..." />
                 </SelectTrigger>
                 <SelectContent>
                   {availableModels.map(m => {
                     // Strip provider prefix for value to match selectedModel state
-                    const modelValue = m.id.includes('/') 
-                      ? m.id.split('/').slice(1).join('/')
-                      : m.id
+                    const modelValue = getSelectableModelValue(m)
                     return (
                       <SelectItem key={m.id} value={modelValue}>
                         <div className="flex items-center gap-2">
@@ -173,20 +157,20 @@ export function ModelSelector({
 
         {selectedProvider && selectedModel && selectedProvider !== 'combo' && selectedProvider !== 'alias' && (
           <>
-            <ChevronRight className="h-4 w-4 text-muted-foreground" />
+            <ChevronRight className="hidden h-4 w-4 text-muted-foreground md:block" />
             
             {/* Account */}
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground font-medium">Account:</span>
+            <div className="grid gap-1 md:flex md:items-center md:gap-2">
+              <span id="playground-account-label" className="text-xs text-muted-foreground font-medium">Account</span>
               <Select 
                 value={selectedAccount} 
                 onValueChange={onAccountChange}
                 disabled={disabled}
               >
                 <SelectTrigger className={cn(
-                  "h-8 w-[180px]",
+                  "h-8 w-full md:w-[180px]",
                   selectedAccount === 'auto' && "text-muted-foreground"
-                )}>
+                )} aria-labelledby="playground-account-label">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>

@@ -19,6 +19,8 @@ interface AttachmentInputProps {
 }
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+const MAX_TOTAL_SIZE = 15 * 1024 * 1024; // 15MB
+const MAX_ATTACHMENTS = 4;
 const SUPPORTED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
 
 export function AttachmentInput({
@@ -33,10 +35,21 @@ export function AttachmentInput({
     async (files: FileList | File[]) => {
       const fileArray = Array.from(files);
       const newAttachments: Attachment[] = [];
+      let nextTotalSize = attachments.reduce((total, attachment) => total + attachment.size, 0);
 
       for (const file of fileArray) {
+        if (attachments.length + newAttachments.length >= MAX_ATTACHMENTS) {
+          toast.error(`Maximum ${MAX_ATTACHMENTS} images per request`);
+          break;
+        }
+
         if (file.size > MAX_FILE_SIZE) {
           toast.error(`File ${file.name} exceeds 10MB limit`);
+          continue;
+        }
+
+        if (nextTotalSize + file.size > MAX_TOTAL_SIZE) {
+          toast.error("Images exceed 15MB total limit");
           continue;
         }
 
@@ -55,6 +68,7 @@ export function AttachmentInput({
             dataUrl,
             mimeType: file.type,
           });
+          nextTotalSize += file.size;
         } catch (error) {
           toast.error(`Failed to read ${file.name}`);
         }
@@ -169,7 +183,8 @@ export function AttachmentInput({
               <Button
                 variant="destructive"
                 size="icon"
-                className="absolute top-1 right-1 h-5 w-5 opacity-0 group-hover:opacity-100 transition-opacity"
+                aria-label={`Remove ${attachment.name}`}
+                className="absolute top-1 right-1 h-5 w-5 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100"
                 onClick={() => removeAttachment(attachment.id)}
               >
                 <X className="h-3 w-3" />

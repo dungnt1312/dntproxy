@@ -188,18 +188,29 @@ function toComboPayload(data: Record<string, any>) {
 
 function mapModel(go: any) {
   const canonicalId = String(go.fullModel || go.id || "");
-  const rawModelId = String(go.modelId || go.model || go.id || "");
+  const rawModelId = String(
+    go.modelId || go.model || stripProviderPrefix(canonicalId),
+  );
+  const displayName = String(
+    go.displayName || go.name || rawModelId || canonicalId || "Unnamed model",
+  );
 
   return {
     ...go,
     id: canonicalId || rawModelId,
     modelId: rawModelId || canonicalId,
-    displayName: String(go.displayName || go.name || rawModelId || canonicalId),
+    name: displayName,
+    displayName,
     provider: String(go.provider || "unknown"),
     connectionId: String(go.connectionId || ""),
     connectionName: String(go.connectionName || ""),
     isActive: typeof go.isActive === "boolean" ? go.isActive : true,
   };
+}
+
+function stripProviderPrefix(modelId: string) {
+  const slashIndex = modelId.indexOf("/");
+  return slashIndex === -1 ? modelId : modelId.slice(slashIndex + 1);
 }
 
 function mapSettings(go: any) {

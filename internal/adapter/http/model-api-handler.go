@@ -5,6 +5,7 @@ import (
 
 	"github.com/dungnt/dntproxy/internal/domain"
 	"github.com/dungnt/dntproxy/internal/port"
+	"github.com/dungnt/dntproxy/internal/service"
 	"github.com/gin-gonic/gin"
 )
 
@@ -13,6 +14,7 @@ import (
 func apiListModels(store port.CredentialStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		providerFilter := c.Query("provider")
+		policy := extractAPIKeyPolicy(c)
 		var allModels []gin.H
 
 		cfg, err := store.Load()
@@ -23,12 +25,16 @@ func apiListModels(store port.CredentialStore) gin.HandlerFunc {
 
 		if cfg != nil {
 			seen := make(map[string]bool)
+			reachableModels := make(map[string]bool)
 			// Track which connections each model is available on
 			modelConnections := make(map[string][]gin.H)
 
 			// Build from active connections' SupportedModels
 			for _, conn := range cfg.ProviderConnections {
 				if !conn.IsActive {
+					continue
+				}
+				if !service.ConnectionAllowed(conn.ID, policy) {
 					continue
 				}
 				if providerFilter != "" && conn.Provider != providerFilter {
@@ -45,6 +51,12 @@ func apiListModels(store port.CredentialStore) gin.HandlerFunc {
 					// No restriction — add all registry models for this provider
 					if cfg.ModelRegistry != nil {
 						for key, m := range cfg.ModelRegistry.Models {
+							if m.Provider == conn.Provider && m.IsActive {
+								reachableModels[key] = true
+							}
+							if !service.ModelAllowedByPolicy(key, policy) {
+								continue
+							}
 							if m.Provider == conn.Provider && m.IsActive && !seen[key] {
 								seen[key] = true
 								modelConnections[key] = []gin.H{connInfo}
@@ -67,6 +79,10 @@ func apiListModels(store port.CredentialStore) gin.HandlerFunc {
 				} else {
 					for _, modelID := range conn.SupportedModels {
 						key := conn.Provider + "/" + modelID
+						reachableModels[key] = true
+						if !service.ModelAllowedByPolicy(key, policy) {
+							continue
+						}
 						entry := gin.H{
 							"id":       key,
 							"name":     modelID,
@@ -102,7 +118,11 @@ func apiListModels(store port.CredentialStore) gin.HandlerFunc {
 					if !m.IsActive {
 						continue
 					}
+					reachableModels[key] = true
 					if providerFilter != "" && m.Provider != providerFilter {
+						continue
+					}
+					if !service.ModelAllowedByPolicy(key, policy) {
 						continue
 					}
 					if !seen[key] {
@@ -132,6 +152,9 @@ func apiListModels(store port.CredentialStore) gin.HandlerFunc {
 
 			// Add aliases
 			for alias, model := range cfg.ModelAliases {
+				if !aliasAllowedByPolicy(alias, model, reachableModels, policy) {
+					continue
+				}
 				allModels = append(allModels, gin.H{
 					"id":       alias,
 					"name":     alias + " → " + model,
@@ -142,6 +165,9 @@ func apiListModels(store port.CredentialStore) gin.HandlerFunc {
 
 			// Add combos
 			for _, combo := range cfg.Combos {
+				if !comboAllowedByPolicy(combo.Models, combo.Name, reachableModels, policy) {
+					continue
+				}
 				allModels = append(allModels, gin.H{
 					"id":       combo.Name,
 					"name":     combo.Name,
@@ -153,6 +179,55 @@ func apiListModels(store port.CredentialStore) gin.HandlerFunc {
 
 		c.JSON(200, allModels)
 	}
+}
+
+func aliasAllowedByPolicy(alias string, target string, directModels map[string]bool, policy *port.APIKeyPolicy) bool {
+	if policy == nil {
+		return true
+	}
+	if len(policy.AllowedConnectionIDs) > 0 && !directModels[service.StripConnectionPin(service.NormalizeModelPolicyString(target))] {
+		return false
+	}
+	if len(policy.AllowedModels) > 0 {
+		for _, allowed := range policy.AllowedModels {
+			if allowed == alias || service.ModelPolicyMatch(target, allowed) {
+				return true
+			}
+		}
+		return false
+	}
+	return true
+}
+
+func comboAllowedByPolicy(models []string, comboName string, directModels map[string]bool, policy *port.APIKeyPolicy) bool {
+	if policy == nil {
+		return true
+	}
+	for _, allowed := range policy.AllowedModels {
+		if allowed == comboName {
+			if len(policy.AllowedConnectionIDs) == 0 {
+				return true
+			}
+			return comboHasReachableMember(models, directModels)
+		}
+	}
+	for _, model := range models {
+		normalized := service.NormalizeModelPolicyString(model)
+		if directModels[service.StripConnectionPin(normalized)] && service.ModelAllowedByPolicy(normalized, policy) {
+			return true
+		}
+	}
+	return false
+}
+
+func comboHasReachableMember(models []string, directModels map[string]bool) bool {
+	for _, model := range models {
+		normalized := service.NormalizeModelPolicyString(model)
+		if directModels[service.StripConnectionPin(normalized)] {
+			return true
+		}
+	}
+	return false
 }
 
 // === Model Registry Management ===

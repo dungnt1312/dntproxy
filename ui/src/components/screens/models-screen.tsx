@@ -9,7 +9,8 @@ import LogsViewerModal, { LogFilter } from "../connections/LogsViewerModal";
 import ModelsTab from "./routing/models-tab";
 import AliasesTab from "./routing/aliases-tab";
 import CombosTab from "./routing/combos-tab";
-import { UiModel, AliasMap, ComboData, ConnectionOption } from "./routing/types";
+import { UiModel, AliasMap, ComboData, ConnectionOption, RoutingLoadErrors } from "./routing/types";
+import { RoutingErrorState } from "./routing/routing-error-state";
 
 const containerVariants = {
   hidden: { opacity: 0 },
@@ -27,6 +28,7 @@ export default function ModelsScreen() {
   const [combos, setCombos] = useState<ComboData[]>([]);
   const [connections, setConnections] = useState<ConnectionOption[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadErrors, setLoadErrors] = useState<RoutingLoadErrors>({});
 
   const [logModal, setLogModal] = useState<{ isOpen: boolean; title: string; filter: LogFilter }>({ 
     isOpen: false, 
@@ -36,23 +38,48 @@ export default function ModelsScreen() {
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
-    try {
-      const [modelsData, aliasesData, combosData, connectionsData] = await Promise.all([
-        goApi.getModels().catch(() => []),
-        goApi.getAliases().catch(() => ({})),
-        goApi.getCombos().catch(() => []),
-        goApi.getConnections().catch(() => []),
-      ]);
+    const [modelsResult, aliasesResult, combosResult, connectionsResult] = await Promise.allSettled([
+      goApi.getModels(),
+      goApi.getAliases(),
+      goApi.getCombos(),
+      goApi.getConnections(),
+    ]);
 
-      const validModels = Array.isArray(modelsData) ? modelsData : [];
-      setModels(validModels);
-      setAliases(aliasesData || {});
-      setCombos(Array.isArray(combosData) ? combosData : []);
-      setConnections(Array.isArray(connectionsData) ? connectionsData : []);
-    } catch {
-      toast.error("Failed to load models data");
-    } finally {
-      setLoading(false);
+    const nextErrors: RoutingLoadErrors = {};
+
+    if (modelsResult.status === "fulfilled" && Array.isArray(modelsResult.value)) {
+      setModels(modelsResult.value);
+    } else {
+      setModels([]);
+      nextErrors.models = "Models unavailable.";
+    }
+
+    if (aliasesResult.status === "fulfilled") {
+      setAliases(aliasesResult.value || {});
+    } else {
+      setAliases({});
+      nextErrors.aliases = "Aliases unavailable.";
+    }
+
+    if (combosResult.status === "fulfilled" && Array.isArray(combosResult.value)) {
+      setCombos(combosResult.value);
+    } else {
+      setCombos([]);
+      nextErrors.combos = "Combos unavailable.";
+    }
+
+    if (connectionsResult.status === "fulfilled" && Array.isArray(connectionsResult.value)) {
+      setConnections(connectionsResult.value);
+    } else {
+      setConnections([]);
+      nextErrors.connections = "Connections unavailable.";
+    }
+
+    setLoadErrors(nextErrors);
+    setLoading(false);
+
+    if (Object.keys(nextErrors).length === 4) {
+      toast.error("Failed to load routing data");
     }
   }, []);
 
@@ -105,6 +132,7 @@ export default function ModelsScreen() {
 
       {/* Tabs */}
       <motion.div variants={itemVariants}>
+        <RoutingErrorState errors={Object.values(loadErrors)} onRetry={fetchAll} />
         <Tabs defaultValue="registry" className="w-full space-y-5">
           <TabsList className="bg-muted/50 p-1">
             <TabsTrigger value="registry" className="rounded-sm px-4 gap-1.5">
@@ -137,11 +165,24 @@ export default function ModelsScreen() {
           </TabsList>
 
           <TabsContent value="registry" className="space-y-4 outline-none">
-            <ModelsTab models={models} loading={loading} onOpenLogModal={handleOpenLogModalForModel} />
+            <ModelsTab
+              models={models}
+              loading={loading}
+              hasLoadError={!!loadErrors.models}
+              onOpenLogModal={handleOpenLogModalForModel}
+            />
           </TabsContent>
 
           <TabsContent value="aliases" className="space-y-4 outline-none">
-            <AliasesTab aliases={aliases} loading={loading} onRefresh={fetchAll} onOpenLogModal={handleOpenLogModalForAlias} />
+            <AliasesTab
+              aliases={aliases}
+              models={models}
+              connections={connections}
+              loading={loading}
+              hasLoadError={!!loadErrors.aliases}
+              onRefresh={fetchAll}
+              onOpenLogModal={handleOpenLogModalForAlias}
+            />
           </TabsContent>
 
           <TabsContent value="combos" className="outline-none">
@@ -150,6 +191,7 @@ export default function ModelsScreen() {
               connections={connections} 
               models={models} 
               loading={loading}
+              hasLoadError={!!loadErrors.combos}
               onRefresh={fetchAll}
               onOpenLogModal={handleOpenLogModalForCombo} 
             />

@@ -9,6 +9,7 @@ export type Model = {
   id: string;
   displayName: string;
   provider: string;
+  capabilities?: string[];
 };
 
 export type Connection = {
@@ -33,6 +34,7 @@ export type Message = {
   role: "user" | "assistant" | "system";
   content: string;
   attachments?: Attachment[];
+  status?: "queued" | "sending" | "done" | "error";
 };
 
 export type RequestLog = {

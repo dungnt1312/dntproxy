@@ -2,6 +2,11 @@
 
 ## 2026-05-12
 
+- Redesigned Models page registry into a searchable table/mobile list with clearer provider, model ID, connection test, status, and log actions.
+- Reworked alias creation into a dialog with registry model picker and validation.
+- Reworked combo creation/editing into a clearer step builder with visible reorder/delete controls and pinned-account display.
+- Added partial-load error handling for routing data so API failures no longer look like empty model, alias, or combo states.
+- Removed unused legacy `ui/src/pages/models.tsx` implementation.
 - Added dashboard API key permission management for connection and model allowlists.
 - Added API client support for `allowedConnectionIds`, `allowedModels`, and key updates.
 - Added backend API key handler validation/deduplication for allowed connection IDs.

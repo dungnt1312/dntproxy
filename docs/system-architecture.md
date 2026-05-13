@@ -54,7 +54,7 @@ The system supports 7 providers with an extensible architecture:
 The core lifecycle of an incoming chat completion request:
 1. **Frontend Proxy**: Request hits the OpenAI-compatible HTTP router exposed by the Gin adapter inside `/v1/chat/completions`.
 2. **Model Resolver**: Identifies if the requested model is a direct provider model (`kr/claude`, `oai/gpt-4`, `glm/glm-5`), an `alias` (short-name mapping), or a `combo` (model rotation strategy).
-3. **Account Strategy**: `account-selector.go` locates valid provider accounts associated with the model. It references priority ranks and tests for existing active cooldowns.
+3. **Account Strategy**: `account-selector.go` locates valid provider accounts associated with the model, filters cooldown/model locks, then applies the configured connection strategy (`weighted-random`, `priority-fallback`, or `round-robin`).
 4. **Token Refresh**: If credentials need refresh, auto-refresh is triggered before request execution.
 5. **Execution Translation**: Adapter layer morphs the OpenAI JSON into provider-specific structure (EventStream for Kiro, standard Chat API for others).
 6. **Event Streaming**: 
@@ -126,7 +126,7 @@ The core lifecycle of an incoming chat completion request:
 │  handleSingleModel()             │  │                                       │
 │  ┌─────────────────────────────┐  │  │  ┌─────────────────────────────────┐  │
 │  │ ModelResolver.Resolve()     │  │  │  │ 1. GetActiveConnections()     │  │
-│  │ └── provider + model        │  │  │  │    (sorted by priority ASC)   │  │
+│  │ └── provider + model        │  │  │  │    (active provider accounts) │  │
 │  └─────────────┬───────────────┘  │  │  └─────────────┬─────────────────┘  │
 │                │                  │  │                │                      │
 │                ▼                  │  │                ▼                      │
@@ -240,6 +240,11 @@ FALLBACK strategy:     ROUND-ROBIN strategy:
 │ A → B → C       │    │ C(start) → A → B│
 └─────────────────┘    └─────────────────┘
 ```
+
+### Connection Strategies
+- `weighted-random`: default, selects an available connection using `weight` as probability.
+- `priority-fallback`: selects the lowest `priority` value first; equal priority keeps config order after weight tie-break.
+- `round-robin`: rotates available connections per provider/model/allowlist key; pinned `model@connectionId` bypasses strategy.
 
 ## Resilience Patterns
 - **Exponential Backoff Strategy**: When an API key faces a failure (rate limit, suspension), it is locked into a cooldown tier. (1s → 2s → 4s ... max 2m) ensuring automatic degradation without excessive retries.

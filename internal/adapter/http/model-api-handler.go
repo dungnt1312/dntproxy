@@ -45,6 +45,7 @@ func apiListModels(store port.CredentialStore) gin.HandlerFunc {
 					"id":       conn.ID,
 					"name":     conn.Name,
 					"provider": conn.Provider,
+					"isActive": conn.IsActive,
 				}
 
 				if len(conn.SupportedModels) == 0 {

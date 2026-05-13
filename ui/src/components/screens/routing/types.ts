@@ -8,7 +8,7 @@ export interface UiModel {
   connectionName?: string;
   isActive?: boolean;
   models?: string[];
-  connections?: Array<{ id: string; name: string; provider: string }>;
+  connections?: Array<{ id: string; name: string; provider: string; isActive?: boolean }>;
 }
 
 export interface RoutingLoadErrors {
@@ -33,4 +33,5 @@ export interface ConnectionOption {
   id: string;
   name: string;
   provider: string;
+  isActive?: boolean;
 }

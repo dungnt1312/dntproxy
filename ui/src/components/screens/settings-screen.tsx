@@ -29,6 +29,7 @@ interface SettingsData {
   serverPort: number;
   apiKeyAuthEnabled: boolean;
   defaultRoutingStrategy: string;
+  connectionStrategy: string;
   compressionEnabled: boolean;
   compressionMinLength: number;
   compressionLogSavings: boolean;
@@ -40,6 +41,7 @@ const DEFAULT_SETTINGS: SettingsData = {
   serverPort: 20199,
   apiKeyAuthEnabled: true,
   defaultRoutingStrategy: "fallback",
+  connectionStrategy: "weighted-random",
   compressionEnabled: false,
   compressionMinLength: 500,
   compressionLogSavings: true,
@@ -103,6 +105,7 @@ export default function SettingsScreen() {
         serverPort: settings.serverPort,
         apiKeyAuthEnabled: settings.apiKeyAuthEnabled,
         defaultRoutingStrategy: settings.defaultRoutingStrategy,
+        connectionStrategy: settings.connectionStrategy,
         compressionEnabled: settings.compressionEnabled,
         compressionMinLength: settings.compressionMinLength,
         compressionLogSavings: settings.compressionLogSavings,
@@ -216,6 +219,29 @@ export default function SettingsScreen() {
                 provider, fall back to the next on failure.{" "}
                 <span className="font-medium">Round-Robin:</span> Rotate the
                 starting model across combo requests.
+              </p>
+            </div>
+
+            {/* Connection Strategy */}
+            <div className="space-y-2">
+              <Label htmlFor="connectionStrategy">Connection Strategy</Label>
+              <Select
+                value={settings.connectionStrategy}
+                onValueChange={(value) =>
+                  updateField("connectionStrategy", value)
+                }
+              >
+                <SelectTrigger id="connectionStrategy" className="w-full max-w-xs">
+                  <SelectValue placeholder="Select connection strategy" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="weighted-random">Weighted Random</SelectItem>
+                  <SelectItem value="priority-fallback">Primary First</SelectItem>
+                  <SelectItem value="round-robin">Round-Robin</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Controls account selection after a provider/model route is chosen.
               </p>
             </div>
           </CardContent>

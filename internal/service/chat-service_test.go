@@ -378,6 +378,64 @@ func TestHandleChat_DisallowedPinnedConnectionFallsThrough(t *testing.T) {
 	}
 }
 
+func TestHandleChat_ConnectionStrategyPriorityFallback(t *testing.T) {
+	store := newTestCredentialStore(&domain.AppConfig{
+		ProviderConnections: []domain.ProviderConnection{
+			{ID: "conn-backup", Name: "backup", Provider: "kiro", Priority: 20, Weight: 100, IsActive: true},
+			{ID: "conn-primary", Name: "primary", Provider: "kiro", Priority: 1, Weight: 1, IsActive: true},
+		},
+		Settings: domain.Settings{ConnectionStrategy: ConnectionStrategyPriorityFallback},
+	})
+	exec := newFakeExecutor(map[string]fakeExecuteResponse{
+		"conn-primary|model-a": {Status: 200, Body: "data: [DONE]\n\n"},
+	})
+	registry := newTestProviderRegistry()
+	registry.RegisterExecutor("kiro", exec)
+
+	svc := NewChatService(store, registry)
+	result := svc.HandleChat([]byte(`{"model":"kiro/model-a","messages":[]}`), "kiro/model-a", "req-priority", nil)
+
+	if result.StatusCode != 200 || result.Stream == nil {
+		t.Fatalf("expected priority fallback success, got status=%d err=%q", result.StatusCode, result.Error)
+	}
+	result.Stream.Close()
+	if len(exec.calls) != 1 || exec.calls[0].ConnectionID != "conn-primary" {
+		t.Fatalf("expected primary priority connection, calls=%+v", exec.calls)
+	}
+}
+
+func TestHandleChat_ConnectionStrategyRoundRobin(t *testing.T) {
+	store := newTestCredentialStore(&domain.AppConfig{
+		ProviderConnections: []domain.ProviderConnection{
+			{ID: "conn-a", Name: "a", Provider: "kiro", Priority: 0, Weight: 100, IsActive: true},
+			{ID: "conn-b", Name: "b", Provider: "kiro", Priority: 0, Weight: 100, IsActive: true},
+		},
+		Settings: domain.Settings{ConnectionStrategy: ConnectionStrategyRoundRobin},
+	})
+	exec := newFakeExecutor(map[string]fakeExecuteResponse{
+		"conn-a|model-a": {Status: 200, Body: "data: [DONE]\n\n"},
+		"conn-b|model-a": {Status: 200, Body: "data: [DONE]\n\n"},
+	})
+	registry := newTestProviderRegistry()
+	registry.RegisterExecutor("kiro", exec)
+
+	svc := NewChatService(store, registry)
+	for i := 0; i < 2; i++ {
+		result := svc.HandleChat([]byte(`{"model":"kiro/model-a","messages":[]}`), "kiro/model-a", "req-rr", nil)
+		if result.StatusCode != 200 || result.Stream == nil {
+			t.Fatalf("request %d expected round-robin success, got status=%d err=%q", i+1, result.StatusCode, result.Error)
+		}
+		result.Stream.Close()
+	}
+
+	if len(exec.calls) != 2 {
+		t.Fatalf("expected two calls, got %+v", exec.calls)
+	}
+	if exec.calls[0].ConnectionID != "conn-a" || exec.calls[1].ConnectionID != "conn-b" {
+		t.Fatalf("expected conn-a then conn-b, calls=%+v", exec.calls)
+	}
+}
+
 func TestWeightedRandomSelect_DistributionByWeight(t *testing.T) {
 	connections := []domain.ProviderConnection{
 		{ID: "heavy", Weight: 900},

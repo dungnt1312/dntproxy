@@ -18,9 +18,10 @@ import {
 } from "@/components/ui/alert-dialog";
 import type { ComboData, ConnectionOption, UiModel } from "./types";
 import { ComboStepBuilder, type ComboStep } from "./combo-step-builder";
+import { ComboTargetChain } from "./combo-target-chain";
 import { RoutingEmptyState } from "./routing-empty-state";
 import { RoutingToolbar } from "./routing-toolbar";
-import { getTargetDisplay, parseRoutingTarget, providerPrefixToProvider } from "./routing-format";
+import { parseRoutingTarget, providerPrefixToProvider, providerToRoutingPrefix } from "./routing-format";
 
 function inferProvidersFromModels(models: string[]): string[] {
   return Array.from(new Set(models.map((model) => parseRoutingTarget(model).provider.toUpperCase()).filter(Boolean)));
@@ -39,7 +40,7 @@ function parseModelString(modelStr: string, order: number): ComboStep {
 }
 
 function serializeStep(step: ComboStep): string {
-  const prefix = step.provider === "kiro" ? "kr" : step.provider === "openai" ? "oai" : step.provider;
+  const prefix = providerToRoutingPrefix(step.provider);
   const base = `${prefix}/${step.model}`;
   return step.accountMode === "pinned" && step.accountId ? `${base}@${step.accountId}` : base;
 }
@@ -71,6 +72,7 @@ export default function CombosTab({
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [search, setSearch] = useState("");
+  const [confirmCloseOpen, setConfirmCloseOpen] = useState(false);
   const q = search.trim().toLowerCase();
 
   const filteredCombos = useMemo(() => {
@@ -78,6 +80,19 @@ export default function CombosTab({
     if (!q) return sorted;
     return sorted.filter((combo) => `${combo.name} ${combo.models.join(" ")}`.toLowerCase().includes(q));
   }, [combos, q]);
+  const serializedFormSteps = useMemo(
+    () => [...formSteps].sort((a, b) => a.order - b.order).map(serializeStep),
+    [formSteps],
+  );
+  const originalSteps = selectedCombo?.models || [];
+  const isDirty =
+    dialogOpen &&
+    (formName !== (selectedCombo?.name || "") ||
+      serializedFormSteps.join("\n") !== originalSteps.join("\n"));
+  const duplicateName = Boolean(
+    formName.trim() &&
+      combos.some((combo) => combo.name === formName.trim() && combo.id !== selectedCombo?.id),
+  );
 
   function openCreateDialog() {
     setSelectedCombo(null);
@@ -93,16 +108,30 @@ export default function CombosTab({
     setDialogOpen(true);
   }
 
+  function requestDialogOpenChange(open: boolean) {
+    if (!open && isDirty && !saving) {
+      setConfirmCloseOpen(true);
+      return;
+    }
+    setDialogOpen(open);
+  }
+
+  function closeDialogDiscardingChanges() {
+    setConfirmCloseOpen(false);
+    setDialogOpen(false);
+  }
+
   async function handleSave() {
     const name = formName.trim();
     if (!name) return toast.error("Combo name is required");
     if (formSteps.length === 0) return toast.error("At least one step is required");
+    if (duplicateName) return toast.error("Combo name already exists");
 
     setSaving(true);
     try {
       const payload = {
         name,
-        models: [...formSteps].sort((a, b) => a.order - b.order).map(serializeStep),
+        models: serializedFormSteps,
         setModels: true,
       };
       if (selectedCombo) {
@@ -154,7 +183,7 @@ export default function CombosTab({
       {loading ? (
         <div className="flex items-center justify-center rounded-lg border bg-card p-16 text-sm text-muted-foreground">
           <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-          Loading combos...
+          Loading combos…
         </div>
       ) : filteredCombos.length === 0 ? (
         <RoutingEmptyState
@@ -179,13 +208,7 @@ export default function CombosTab({
                     <GitBranch className="h-4 w-4 text-muted-foreground" />
                     <p className="truncate text-sm font-semibold">{combo.name}</p>
                   </div>
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    {combo.models.map((model, index) => (
-                      <code key={`${model}-${index}`} className="max-w-full truncate rounded bg-muted px-2 py-1 font-mono text-xs text-muted-foreground" title={model}>
-                        {index + 1}. {getTargetDisplay(model, models, connections)}
-                      </code>
-                    ))}
-                  </div>
+                  <ComboTargetChain targets={combo.models} models={models} connections={connections} />
                 </div>
                 <div className="flex shrink-0 gap-1">
                   <Button variant="ghost" size="icon" onClick={() => onOpenLogModal(combo.name, inferProvidersFromModels(combo.models))} aria-label={`View logs for combo ${combo.name}`}>
@@ -204,28 +227,62 @@ export default function CombosTab({
         </div>
       )}
 
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
-          <DialogHeader>
+      <Dialog open={dialogOpen} onOpenChange={requestDialogOpenChange}>
+        <DialogContent className="flex max-h-[90vh] flex-col overflow-hidden sm:max-w-3xl">
+          <DialogHeader className="shrink-0">
             <DialogTitle>{selectedCombo ? "Edit combo" : "Create combo"}</DialogTitle>
             <DialogDescription>Build each combo step in order. Pinned accounts stay tied to that connection.</DialogDescription>
           </DialogHeader>
-          <div className="space-y-4">
+          <div className="min-h-0 space-y-4 overflow-y-auto pr-1">
             <div className="space-y-2">
               <Label htmlFor="combo-name">Combo name</Label>
-              <Input id="combo-name" value={formName} onChange={(event) => setFormName(event.target.value)} placeholder="e.g. primary-backup" />
+              <Input
+                id="combo-name"
+                name="combo-name"
+                autoComplete="off"
+                value={formName}
+                onChange={(event) => setFormName(event.target.value)}
+                aria-invalid={duplicateName}
+                placeholder="primary-backup…"
+              />
+              {duplicateName && (
+                <p className="text-xs text-destructive">A combo with this name already exists.</p>
+              )}
             </div>
-            <ComboStepBuilder steps={formSteps} connections={connections} models={models} onChange={setFormSteps} />
+            <ComboStepBuilder
+              steps={formSteps}
+              connections={connections}
+              models={models}
+              onChange={setFormSteps}
+              serializeStep={serializeStep}
+            />
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
-            <Button onClick={handleSave} disabled={saving || formSteps.length === 0}>
+          <DialogFooter className="shrink-0 border-t pt-4">
+            <Button variant="outline" onClick={() => requestDialogOpenChange(false)}>Cancel</Button>
+            <Button onClick={handleSave} disabled={saving || formSteps.length === 0 || duplicateName}>
               {saving ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : null}
               {selectedCombo ? "Update combo" : "Create combo"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={confirmCloseOpen} onOpenChange={setConfirmCloseOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Discard combo changes?</AlertDialogTitle>
+            <AlertDialogDescription>
+              You have unsaved combo changes. Closing now will discard them.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep Editing</AlertDialogCancel>
+            <AlertDialogAction onClick={closeDialogDiscardingChanges}>
+              Discard Changes
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
         <AlertDialogContent>
@@ -245,7 +302,7 @@ export default function CombosTab({
               disabled={deleting}
               className="bg-destructive text-white hover:bg-destructive/90"
             >
-              {deleting ? "Deleting..." : "Delete"}
+              {deleting ? "Deleting…" : "Delete"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

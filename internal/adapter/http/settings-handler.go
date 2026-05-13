@@ -43,6 +43,9 @@ func apiUpdateSettings(store port.CredentialStore) gin.HandlerFunc {
 			if req.ComboStrategy != "" {
 				cfg.Settings.ComboStrategy = req.ComboStrategy
 			}
+			if req.ConnectionStrategy != "" {
+				cfg.Settings.ConnectionStrategy = req.ConnectionStrategy
+			}
 			cfg.Settings.RequireAPIKey = req.RequireAPIKey
 			if req.ComboStrategies != nil {
 				cfg.Settings.ComboStrategies = req.ComboStrategies

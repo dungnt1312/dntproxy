@@ -78,6 +78,9 @@ func main() {
 	// Connection commands
 	rootCmd.AddCommand(buildConnectionCmd())
 
+	// Tools commands
+	rootCmd.AddCommand(buildToolsCmd())
+
 	// Update command
 	rootCmd.AddCommand(buildUpdateCmd())
 

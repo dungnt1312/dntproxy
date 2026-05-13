@@ -29,8 +29,11 @@ func (c *CompressionSettings) Normalize() {
 type Settings struct {
 	ComboStrategy   string            `json:"comboStrategy"`
 	ComboStrategies map[string]string `json:"comboStrategies,omitempty"`
-	RequireAPIKey   bool              `json:"requireApiKey"`
-	Port            int               `json:"port,omitempty"`
+	// ConnectionStrategy controls how an account is selected after model routing.
+	// Supported: weighted-random, priority-fallback, round-robin.
+	ConnectionStrategy string `json:"connectionStrategy,omitempty"`
+	RequireAPIKey      bool   `json:"requireApiKey"`
+	Port               int    `json:"port,omitempty"`
 	// Profile settings
 	ActiveProfile string `json:"activeProfile,omitempty"`
 	// Tunnel settings
@@ -53,7 +56,7 @@ type APIKey struct {
 	Name                 string   `json:"name"`
 	Key                  string   `json:"key"`
 	IsActive             bool     `json:"isActive"`
-	DashboardAccess      bool     `json:"dashboardAccess"`                // true = can access /api/* dashboard
+	DashboardAccess      bool     `json:"dashboardAccess"` // true = can access /api/* dashboard
 	CreatedAt            string   `json:"createdAt,omitempty"`
 	AllowedConnectionIDs []string `json:"allowedConnectionIds,omitempty"` // nil/empty = unrestricted
 	AllowedModels        []string `json:"allowedModels,omitempty"`        // nil/empty = unrestricted
@@ -67,9 +70,10 @@ func DefaultConfig() AppConfig {
 		ModelAliases:        AliasMap{},
 		APIKeys:             []APIKey{},
 		Settings: Settings{
-			ComboStrategy: "fallback",
-			RequireAPIKey: false,
-			Port:          20199,
+			ComboStrategy:      "fallback",
+			ConnectionStrategy: "weighted-random",
+			RequireAPIKey:      false,
+			Port:               20199,
 			Compression: CompressionSettings{
 				Enabled:          false,
 				MinContentLength: 500,

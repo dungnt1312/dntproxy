@@ -86,6 +86,13 @@ dntproxy connection export <connection-id> [file]
 dntproxy connection export-multiple --ids conn1,conn2 [file]
 dntproxy connection import <file> --mode add|replace|merge
 
+# Configure AI tools to use dntproxy
+dntproxy tools list                    # Show supported tools
+dntproxy tools configure claude-code   # Configure Claude Code
+dntproxy tools configure all           # Configure all detected tools
+dntproxy tools status                  # Show configured tools
+dntproxy tools reset claude-code       # Revert to direct access
+
 # Create model combo
 dntproxy combo add my-combo kr/claude-sonnet-4.5 oai/gpt-4o
 

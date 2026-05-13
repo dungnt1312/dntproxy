@@ -204,6 +204,9 @@ function mapModel(go: any) {
     provider: String(go.provider || "unknown"),
     connectionId: String(go.connectionId || ""),
     connectionName: String(go.connectionName || ""),
+    connections: Array.isArray(go.connections)
+      ? go.connections.filter((conn: any) => conn?.isActive !== false)
+      : [],
     isActive: typeof go.isActive === "boolean" ? go.isActive : true,
   };
 }
@@ -220,6 +223,7 @@ function mapSettings(go: any) {
     serverPort: Number(go.port ?? 20199),
     apiKeyAuthEnabled: Boolean(go.requireApiKey),
     defaultRoutingStrategy: String(go.comboStrategy || "fallback"),
+    connectionStrategy: String(go.connectionStrategy || "weighted-random"),
     compressionEnabled: Boolean(go?.compression?.enabled),
     compressionMinLength: Number(go?.compression?.minContentLength ?? 500),
     compressionLogSavings: go?.compression?.logSavings !== false,
@@ -371,7 +375,8 @@ export const goApi: any = {
       requireApiKey: data.apiKeyAuthEnabled ?? data.requireApiKey ?? false,
       comboStrategy:
         data.defaultRoutingStrategy ?? data.comboStrategy ?? "fallback",
-      stickyRoundRobinLimit: data.stickyRoundRobinLimit ?? 3,
+      connectionStrategy:
+        data.connectionStrategy ?? "weighted-random",
       compression: {
         enabled: Boolean(data.compressionEnabled ?? false),
         minContentLength: Number(data.compressionMinLength ?? 500),

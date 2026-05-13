@@ -65,6 +65,7 @@ internal/service/               → Business logic orchestration
   ├── account-selector.go       → Multi-account selection, cooldown, backoff, on-demand token refresh
   ├── combo-handler.go          → Fallback + round-robin strategies
   ├── tunnel-service.go         → Tunnel enable/disable/status
+  ├── tools-service.go          → AI tool detection, configure, reset
   └── backup/                   → Backup/restore service
       ├── types.go              → BackupData, ConnectionExportData
       ├── export.go             → Full config export

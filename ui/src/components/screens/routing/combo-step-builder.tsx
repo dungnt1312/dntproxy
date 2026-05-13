@@ -18,9 +18,10 @@ interface ComboStepBuilderProps {
   connections: ConnectionOption[];
   models: UiModel[];
   onChange: (steps: ComboStep[]) => void;
+  serializeStep: (step: ComboStep) => string;
 }
 
-export function ComboStepBuilder({ steps, connections, models, onChange }: ComboStepBuilderProps) {
+export function ComboStepBuilder({ steps, connections, models, onChange, serializeStep }: ComboStepBuilderProps) {
   const [selectedProvider, setSelectedProvider] = useState("");
   const [selectedModel, setSelectedModel] = useState("");
   const [accountMode, setAccountMode] = useState<"auto" | "pinned">("auto");
@@ -69,6 +70,16 @@ export function ComboStepBuilder({ steps, connections, models, onChange }: Combo
     onChange(next.map((step, order) => ({ ...step, order })));
   }
 
+  function handleSwitchStepToAuto(stepId: string) {
+    onChange(
+      steps.map((step) =>
+        step.id === stepId
+          ? { ...step, accountMode: "auto", accountId: undefined }
+          : step,
+      ),
+    );
+  }
+
   return (
     <div className="space-y-4">
       <ComboStepForm
@@ -82,17 +93,22 @@ export function ComboStepBuilder({ steps, connections, models, onChange }: Combo
         onModelChange={setSelectedModel}
         onAccountChange={handleAccountChange}
         onAddStep={handleAddStep}
+        serializeStep={serializeStep}
       />
-      <div className="space-y-2">
-        <Label className="text-xs">Combo steps ({steps.length})</Label>
+      <section className="space-y-2" aria-label="Combo steps">
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+          <Label className="text-xs">Combo Steps ({steps.length})</Label>
+          <p className="text-xs text-muted-foreground">Order matters. Routing tries these targets using the active combo strategy.</p>
+        </div>
         <ComboStepList
           steps={steps}
           connections={connections}
           models={models}
           onMove={handleMoveStep}
           onDelete={handleDeleteStep}
+          onSwitchToAuto={handleSwitchStepToAuto}
         />
-      </div>
+      </section>
     </div>
   );
 }

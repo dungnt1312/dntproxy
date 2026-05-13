@@ -68,6 +68,29 @@ export default function SettingsPage() {
             </select>
           </div>
 
+          <div>
+            <label
+              className="block text-sm font-medium mb-1.5"
+              style={{ fontFamily: "var(--font-heading)" }}
+            >
+              Connection Strategy
+            </label>
+            <select
+              value={settings.connectionStrategy || "weighted-random"}
+              onChange={(e) =>
+                setSettings({ ...settings, connectionStrategy: e.target.value })
+              }
+              className="glass-select w-full"
+            >
+              <option value="weighted-random">Weighted Random</option>
+              <option value="priority-fallback">Primary First</option>
+              <option value="round-robin">Round Robin</option>
+            </select>
+            <p className="text-xs text-[var(--text-dim)] mt-1.5">
+              Controls account selection inside a routed provider/model.
+            </p>
+          </div>
+
           <div className="flex items-center justify-between py-1">
             <div>
               <label
@@ -96,26 +119,6 @@ export default function SettingsPage() {
                 className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${settings.requireApiKey ? "left-5.5" : "left-0.5"}`}
               />
             </button>
-          </div>
-
-          <div>
-            <label
-              className="block text-sm font-medium mb-1.5"
-              style={{ fontFamily: "var(--font-heading)" }}
-            >
-              Sticky Round Robin Limit
-            </label>
-            <input
-              type="number"
-              value={settings.stickyRoundRobinLimit || 3}
-              onChange={(e) =>
-                setSettings({
-                  ...settings,
-                  stickyRoundRobinLimit: parseInt(e.target.value) || 3,
-                })
-              }
-              className="glass-input w-full"
-            />
           </div>
         </div>
 

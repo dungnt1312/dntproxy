@@ -5,6 +5,10 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"sort"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/dungnt/dntproxy/internal/adapter/auth"
@@ -15,8 +19,9 @@ import (
 
 // AccountSelector manages multi-account selection with weighted random and cooldown.
 type AccountSelector struct {
-	store        port.CredentialStore
-	tokenRefresh *auth.TokenRefreshService
+	store          port.CredentialStore
+	tokenRefresh   *auth.TokenRefreshService
+	rotationStates sync.Map // strategy key -> *int32
 }
 
 type AccountSelectionErrorKind string
@@ -31,6 +36,10 @@ const (
 
 	// DefaultWeight is the weight assigned to connections with zero/unset weight.
 	DefaultWeight = 100
+
+	ConnectionStrategyWeightedRandom   = "weighted-random"
+	ConnectionStrategyPriorityFallback = "priority-fallback"
+	ConnectionStrategyRoundRobin       = "round-robin"
 )
 
 type AccountSelectionError struct {
@@ -288,8 +297,7 @@ func (s *AccountSelector) SelectCredentials(
 		}
 	}
 
-	// Weighted random selection
-	selected := weightedRandomSelect(available)
+	selected := s.selectConnection(available, provider, model, allowedConnectionIDs)
 
 	// Auto-refresh token if expiring soon
 	if s.tokenRefresh.NeedsRefresh(selected) {
@@ -306,6 +314,91 @@ func (s *AccountSelector) SelectCredentials(
 	return shared.ConnectionToCredentials(selected), nil
 }
 
+func (s *AccountSelector) selectConnection(available []domain.ProviderConnection, provider string, model string, allowedConnectionIDs []string) *domain.ProviderConnection {
+	switch s.connectionStrategy() {
+	case ConnectionStrategyPriorityFallback:
+		return priorityFallbackSelect(available)
+	case ConnectionStrategyRoundRobin:
+		return s.roundRobinSelect(available, provider, model, allowedConnectionIDs)
+	default:
+		return weightedRandomSelect(available)
+	}
+}
+
+func (s *AccountSelector) connectionStrategy() string {
+	settings, err := s.store.GetSettings()
+	if err != nil || settings == nil || settings.ConnectionStrategy == "" {
+		return ConnectionStrategyWeightedRandom
+	}
+	switch settings.ConnectionStrategy {
+	case ConnectionStrategyWeightedRandom, ConnectionStrategyPriorityFallback, ConnectionStrategyRoundRobin:
+		return settings.ConnectionStrategy
+	default:
+		return ConnectionStrategyWeightedRandom
+	}
+}
+
+func priorityFallbackSelect(available []domain.ProviderConnection) *domain.ProviderConnection {
+	if len(available) == 1 {
+		return &available[0]
+	}
+	sorted := append([]domain.ProviderConnection(nil), available...)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		if sorted[i].Priority != sorted[j].Priority {
+			return sorted[i].Priority < sorted[j].Priority
+		}
+		if normalizedWeight(sorted[i].Weight) != normalizedWeight(sorted[j].Weight) {
+			return normalizedWeight(sorted[i].Weight) > normalizedWeight(sorted[j].Weight)
+		}
+		return false
+	})
+	return &sorted[0]
+}
+
+func (s *AccountSelector) roundRobinSelect(available []domain.ProviderConnection, provider string, model string, allowedConnectionIDs []string) *domain.ProviderConnection {
+	if len(available) == 1 {
+		return &available[0]
+	}
+	sorted := append([]domain.ProviderConnection(nil), available...)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		if sorted[i].Priority != sorted[j].Priority {
+			return sorted[i].Priority < sorted[j].Priority
+		}
+		return false
+	})
+
+	key := connectionRotationKey(provider, model, allowedConnectionIDs)
+	val, _ := s.rotationStates.LoadOrStore(key, new(int32))
+	counter := val.(*int32)
+	offset := int(atomic.LoadInt32(counter)) % len(sorted)
+	if offset < 0 {
+		offset += len(sorted)
+	}
+	return &sorted[offset]
+}
+
+func (s *AccountSelector) AdvanceConnectionRotation(provider string, model string, allowedConnectionIDs []string) {
+	if s.connectionStrategy() != ConnectionStrategyRoundRobin {
+		return
+	}
+	key := connectionRotationKey(provider, model, allowedConnectionIDs)
+	val, ok := s.rotationStates.Load(key)
+	if !ok {
+		return
+	}
+	counter := val.(*int32)
+	atomic.AddInt32(counter, 1)
+}
+
+func connectionRotationKey(provider string, model string, allowedConnectionIDs []string) string {
+	ids := append([]string(nil), allowedConnectionIDs...)
+	sort.Strings(ids)
+	if len(ids) == 0 {
+		return provider + "/" + model + "|all"
+	}
+	return provider + "/" + model + "|" + strings.Join(ids, ",")
+}
+
 // weightedRandomSelect picks a connection from the available list using weighted random.
 // Weight represents probability: higher weight = more likely to be selected.
 // Connections with weight <= 0 are treated as DefaultWeight (100).
@@ -316,20 +409,13 @@ func weightedRandomSelect(available []domain.ProviderConnection) *domain.Provide
 
 	totalWeight := 0
 	for _, conn := range available {
-		w := conn.Weight
-		if w <= 0 {
-			w = DefaultWeight
-		}
-		totalWeight += w
+		totalWeight += normalizedWeight(conn.Weight)
 	}
 
 	r := rand.Intn(totalWeight)
 	cumulative := 0
 	for i := range available {
-		w := available[i].Weight
-		if w <= 0 {
-			w = DefaultWeight
-		}
+		w := normalizedWeight(available[i].Weight)
 		cumulative += w
 		if r < cumulative {
 			return &available[i]
@@ -338,6 +424,13 @@ func weightedRandomSelect(available []domain.ProviderConnection) *domain.Provide
 
 	// Fallback (should never reach here)
 	return &available[0]
+}
+
+func normalizedWeight(weight int) int {
+	if weight <= 0 {
+		return DefaultWeight
+	}
+	return weight
 }
 
 // MarkUnavailable marks a connection as unavailable with cooldown.

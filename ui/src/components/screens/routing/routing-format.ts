@@ -37,3 +37,9 @@ export function providerPrefixToProvider(prefix: string): string {
   if (prefix === "oai") return "openai";
   return prefix;
 }
+
+export function providerToRoutingPrefix(provider: string): string {
+  if (provider === "kiro") return "kr";
+  if (provider === "openai") return "oai";
+  return provider;
+}

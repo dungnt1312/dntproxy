@@ -224,6 +224,7 @@ func (s *ChatService) executeOnProvider(body []byte, qualifiedModel string, requ
 		if execErr == nil && status == http.StatusOK {
 			reqlog.Upstream("", "", status, duration, nil)
 			s.accountSelector.ClearError(creds.ConnectionID, model)
+			s.accountSelector.AdvanceConnectionRotation(provider, model, allowedConnectionIDs)
 
 			// Stream wrapper will finalize reqlog.End() when consumer closes stream
 			wrappedStream := reqlog.WrapStream(stream)

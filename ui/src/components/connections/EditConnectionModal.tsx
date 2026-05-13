@@ -24,6 +24,8 @@ export default function EditConnectionModal({ conn, onSuccess, onClose }: EditCo
   const [apiKey, setApiKey] = useState('')
   const [baseUrl, setBaseUrl] = useState(conn.baseUrl || '')
   const [modelPrefix, setModelPrefix] = useState(conn.modelPrefix || '')
+  const [priority, setPriority] = useState(String(conn.priority ?? 0))
+  const [weight, setWeight] = useState(String(conn.weight ?? 100))
 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -32,11 +34,15 @@ export default function EditConnectionModal({ conn, onSuccess, onClose }: EditCo
     setLoading(true)
     setError('')
     try {
-      const payload: Record<string, string> = {}
+      const payload: Record<string, unknown> = {}
       if (name.trim() && name !== conn.name) payload.name = name.trim()
       if (apiKey.trim()) payload.apiKey = apiKey.trim()
       if (baseUrl !== conn.baseUrl) payload.baseUrl = baseUrl.trim()
       if (modelPrefix !== (conn.modelPrefix || '')) payload.modelPrefix = modelPrefix.trim()
+      const nextPriority = parseInt(priority, 10)
+      const nextWeight = parseInt(weight, 10)
+      if (!Number.isNaN(nextPriority) && nextPriority !== (conn.priority ?? 0)) payload.priority = nextPriority
+      if (!Number.isNaN(nextWeight) && nextWeight !== (conn.weight ?? 100)) payload.weight = nextWeight
 
       if (Object.keys(payload).length > 0) {
         await api.updateConnection(conn.id, payload)
@@ -118,6 +124,32 @@ export default function EditConnectionModal({ conn, onSuccess, onClose }: EditCo
                 />
               </div>
             )}
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label className="text-xs">Priority</Label>
+                <Input
+                  type="number"
+                  value={priority}
+                  onChange={e => setPriority(e.target.value)}
+                  placeholder="0"
+                  className="text-xs"
+                  autoComplete="off"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Weight</Label>
+                <Input
+                  type="number"
+                  min="1"
+                  value={weight}
+                  onChange={e => setWeight(e.target.value)}
+                  placeholder="100"
+                  className="text-xs"
+                  autoComplete="off"
+                />
+              </div>
+            </div>
           </div>
 
           {error && (

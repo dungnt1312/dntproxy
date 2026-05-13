@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, Pin, Shuffle, Trash2 } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowUp, Pin, Shuffle, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { ConnectionOption, UiModel } from "./types";
@@ -11,9 +11,10 @@ interface ComboStepListProps {
   models: UiModel[];
   onMove: (stepId: string, direction: "up" | "down") => void;
   onDelete: (stepId: string) => void;
+  onSwitchToAuto: (stepId: string) => void;
 }
 
-export function ComboStepList({ steps, connections, models, onMove, onDelete }: ComboStepListProps) {
+export function ComboStepList({ steps, connections, models, onMove, onDelete, onSwitchToAuto }: ComboStepListProps) {
   if (steps.length === 0) {
     return (
       <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
@@ -27,8 +28,9 @@ export function ComboStepList({ steps, connections, models, onMove, onDelete }: 
       {steps.map((step, index) => {
         const connection = connections.find((item) => item.id === step.accountId);
         const model = models.find((item) => item.provider === step.provider && (item.modelId === step.model || item.id === `${step.provider}/${step.model}`));
+        const hasBadPin = step.accountMode === "pinned" && (!connection || connection.isActive === false);
         return (
-          <div key={step.id} className="flex items-center gap-3 rounded-lg border bg-card p-3">
+          <div key={step.id} className="flex flex-col gap-3 rounded-lg border bg-card p-3 sm:flex-row sm:items-center">
             <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-muted text-sm font-semibold">
               {index + 1}
             </div>
@@ -38,11 +40,18 @@ export function ComboStepList({ steps, connections, models, onMove, onDelete }: 
                 <span className="truncate text-sm font-medium">{model ? getModelDisplayName(model) : step.model}</span>
               </div>
               <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
-                {step.accountMode === "pinned" ? <Pin className="h-3 w-3" /> : <Shuffle className="h-3 w-3" />}
+                {hasBadPin ? <AlertTriangle className="h-3 w-3 text-destructive" /> : step.accountMode === "pinned" ? <Pin className="h-3 w-3" /> : <Shuffle className="h-3 w-3" />}
                 {step.accountMode === "pinned" ? `Pinned to ${connection?.name || step.accountId}` : "Auto-select account"}
+                {hasBadPin && <Badge variant="destructive" className="h-5 px-1.5 text-[10px]">Missing</Badge>}
               </div>
             </div>
-            <div className="flex shrink-0 gap-1">
+            <div className="flex shrink-0 justify-end gap-1 sm:justify-start">
+              {hasBadPin && (
+                <Button variant="outline" size="sm" onClick={() => onSwitchToAuto(step.id)} className="h-8 gap-1.5">
+                  <Shuffle className="h-3.5 w-3.5" />
+                  Auto
+                </Button>
+              )}
               <Button variant="ghost" size="icon" onClick={() => onMove(step.id, "up")} disabled={index === 0} aria-label="Move step up">
                 <ArrowUp className="h-4 w-4" />
               </Button>

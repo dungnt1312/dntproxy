@@ -1,5 +1,12 @@
 # Project Changelog
 
+## 2026-05-13
+
+- Added connection execution strategy setting: weighted random, primary-first priority fallback, and round-robin account rotation.
+- Added connection `priority` field and editable priority/weight controls in the connection edit dialog.
+- Removed the unused sticky round-robin UI setting and wired Settings to persist `connectionStrategy`.
+- Added route tests for priority fallback and round-robin connection selection.
+
 ## 2026-05-12
 
 - Redesigned Models page registry into a searchable table/mobile list with clearer provider, model ID, connection test, status, and log actions.

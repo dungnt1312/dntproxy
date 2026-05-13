@@ -119,11 +119,16 @@ func (db *JsonDB) readFromDisk() (*domain.AppConfig, error) {
 	}
 
 	// Migrate: ensure all connections have a valid weight.
-	// Old configs may have Priority (now removed) or Weight=0.
 	for i := range cfg.ProviderConnections {
 		if cfg.ProviderConnections[i].Weight <= 0 {
 			cfg.ProviderConnections[i].Weight = 100
 		}
+	}
+	if cfg.Settings.ComboStrategy == "" {
+		cfg.Settings.ComboStrategy = "fallback"
+	}
+	if cfg.Settings.ConnectionStrategy == "" {
+		cfg.Settings.ConnectionStrategy = "weighted-random"
 	}
 
 	// Migrate: existing keys without dashboardAccess field get it set to true

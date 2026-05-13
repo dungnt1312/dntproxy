@@ -81,6 +81,7 @@ func apiUpdateConnection(store port.CredentialStore) gin.HandlerFunc {
 		var req struct {
 			Name            *string  `json:"name,omitempty"`
 			IsActive        *bool    `json:"isActive,omitempty"`
+			Priority        *int     `json:"priority,omitempty"`
 			Weight          *int     `json:"weight,omitempty"`
 			SupportedModels []string `json:"supportedModels,omitempty"`
 			SetModels       bool     `json:"setModels,omitempty"`
@@ -104,6 +105,9 @@ func apiUpdateConnection(store port.CredentialStore) gin.HandlerFunc {
 					}
 					if req.IsActive != nil {
 						conn.IsActive = *req.IsActive
+					}
+					if req.Priority != nil {
+						conn.Priority = *req.Priority
 					}
 					if req.Weight != nil {
 						conn.Weight = *req.Weight

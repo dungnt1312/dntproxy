@@ -5,6 +5,8 @@ export interface Connection {
   name: string;
   provider: string;
   isActive: boolean;
+  priority?: number;
+  weight?: number;
   email?: string;
   baseUrl?: string;
   providerName?: string;

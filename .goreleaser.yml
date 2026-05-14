@@ -2,12 +2,6 @@ version: 2
 
 project_name: dntproxy
 
-before:
-  hooks:
-    - cmd: bun install
-      dir: ui
-    - cmd: bun run build
-      dir: ui
 
 builds:
   - id: dntproxy

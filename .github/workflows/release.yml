@@ -30,6 +30,12 @@ jobs:
         with:
           bun-version: latest
 
+      - name: Build UI
+        working-directory: ui
+        run: |
+          bun install
+          bun run build
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:

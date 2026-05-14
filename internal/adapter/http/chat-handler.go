@@ -1,12 +1,14 @@
 package http
 
 import (
+	"bufio"
 	"encoding/json"
 	"io"
 	"log"
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/dungnt/dntproxy/internal/adapter/compressor"
@@ -43,7 +45,8 @@ func chatHandler(chatService port.ChatService, store port.CredentialStore, comp 
 
 		// Extract model from raw body
 		var partial struct {
-			Model string `json:"model"`
+			Model  string `json:"model"`
+			Stream *bool  `json:"stream"`
 		}
 		if err := json.Unmarshal(body, &partial); err != nil || partial.Model == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"message": "Missing model"}})
@@ -65,6 +68,17 @@ func chatHandler(chatService port.ChatService, store port.CredentialStore, comp 
 		result := chatService.HandleChat(body, partial.Model, requestID, policy, compressionMetadata(stats))
 
 		if result.Stream != nil {
+			if partial.Stream == nil || !*partial.Stream {
+				defer result.Stream.Close()
+				completion, err := aggregateChatCompletion(result.Stream, partial.Model, requestID)
+				if err != nil {
+					c.JSON(http.StatusBadGateway, gin.H{"error": gin.H{"message": err.Error()}})
+					return
+				}
+				c.JSON(http.StatusOK, completion)
+				return
+			}
+
 			c.Header("Content-Type", "text/event-stream")
 			c.Header("Cache-Control", "no-cache")
 			c.Header("Connection", "keep-alive")
@@ -182,4 +196,115 @@ func streamChunks(done <-chan struct{}, r io.Reader) (<-chan []byte, <-chan erro
 	}()
 
 	return chunks, errs
+}
+
+type chatCompletionResponse struct {
+	ID      string                 `json:"id"`
+	Object  string                 `json:"object"`
+	Created int64                  `json:"created"`
+	Model   string                 `json:"model"`
+	Choices []chatCompletionChoice `json:"choices"`
+}
+
+type chatCompletionChoice struct {
+	Index        int                   `json:"index"`
+	Message      chatCompletionMessage `json:"message"`
+	FinishReason string                `json:"finish_reason,omitempty"`
+}
+
+type chatCompletionMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+type streamingChatChunk struct {
+	ID      string `json:"id"`
+	Object  string `json:"object"`
+	Created int64  `json:"created"`
+	Model   string `json:"model"`
+	Choices []struct {
+		Index int `json:"index"`
+		Delta struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"delta"`
+		Message      *chatCompletionMessage `json:"message,omitempty"`
+		FinishReason *string                `json:"finish_reason"`
+	} `json:"choices"`
+}
+
+func aggregateChatCompletion(stream io.Reader, requestedModel, requestID string) (chatCompletionResponse, error) {
+	response := chatCompletionResponse{
+		ID:      "chatcmpl-" + requestID,
+		Object:  "chat.completion",
+		Created: time.Now().Unix(),
+		Model:   requestedModel,
+		Choices: []chatCompletionChoice{{Index: 0, Message: chatCompletionMessage{Role: "assistant"}}},
+	}
+
+	choices := map[int]*chatCompletionChoice{0: &response.Choices[0]}
+	scanner := bufio.NewScanner(stream)
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, maxChatBodySize)
+
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, ":") {
+			continue
+		}
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+
+		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if payload == "" || payload == "[DONE]" {
+			continue
+		}
+
+		var chunk streamingChatChunk
+		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
+			return chatCompletionResponse{}, err
+		}
+		if chunk.ID != "" {
+			response.ID = chunk.ID
+		}
+		if chunk.Created != 0 {
+			response.Created = chunk.Created
+		}
+		if chunk.Model != "" {
+			response.Model = chunk.Model
+		}
+
+		for _, chunkChoice := range chunk.Choices {
+			choice := choices[chunkChoice.Index]
+			if choice == nil {
+				response.Choices = append(response.Choices, chatCompletionChoice{
+					Index:   chunkChoice.Index,
+					Message: chatCompletionMessage{Role: "assistant"},
+				})
+				choice = &response.Choices[len(response.Choices)-1]
+				choices[chunkChoice.Index] = choice
+			}
+			if chunkChoice.Delta.Role != "" {
+				choice.Message.Role = chunkChoice.Delta.Role
+			}
+			if chunkChoice.Delta.Content != "" {
+				choice.Message.Content += chunkChoice.Delta.Content
+			}
+			if chunkChoice.Message != nil {
+				if chunkChoice.Message.Role != "" {
+					choice.Message.Role = chunkChoice.Message.Role
+				}
+				choice.Message.Content += chunkChoice.Message.Content
+			}
+			if chunkChoice.FinishReason != nil {
+				choice.FinishReason = *chunkChoice.FinishReason
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return chatCompletionResponse{}, err
+	}
+
+	return response, nil
 }

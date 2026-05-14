@@ -36,6 +36,16 @@ A `dntproxy tools` command with subcommands:
 - Register in main.go
 - Unit tests for detection and config generation
 
+### Phase 4: API Endpoints [DONE]
+- `internal/adapter/http/tools-handler.go` — REST API for tools management
+- GET /api/tools, POST /api/tools/:id/configure, POST /api/tools/:id/reset
+- Bulk configure/reset endpoints
+
+### Phase 5: Dashboard UI [DONE]
+- `ui/src/components/screens/tools-screen.tsx` — React screen
+- Registered in App.tsx with route and nav item
+- API client methods in go-api.ts
+
 ## Tool Configuration Details
 
 | Tool | Config Location | Format | Key Fields |

@@ -120,7 +120,6 @@ export default function AddConnectionModal({ onSuccess, onClose }: AddConnection
     try {
       const res = await api.startSocialLogin(socialProvider)
       setSocialLogin({ ...res, provider: socialProvider })
-      window.open(res.loginUrl, '_blank')
     } catch (e: any) { setError(e.message) } finally { setLoading(false) }
   }
 

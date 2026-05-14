@@ -553,4 +553,16 @@ export const goApi: any = {
       method: "POST",
       body: JSON.stringify({ key }),
     }),
+
+  // Tools
+  getTools: () => goRequest<any[]>("/tools"),
+  getToolsStatus: () => goRequest<any>("/tools/status"),
+  configureTool: (id: string) =>
+    goRequest(`/tools/${id}/configure`, { method: "POST" }),
+  resetTool: (id: string) =>
+    goRequest(`/tools/${id}/reset`, { method: "POST" }),
+  configureAllTools: () =>
+    goRequest("/tools/configure-all", { method: "POST" }),
+  resetAllTools: () =>
+    goRequest("/tools/reset-all", { method: "POST" }),
 };

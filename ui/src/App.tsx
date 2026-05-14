@@ -76,7 +76,7 @@ const navItems: NavItem[] = [
     group: "Management",
   },
   // { path: "/profiles", label: "Profiles", icon: UserCircle, group: "Management" },
-  { path: "/tools", label: "AI Tools", icon: Wrench, group: "Management" },
+  // { path: "/tools", label: "AI Tools", icon: Wrench, group: "Management" },
   { path: "/api-keys", label: "API Keys", icon: Key, group: "Security" },
   { path: "/tunnel", label: "Tunnel", icon: Globe, group: "Network" },
   { path: "/usage", label: "Usage", icon: BarChart2, group: "Monitoring" },

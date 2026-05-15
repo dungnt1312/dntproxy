@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { motion } from "framer-motion";
-import { Settings, ShieldAlert, RotateCcw, Save, Loader2, Sparkles, FileText } from "lucide-react";
+import { Settings, ShieldAlert, RotateCcw, Save, Loader2, Sparkles, FileText, Send } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -34,6 +34,9 @@ interface SettingsData {
   compressionMinLength: number;
   compressionLogSavings: boolean;
   logBodies: boolean;
+  telegramEnabled: boolean;
+  telegramBotToken: string;
+  telegramOwnerID: number;
 }
 
 const DEFAULT_SETTINGS: SettingsData = {
@@ -46,6 +49,9 @@ const DEFAULT_SETTINGS: SettingsData = {
   compressionMinLength: 500,
   compressionLogSavings: true,
   logBodies: false,
+  telegramEnabled: false,
+  telegramBotToken: "",
+  telegramOwnerID: 0,
 };
 
 const containerVariants = {
@@ -110,6 +116,9 @@ export default function SettingsScreen() {
         compressionMinLength: settings.compressionMinLength,
         compressionLogSavings: settings.compressionLogSavings,
         logBodies: settings.logBodies,
+        telegramEnabled: settings.telegramEnabled,
+        telegramBotToken: settings.telegramBotToken,
+        telegramOwnerID: settings.telegramOwnerID,
       });
       setSettings(json);
       setInitialSettings(json);
@@ -331,6 +340,11 @@ export default function SettingsScreen() {
         </Card>
       </motion.div>
 
+      {/* Telegram Bot */}
+      <motion.div variants={itemVariants}>
+        <TelegramCard settings={settings} updateField={updateField} />
+      </motion.div>
+
       {/* Security */}
       <motion.div variants={itemVariants}>
         <Card>
@@ -425,5 +439,167 @@ export default function SettingsScreen() {
         </Button>
       </motion.div>
     </motion.div>
+  );
+}
+
+// === Telegram Bot Card ===
+
+function TelegramCard({
+  settings,
+  updateField,
+}: {
+  settings: SettingsData;
+  updateField: <K extends keyof SettingsData>(key: K, value: SettingsData[K]) => void;
+}) {
+  const [botStatus, setBotStatus] = useState<{
+    running: boolean;
+    username: string;
+  }>({ running: false, username: "" });
+  const [testing, setTesting] = useState(false);
+  const [toggling, setToggling] = useState(false);
+
+  const fetchStatus = useCallback(async () => {
+    try {
+      const status = await goApi.getTelegramStatus();
+      setBotStatus({ running: status.running, username: status.username || "" });
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchStatus();
+  }, [fetchStatus]);
+
+  const handleToggleBot = async () => {
+    try {
+      setToggling(true);
+      if (botStatus.running) {
+        await goApi.stopTelegram();
+        setBotStatus({ running: false, username: "" });
+        toast.success("Telegram bot stopped");
+      } else {
+        const res = await goApi.startTelegram();
+        setBotStatus({ running: true, username: res.username || "" });
+        toast.success("Telegram bot started");
+      }
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to toggle bot");
+    } finally {
+      setToggling(false);
+    }
+  };
+
+  const handleTest = async () => {
+    try {
+      setTesting(true);
+      await goApi.testTelegram();
+      toast.success("Test message sent to Telegram");
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to send test message");
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <Send className="size-5 text-sky-600" />
+          <CardTitle className="text-base">Telegram Bot</CardTitle>
+          {botStatus.running && (
+            <span className="ml-auto inline-flex items-center gap-1.5 text-xs text-emerald-600">
+              <span className="size-2 rounded-full bg-emerald-500 animate-pulse" />
+              @{botStatus.username}
+            </span>
+          )}
+        </div>
+        <CardDescription>
+          Real-time alerts and interactive commands via Telegram. Receive
+          notifications for quota exhaustion, token expiry, connection failures,
+          and more.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4 p-6 pt-0">
+        {/* Enable toggle */}
+        <div className="flex items-center justify-between gap-4">
+          <div className="space-y-0.5">
+            <Label htmlFor="tgEnabled">Enable Telegram Bot</Label>
+            <p className="text-xs text-muted-foreground">
+              Start the bot on server launch
+            </p>
+          </div>
+          <Switch
+            id="tgEnabled"
+            checked={settings.telegramEnabled}
+            onCheckedChange={(v) => updateField("telegramEnabled", v)}
+          />
+        </div>
+
+        {/* Bot Token */}
+        <div className="space-y-2">
+          <Label htmlFor="tgToken">Bot Token</Label>
+          <Input
+            id="tgToken"
+            type="text"
+            placeholder="123456:ABC-DEF..."
+            value={settings.telegramBotToken}
+            onChange={(e) => updateField("telegramBotToken", e.target.value)}
+            className="max-w-md font-mono text-sm"
+          />
+          <p className="text-xs text-muted-foreground">
+            Get from @BotFather on Telegram
+          </p>
+        </div>
+
+        {/* Owner ID */}
+        <div className="space-y-2">
+          <Label htmlFor="tgOwner">Owner Chat ID</Label>
+          <Input
+            id="tgOwner"
+            type="number"
+            placeholder="123456789"
+            value={settings.telegramOwnerID || ""}
+            onChange={(e) => updateField("telegramOwnerID", parseInt(e.target.value, 10) || 0)}
+            className="max-w-xs"
+          />
+          <p className="text-xs text-muted-foreground">
+            Your Telegram user ID. Only this user can interact with the bot.
+            Get from @userinfobot.
+          </p>
+        </div>
+
+        {/* Action buttons */}
+        <div className="flex gap-2 pt-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleToggleBot}
+            disabled={toggling || !settings.telegramBotToken || !settings.telegramOwnerID}
+          >
+            {toggling ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : botStatus.running ? (
+              "Stop Bot"
+            ) : (
+              "Start Bot"
+            )}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleTest}
+            disabled={testing || !settings.telegramBotToken || !settings.telegramOwnerID}
+          >
+            {testing ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              "Send Test Message"
+            )}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
   );
 }

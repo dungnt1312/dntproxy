@@ -53,6 +53,16 @@ func apiUpdateSettings(store port.CredentialStore) gin.HandlerFunc {
 			cfg.Settings.Compression = req.Compression
 			cfg.Settings.Compression.Normalize()
 			cfg.Settings.LogBodies = req.LogBodies
+
+			// Telegram settings
+			cfg.Settings.Telegram.Enabled = req.Telegram.Enabled
+			if req.Telegram.BotToken != "" {
+				cfg.Settings.Telegram.BotToken = req.Telegram.BotToken
+			}
+			if req.Telegram.OwnerID != 0 {
+				cfg.Settings.Telegram.OwnerID = req.Telegram.OwnerID
+			}
+
 			updated = cfg.Settings
 		}); err != nil {
 			c.JSON(500, gin.H{"error": "Failed to save config"})

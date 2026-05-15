@@ -25,6 +25,14 @@ func (c *CompressionSettings) Normalize() {
 	}
 }
 
+// TelegramSettings controls the embedded Telegram bot for alerts and commands.
+type TelegramSettings struct {
+	Enabled    bool   `json:"enabled"`
+	BotToken   string `json:"botToken,omitempty"`
+	OwnerID    int64  `json:"ownerId,omitempty"`
+	MutedUntil string `json:"mutedUntil,omitempty"` // RFC3339, suppress alerts until this time
+}
+
 // Settings holds app-level settings.
 type Settings struct {
 	ComboStrategy   string            `json:"comboStrategy"`
@@ -46,6 +54,8 @@ type Settings struct {
 	Compression CompressionSettings `json:"compression,omitempty"`
 	// Logging settings
 	LogBodies bool `json:"logBodies"` // persist request/response bodies in SQLite (default: false)
+	// Telegram bot settings
+	Telegram TelegramSettings `json:"telegram,omitempty"`
 	// Migration flags
 	DashboardAccessMigrated bool `json:"dashboardAccessMigrated,omitempty"`
 }

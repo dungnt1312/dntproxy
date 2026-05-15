@@ -17,6 +17,7 @@ import (
 	openaiAdapter "github.com/dungnt/dntproxy/internal/adapter/openai"
 	"github.com/dungnt/dntproxy/internal/adapter/provider"
 	"github.com/dungnt/dntproxy/internal/adapter/storage"
+	"github.com/dungnt/dntproxy/internal/adapter/telegram"
 	"github.com/dungnt/dntproxy/internal/logger"
 	"github.com/dungnt/dntproxy/internal/service"
 	appversion "github.com/dungnt/dntproxy/internal/version"
@@ -149,6 +150,21 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Set actual server port in router context
 	httpAdapter.SetServerPort(router, port)
 
+	// Telegram bot (optional - start if enabled in settings)
+	tgBot := telegram.NewBot(store, logStore)
+	if cfg.Settings.Telegram.Enabled && cfg.Settings.Telegram.BotToken != "" {
+		if err := tgBot.Start(); err != nil {
+			log.Printf("[TELEGRAM] Bot start failed: %v", err)
+		} else {
+			tgAlerter := telegram.NewAlerter(tgBot, store)
+			tgBot.SetAlerter(tgAlerter)
+			tgAlerter.Start()
+		}
+	}
+
+	// Register telegram bot in router for API access
+	httpAdapter.SetTelegramBot(router, tgBot, nil)
+
 	// Tunnel auto-start is handled by the dashboard UI only.
 	// Reset persisted enabled flag so it doesn't leak across restarts.
 	if tunnelService != nil && cfg.Settings.TunnelEnabled {
@@ -198,6 +214,12 @@ func runServe(cmd *cobra.Command, args []string) error {
 	if tunnelService != nil {
 		tunnelService.Stop()
 	}
+
+	// Stop telegram bot
+	if alerter := tgBot.GetAlerter(); alerter != nil {
+		alerter.Stop()
+	}
+	tgBot.Stop()
 
 	log.Printf("[dntproxy] Shutdown complete")
 	return nil

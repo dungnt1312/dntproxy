@@ -20,6 +20,15 @@ import (
 // serverPortKey is the context key for storing actual server port
 const serverPortKey = "server_port"
 
+// telegramBotKey is the context key for the telegram bot instance
+const telegramBotKey = "telegram_bot"
+
+// Package-level references for late-bound components
+var (
+	globalTelegramBot interface{}
+	globalServerPort  int
+)
+
 // NewRouter creates and configures the Gin router.
 func NewRouter(store port.CredentialStore, providers port.ProviderRegistry, tunnelMgr port.TunnelManager) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
@@ -81,22 +90,20 @@ func NewRouter(store port.CredentialStore, providers port.ProviderRegistry, tunn
 	return r
 }
 
-// SetServerPort stores the actual server port in the router context.
-// This should be called from main.go after determining the final port.
+// SetServerPort stores the actual server port for late-bound access.
 func SetServerPort(r *gin.Engine, port int) {
-	// Store in a middleware that sets it in every request context
-	r.Use(func(c *gin.Context) {
-		c.Set(serverPortKey, port)
-		c.Next()
-	})
+	globalServerPort = port
 }
 
-// GetServerPort retrieves the actual server port from context.
+// SetTelegramBot stores the telegram bot reference for handler access.
+func SetTelegramBot(r *gin.Engine, bot interface{}, alerter interface{}) {
+	globalTelegramBot = bot
+}
+
+// GetServerPort retrieves the actual server port.
 func GetServerPort(c *gin.Context) int {
-	if port, exists := c.Get(serverPortKey); exists {
-		if p, ok := port.(int); ok {
-			return p
-		}
+	if globalServerPort > 0 {
+		return globalServerPort
 	}
 	return 20199 // fallback
 }

@@ -228,6 +228,9 @@ function mapSettings(go: any) {
     compressionMinLength: Number(go?.compression?.minContentLength ?? 500),
     compressionLogSavings: go?.compression?.logSavings !== false,
     logBodies: Boolean(go.logBodies),
+    telegramEnabled: Boolean(go?.telegram?.enabled),
+    telegramBotToken: String(go?.telegram?.botToken || ""),
+    telegramOwnerID: Number(go?.telegram?.ownerId || 0),
   };
 }
 
@@ -370,7 +373,7 @@ export const goApi: any = {
   getSettings: () => goRequest("/settings").then(mapSettings),
 
   updateSettings: (data: Record<string, unknown>) => {
-    const payload = {
+    const payload: Record<string, unknown> = {
       port: data.serverPort ?? data.port ?? 20199,
       requireApiKey: data.apiKeyAuthEnabled ?? data.requireApiKey ?? false,
       comboStrategy:
@@ -383,6 +386,11 @@ export const goApi: any = {
         logSavings: data.compressionLogSavings !== false,
       },
       logBodies: Boolean(data.logBodies ?? false),
+      telegram: {
+        enabled: Boolean(data.telegramEnabled ?? false),
+        botToken: String(data.telegramBotToken || ""),
+        ownerId: Number(data.telegramOwnerID || 0),
+      },
     };
     return goRequest("/settings", {
       method: "PUT",
@@ -565,4 +573,10 @@ export const goApi: any = {
     goRequest("/tools/configure-all", { method: "POST" }),
   resetAllTools: () =>
     goRequest("/tools/reset-all", { method: "POST" }),
+
+  // Telegram
+  getTelegramStatus: () => goRequest<any>("/telegram/status"),
+  startTelegram: () => goRequest("/telegram/start", { method: "POST" }),
+  stopTelegram: () => goRequest("/telegram/stop", { method: "POST" }),
+  testTelegram: () => goRequest("/telegram/test", { method: "POST" }),
 };

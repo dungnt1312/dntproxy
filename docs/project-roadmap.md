@@ -54,6 +54,7 @@ This roadmap captures the progress and next milestones for `dntproxy`.
 - [x] **API Key Permission UI**: Add dashboard create/edit controls for connection and model allowlists on proxy API keys.
 - [x] **Models Page Redesign**: Improve registry scanning, alias creation, combo editing, partial-load errors, and remove legacy Models page drift.
 - [x] **Connection Execution Strategies**: Add weighted random, primary-first priority fallback, and round-robin account selection for chat execution.
+- [x] **Telegram Bot Integration**: Embedded two-way Telegram bot for real-time alerts (quota exhausted, token expired, connection down, rate limited, combo exhausted) and interactive commands (/status, /usage, /connections, /mute, /unmute). Single-owner auth, start/stop from UI, 30-min alert deduplication with auto-recovery notifications.
 - [ ] **Graceful Shutdown**: Listen for SIGTERM / SIGINT and handle open persistent SSE connections gracefully.
 - [ ] **Cross-Platform Delivery**: Enhance build configuration (Makefiles, CI, Goreleaser).
 - [ ] **Dockerization**: Provide an official `Dockerfile` and `docker-compose.yml` pattern.
@@ -62,5 +63,4 @@ This roadmap captures the progress and next milestones for `dntproxy`.
 - [ ] Request rate limiting and throttling
 - [ ] Team/multi-user mode with role-based access
 - [ ] Advanced analytics dashboard (usage trends, cost forecasting)
-- [ ] Webhook integrations for monitoring/alerting
 - [ ] OpenTelemetry tracing for distributed tracing compatibility

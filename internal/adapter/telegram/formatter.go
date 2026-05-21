@@ -55,13 +55,24 @@ func FormatAlert(alert port.Alert) string {
 }
 
 // FormatStatus formats connection status list for Telegram.
-func FormatStatus(connections []ConnectionStatus) string {
+func FormatStatus(connections []ConnectionStatus, enabled bool, muted bool, mutedUntil time.Time, suppressionWindow time.Duration) string {
 	if len(connections) == 0 {
 		return "No connections configured\\."
 	}
 
 	var sb strings.Builder
 	sb.WriteString("*Connection Status*\n\n")
+	if enabled {
+		sb.WriteString("Bot: `enabled`\n")
+	} else {
+		sb.WriteString("Bot: `disabled` \\(alerts paused\\)\n")
+	}
+	if muted {
+		sb.WriteString(fmt.Sprintf("Mute: `active until %s`\n", escapeMarkdown(mutedUntil.Local().Format("2006-01-02 15:04:05"))))
+	} else {
+		sb.WriteString("Mute: `off`\n")
+	}
+	sb.WriteString(fmt.Sprintf("Repeat alerts: `suppressed for %s per issue`\n\n", escapeMarkdown(suppressionWindow.String())))
 
 	for _, c := range connections {
 		var icon string
@@ -70,6 +81,8 @@ func FormatStatus(connections []ConnectionStatus) string {
 			icon = "🟢"
 		case "rate_limited":
 			icon = "🟡"
+		case "refreshable":
+			icon = "🟠"
 		case "error":
 			icon = "🔴"
 		case "expired":
@@ -91,9 +104,40 @@ func FormatUsage(stats UsageStats) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("*Usage \\- %s*\n\n", escapeMarkdown(stats.Period)))
 	sb.WriteString(fmt.Sprintf("Requests: `%d`\n", stats.Requests))
+	if stats.Errors > 0 {
+		sb.WriteString(fmt.Sprintf("Errors: `%d`\n", stats.Errors))
+	}
 	sb.WriteString(fmt.Sprintf("Tokens in: `%d`\n", stats.TokensIn))
 	sb.WriteString(fmt.Sprintf("Tokens out: `%d`\n", stats.TokensOut))
+	sb.WriteString(fmt.Sprintf("Tokens total: `%d`\n", stats.TokensTotal))
 	sb.WriteString(fmt.Sprintf("Cost: `$%.4f`\n", stats.Cost))
+
+	if len(stats.Quotas) == 0 {
+		sb.WriteString("\nQuota: `not checked or unsupported`\n")
+		return sb.String()
+	}
+
+	sb.WriteString("\n*Quota Check*\n")
+	for _, q := range stats.Quotas {
+		sb.WriteString(fmt.Sprintf("\n`%s` \\(%s\\)", escapeMarkdown(q.Name), escapeMarkdown(q.Provider)))
+		if q.Plan != "" {
+			sb.WriteString(fmt.Sprintf(" \\- %s", escapeMarkdown(q.Plan)))
+		}
+		sb.WriteString("\n")
+		if q.LimitReached {
+			sb.WriteString("  Limit: `reached`\n")
+		}
+		if q.Message != "" {
+			sb.WriteString(fmt.Sprintf("  Note: %s\n", escapeMarkdown(q.Message)))
+		}
+		for _, bucket := range q.Buckets {
+			sb.WriteString(fmt.Sprintf("  %s: `%d/%d used` \\(%d%%\\), `%d left`", escapeMarkdown(bucket.Label), bucket.Used, bucket.Total, bucket.Pct, bucket.Remaining))
+			if bucket.ResetAt != "" {
+				sb.WriteString(fmt.Sprintf(" reset `%s`", escapeMarkdown(formatResetAt(bucket.ResetAt))))
+			}
+			sb.WriteString("\n")
+		}
+	}
 	return sb.String()
 }
 
@@ -128,17 +172,26 @@ func FormatHelp() string {
 	return `*Available Commands*
 
 /status \- Connection health overview
-/usage \- Today's usage stats
-/usage 7d \- Last 7 days usage
+/usage \- Today's usage stats \+ quota check
+/usage 7d \- Last 7 days usage \+ quota check
 /connections \- Detailed connection info
-/mute 2h \- Suppress alerts \(e\.g\. 1h, 30m, 2h\)
+/mute \- Show current mute status
+/mute 2h \- Suppress alert notifications \(e\.g\. 1h, 30m, 2h\)
 /unmute \- Resume alerts
 /help \- Show this message`
 }
 
 // FormatMuted formats the mute confirmation.
 func FormatMuted(until time.Time) string {
-	return fmt.Sprintf("🔇 Alerts muted until `%s`", escapeMarkdown(until.Format("15:04:05")))
+	return fmt.Sprintf("🔇 Alerts muted until `%s`\nOnly alert notifications are paused\\. Commands still work\\.", escapeMarkdown(until.Local().Format("2006-01-02 15:04:05")))
+}
+
+// FormatMuteStatus formats current mute state.
+func FormatMuteStatus(muted bool, until time.Time) string {
+	if muted {
+		return fmt.Sprintf("🔇 Alerts are muted until `%s`\nUse `/unmute` to resume now\\.", escapeMarkdown(until.Local().Format("2006-01-02 15:04:05")))
+	}
+	return "🔔 Alerts are not muted\\.\nUse `/mute 30m`, `/mute 2h`, or `/mute 1h30m`\\."
 }
 
 // FormatUnmuted formats the unmute confirmation.
@@ -150,20 +203,43 @@ func FormatUnmuted() string {
 type ConnectionStatus struct {
 	Name     string
 	Provider string
-	Status   string // ok, rate_limited, error, expired
+	Status   string // ok, rate_limited, refreshable, error, expired
 	Error    string
 }
 
 // UsageStats holds usage data for /usage command.
 type UsageStats struct {
-	Period    string
-	Requests int
-	TokensIn int64
-	TokensOut int64
-	Cost     float64
+	Period      string
+	Requests    int
+	Errors      int
+	TokensIn    int64
+	TokensOut   int64
+	TokensTotal int64
+	Cost        float64
+	Quotas      []QuotaSummary
 }
 
-// ConnectionDetail holds detailed connection info for /connections command.
+// QuotaSummary is a compact provider quota summary for /usage.
+type QuotaSummary struct {
+	Name         string
+	Provider     string
+	Plan         string
+	LimitReached bool
+	Message      string
+	Buckets      []QuotaBucketSummary
+}
+
+// QuotaBucketSummary is one quota bucket for /usage.
+type QuotaBucketSummary struct {
+	Label     string
+	Used      int
+	Total     int
+	Remaining int
+	Pct       int
+	ResetAt   string
+}
+
+// ConnectionDetail holds detailed connection info.
 type ConnectionDetail struct {
 	Name              string
 	Provider          string
@@ -196,4 +272,11 @@ func escapeMarkdown(s string) string {
 		"!", "\\!",
 	)
 	return replacer.Replace(s)
+}
+
+func formatResetAt(value string) string {
+	if t, err := time.Parse(time.RFC3339, value); err == nil {
+		return t.Local().Format("2006-01-02 15:04")
+	}
+	return value
 }

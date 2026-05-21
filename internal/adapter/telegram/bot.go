@@ -43,6 +43,10 @@ func NewBot(store port.CredentialStore, logStore port.LogStore) *Bot {
 
 // Start initializes the bot API and begins long-polling for commands.
 func (b *Bot) Start() error {
+	if b.IsRunning() {
+		return nil
+	}
+
 	settings, err := b.store.GetSettings()
 	if err != nil {
 		return fmt.Errorf("telegram: failed to load settings: %w", err)
@@ -61,13 +65,14 @@ func (b *Bot) Start() error {
 	}
 
 	// Restore mute state
+	b.muteMu.Lock()
+	b.mutedUntil = time.Time{}
 	if settings.Telegram.MutedUntil != "" {
 		if t, err := time.Parse(time.RFC3339, settings.Telegram.MutedUntil); err == nil && t.After(time.Now()) {
-			b.muteMu.Lock()
 			b.mutedUntil = t
-			b.muteMu.Unlock()
 		}
 	}
+	b.muteMu.Unlock()
 
 	ctx, cancel := context.WithCancel(context.Background())
 

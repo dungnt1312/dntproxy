@@ -20,6 +20,8 @@ type DedupStore struct {
 	states map[string]*AlertState
 }
 
+const alertDedupWindow = 30 * time.Minute
+
 // NewDedupStore creates a new deduplication store.
 func NewDedupStore() *DedupStore {
 	return &DedupStore{states: make(map[string]*AlertState)}
@@ -37,12 +39,17 @@ func (d *DedupStore) ShouldSend(key string) bool {
 		return true
 	}
 
-	if time.Since(state.LastSent) >= 30*time.Minute {
+	if time.Since(state.LastSent) >= alertDedupWindow {
 		state.LastSent = time.Now()
 		state.Count++
 		return true
 	}
 	return false
+}
+
+// SuppressionWindow returns the deduplication window used for repeated alerts.
+func SuppressionWindow() time.Duration {
+	return alertDedupWindow
 }
 
 // Clear removes dedup state for a connection (used on recovery).

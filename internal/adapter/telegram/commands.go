@@ -17,6 +17,7 @@ func (b *Bot) cmdStatus() {
 		return
 	}
 
+	muteUntil, muted := b.MuteState()
 	statuses := make([]ConnectionStatus, 0, len(cfg.ProviderConnections))
 	for _, conn := range cfg.ProviderConnections {
 		if !conn.IsActive {
@@ -41,8 +42,13 @@ func (b *Bot) cmdStatus() {
 		// Check token expired
 		if conn.ExpiresAt != "" {
 			if t, err := time.Parse(time.RFC3339, conn.ExpiresAt); err == nil && t.Before(now) {
-				cs.Status = "expired"
-				cs.Error = "token expired"
+				if conn.RefreshToken != "" {
+					cs.Status = "refreshable"
+					cs.Error = "token expired; refresh token available"
+				} else {
+					cs.Status = "expired"
+					cs.Error = "token expired; no refresh token"
+				}
 			}
 		}
 
@@ -61,7 +67,7 @@ func (b *Bot) cmdStatus() {
 		statuses = append(statuses, cs)
 	}
 
-	b.sendMarkdown(FormatStatus(statuses))
+	b.sendMarkdown(FormatStatus(statuses, cfg.Settings.Telegram.Enabled, muted, muteUntil, SuppressionWindow()))
 }
 
 func (b *Bot) cmdUsage(args []string) {
@@ -97,14 +103,59 @@ func (b *Bot) cmdUsage(args []string) {
 	}
 
 	stats := UsageStats{
-		Period:    displayPeriod,
-		Requests: summary.Requests,
-		TokensIn: int64(summary.InputTokens),
-		TokensOut: int64(summary.OutputTokens),
-		Cost:     summary.CostTotal,
+		Period:      displayPeriod,
+		Requests:    summary.Requests,
+		Errors:      summary.Errors,
+		TokensIn:    int64(summary.InputTokens),
+		TokensOut:   int64(summary.OutputTokens),
+		TokensTotal: int64(summary.TotalTokens),
+		Cost:        summary.CostTotal,
 	}
+	stats.Quotas = b.collectQuotaSummaries()
 
 	b.sendMarkdown(FormatUsage(stats))
+}
+
+func (b *Bot) collectQuotaSummaries() []QuotaSummary {
+	cfg, err := b.store.Load()
+	if err != nil {
+		return nil
+	}
+
+	summaries := make([]QuotaSummary, 0, len(cfg.ProviderConnections))
+	for i := range cfg.ProviderConnections {
+		conn := &cfg.ProviderConnections[i]
+		if !conn.IsActive || !supportsTelegramQuota(conn) {
+			continue
+		}
+
+		usage, err := fetchQuotaUsage(conn)
+		if err != nil {
+			summaries = append(summaries, QuotaSummary{Name: conn.Name, Provider: conn.Provider, Message: err.Error()})
+			continue
+		}
+		if usage == nil {
+			continue
+		}
+
+		summary := QuotaSummary{Name: conn.Name, Provider: conn.Provider, Plan: usage.Plan, LimitReached: usage.LimitReached, Message: usage.Message}
+		for _, q := range usage.Quotas {
+			summary.Buckets = append(summary.Buckets, QuotaBucketSummary{
+				Label:     q.Label,
+				Used:      q.Used,
+				Total:     q.Total,
+				Remaining: q.Remaining,
+				Pct:       q.Pct,
+				ResetAt:   q.ResetAt,
+			})
+		}
+		summaries = append(summaries, summary)
+	}
+	return summaries
+}
+
+func supportsTelegramQuota(conn *domain.ProviderConnection) bool {
+	return conn.Provider == "kiro" || conn.Provider == "openai" || conn.Provider == "minimax"
 }
 
 func (b *Bot) cmdConnections() {
@@ -143,7 +194,8 @@ func (b *Bot) cmdConnections() {
 
 func (b *Bot) cmdMute(args []string) {
 	if len(args) == 0 {
-		b.sendMarkdown(escapeMarkdown("Usage: /mute <duration> (e.g. 1h, 30m, 2h)"))
+		until, muted := b.MuteState()
+		b.sendMarkdown(FormatMuteStatus(muted, until))
 		return
 	}
 
@@ -156,6 +208,21 @@ func (b *Bot) cmdMute(args []string) {
 	until := time.Now().Add(duration)
 	b.setMute(until)
 	b.sendMarkdown(FormatMuted(until))
+}
+
+// MuteState returns the current mute state and clears expired persisted mutes.
+func (b *Bot) MuteState() (time.Time, bool) {
+	b.muteMu.RLock()
+	until := b.mutedUntil
+	b.muteMu.RUnlock()
+	if until.IsZero() {
+		return time.Time{}, false
+	}
+	if time.Now().Before(until) {
+		return until, true
+	}
+	b.clearMute()
+	return time.Time{}, false
 }
 
 func (b *Bot) cmdUnmute() {

@@ -14,9 +14,9 @@ import (
 
 // Alerter monitors the log stream and sends alerts to the bot owner.
 type Alerter struct {
-	bot   *Bot
-	store port.CredentialStore
-	ch    chan *domain.LogEntry
+	bot    *Bot
+	store  port.CredentialStore
+	ch     chan *domain.LogEntry
 	cancel context.CancelFunc
 }
 
@@ -30,6 +30,9 @@ func NewAlerter(bot *Bot, store port.CredentialStore) *Alerter {
 
 // Start begins monitoring the log stream for alertable events.
 func (a *Alerter) Start() {
+	if a.cancel != nil {
+		return
+	}
 	a.ch = logger.Get().Subscribe()
 	ctx, cancel := context.WithCancel(context.Background())
 	a.cancel = cancel
@@ -74,6 +77,9 @@ func (a *Alerter) processEntry(entry *domain.LogEntry) {
 	if entry == nil {
 		return
 	}
+	if !a.alertsEnabled() {
+		return
+	}
 
 	// Only process request-level errors (not event logs)
 	if entry.Direction != "response" && entry.Direction != "event" {
@@ -102,6 +108,11 @@ func (a *Alerter) processEntry(entry *domain.LogEntry) {
 }
 
 func (a *Alerter) classifyError(entry *domain.LogEntry) *port.Alert {
+	conn := a.connectionForEntry(entry)
+	if isRefreshableTokenError(entry, conn) {
+		return nil
+	}
+
 	alert := &port.Alert{
 		ConnectionID: entry.ConnectionID,
 		Connection:   entry.ConnectionName,
@@ -138,9 +149,8 @@ func (a *Alerter) classifyError(entry *domain.LogEntry) *port.Alert {
 		}
 
 		// Check connection backoff level for connection_down
-		if entry.ConnectionID != "" {
-			conn, err := a.store.GetConnectionByID(entry.ConnectionID)
-			if err == nil && conn != nil && conn.BackoffLevel >= 4 {
+		if conn != nil {
+			if conn.BackoffLevel >= 4 {
 				alert.Type = port.AlertConnectionDown
 				return alert
 			}
@@ -153,6 +163,9 @@ func (a *Alerter) classifyError(entry *domain.LogEntry) *port.Alert {
 }
 
 func (a *Alerter) checkAllDown() {
+	if !a.alertsEnabled() {
+		return
+	}
 	cfg, err := a.store.Load()
 	if err != nil {
 		return
@@ -182,7 +195,7 @@ func (a *Alerter) checkAllDown() {
 			// Check token expired
 			if !isDown && conn.ExpiresAt != "" {
 				if t, err := time.Parse(time.RFC3339, conn.ExpiresAt); err == nil && t.Before(now) {
-					isDown = true
+					isDown = conn.RefreshToken == ""
 				}
 			}
 
@@ -205,6 +218,32 @@ func (a *Alerter) checkAllDown() {
 			})
 		}
 	}
+}
+
+func (a *Alerter) alertsEnabled() bool {
+	settings, err := a.store.GetSettings()
+	return err == nil && settings != nil && settings.Telegram.Enabled
+}
+
+func (a *Alerter) connectionForEntry(entry *domain.LogEntry) *domain.ProviderConnection {
+	if entry.ConnectionID == "" {
+		return nil
+	}
+	conn, err := a.store.GetConnectionByID(entry.ConnectionID)
+	if err != nil {
+		return nil
+	}
+	return conn
+}
+
+func isRefreshableTokenError(entry *domain.LogEntry, conn *domain.ProviderConnection) bool {
+	if conn == nil || conn.RefreshToken == "" {
+		return false
+	}
+	if isTokenRefreshFailure(entry.Message) || isTokenRefreshFailure(entry.Error) {
+		return false
+	}
+	return entry.StatusCode == 401 || isTokenError(entry.Message) || isTokenError(entry.Error)
 }
 
 func isTokenError(msg string) bool {

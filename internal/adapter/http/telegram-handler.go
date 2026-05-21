@@ -15,7 +15,7 @@ func RegisterTelegramRoutes(api *gin.RouterGroup, store port.CredentialStore) {
 	{
 		tg.GET("/status", apiTelegramStatus(store))
 		tg.POST("/start", apiTelegramStart(store))
-		tg.POST("/stop", apiTelegramStop())
+		tg.POST("/stop", apiTelegramStop(store))
 		tg.POST("/test", apiTelegramTest(store))
 	}
 }
@@ -38,11 +38,11 @@ func apiTelegramStatus(store port.CredentialStore) gin.HandlerFunc {
 		}
 
 		status := gin.H{
-			"enabled":   settings.Telegram.Enabled,
-			"running":   false,
-			"username":  "",
-			"ownerID":   settings.Telegram.OwnerID,
-			"hasToken":  settings.Telegram.BotToken != "",
+			"enabled":    settings.Telegram.Enabled,
+			"running":    false,
+			"username":   "",
+			"ownerID":    settings.Telegram.OwnerID,
+			"hasToken":   settings.Telegram.BotToken != "",
 			"mutedUntil": settings.Telegram.MutedUntil,
 		}
 
@@ -90,7 +90,7 @@ func apiTelegramStart(store port.CredentialStore) gin.HandlerFunc {
 	}
 }
 
-func apiTelegramStop() gin.HandlerFunc {
+func apiTelegramStop(store port.CredentialStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		bot := getTelegramBot(c)
 		if bot == nil {
@@ -103,6 +103,11 @@ func apiTelegramStop() gin.HandlerFunc {
 			alerter.Stop()
 		}
 		bot.Stop()
+
+		// Persist disabled state so the bot/alerter does not restart on next boot.
+		_ = store.Update(func(cfg *domain.AppConfig) {
+			cfg.Settings.Telegram.Enabled = false
+		})
 
 		c.JSON(http.StatusOK, gin.H{"message": "bot stopped"})
 	}

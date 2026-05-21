@@ -61,6 +61,7 @@ func apiFetchConnectionModels(store port.CredentialStore) gin.HandlerFunc {
 			c.JSON(400, gin.H{"error": "No base URL configured for this connection"})
 			return
 		}
+		baseURL = domain.StripVersionSuffix(baseURL)
 
 		var modelsURL string
 		// chatgpt.com/backend-api/models instead of /v1/models

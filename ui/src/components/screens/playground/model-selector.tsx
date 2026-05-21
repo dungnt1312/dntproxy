@@ -15,6 +15,7 @@ interface Model {
   id: string
   name?: string
   provider: string
+  routePrefix?: string
   displayName?: string
 }
 
@@ -24,6 +25,7 @@ interface Connection {
   provider: string
   isActive: boolean
   supportedModels?: string[]
+  routePrefix?: string
 }
 
 interface ModelSelectorProps {
@@ -49,25 +51,29 @@ export function ModelSelector({
   onAccountChange,
   disabled,
 }: ModelSelectorProps) {
+  const displayProvider = (m: Model) => m.routePrefix || m.provider
+
   // Get unique providers from models
   const providers = useMemo(() => {
-    const providerSet = new Set(models.map(m => m.provider))
+    const providerSet = new Set(models.map(displayProvider))
     return Array.from(providerSet).sort()
   }, [models])
 
   // Filter models by selected provider
   const availableModels = useMemo(() => {
     if (!selectedProvider) return []
-    return models.filter(m => m.provider === selectedProvider)
+    return models.filter(m => displayProvider(m) === selectedProvider)
   }, [models, selectedProvider])
 
   // Filter connections by selected provider and model
   const availableAccounts = useMemo(() => {
     if (!selectedProvider) return []
     
-    const filtered = connections.filter(c => 
-      c.isActive && c.provider === selectedProvider
-    )
+    const filtered = connections.filter(c => {
+      if (!c.isActive) return false
+      if (c.routePrefix && c.routePrefix === selectedProvider) return true
+      return c.provider === selectedProvider
+    })
 
     // If model is selected, further filter by supportedModels
     if (selectedModel && filtered.length > 0) {

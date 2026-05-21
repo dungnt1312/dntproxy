@@ -4,6 +4,7 @@ import {
   Settings2,
   MoreHorizontal,
   RefreshCw,
+  Eraser,
   Trash2,
   Loader2,
   Lock,
@@ -131,6 +132,16 @@ export default function ConnectionCard({
       await onReload();
     } catch (e: any) {
       toast.error(e.message || "Failed to reset cooldown");
+    }
+  };
+
+  const handleClearError = async () => {
+    try {
+      await api.clearConnectionError(c.id);
+      toast.success("Connection error cleared");
+      await onReload();
+    } catch (e: any) {
+      toast.error(e.message || "Failed to clear connection error");
     }
   };
 
@@ -341,6 +352,14 @@ export default function ConnectionCard({
                     className="gap-2 cursor-pointer text-xs py-2 text-amber-600 focus:text-amber-700"
                   >
                     <RefreshCw size={15} /> Reset Cooldown
+                  </DropdownMenuItem>
+                )}
+                {hasIssue && (
+                  <DropdownMenuItem
+                    onClick={handleClearError}
+                    className="gap-2 cursor-pointer text-xs py-2 text-amber-600 focus:text-amber-700"
+                  >
+                    <Eraser size={15} /> Clear Error
                   </DropdownMenuItem>
                 )}
                 <DropdownMenuSeparator />

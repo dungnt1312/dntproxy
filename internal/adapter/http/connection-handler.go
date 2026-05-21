@@ -2,6 +2,7 @@ package http
 
 import (
 	"log"
+	"strings"
 	"time"
 
 	"github.com/dungnt/dntproxy/internal/domain"
@@ -87,6 +88,7 @@ func apiUpdateConnection(store port.CredentialStore) gin.HandlerFunc {
 			SetModels       bool     `json:"setModels,omitempty"`
 			APIKey          *string  `json:"apiKey,omitempty"`
 			BaseURL         *string  `json:"baseUrl,omitempty"`
+			RoutePrefix     *string  `json:"routePrefix,omitempty"`
 			ModelPrefix     *string  `json:"modelPrefix,omitempty"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -121,10 +123,14 @@ func apiUpdateConnection(store port.CredentialStore) gin.HandlerFunc {
 					if req.BaseURL != nil {
 						conn.BaseURL = *req.BaseURL
 					}
+					if req.RoutePrefix != nil {
+						conn.RoutePrefix = domain.NormalizeRoutePrefix(*req.RoutePrefix)
+					}
 					if req.ModelPrefix != nil {
 						conn.ModelPrefix = *req.ModelPrefix
 					}
 					conn.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+					domain.EnsureOpenAICompatibleRoutePrefixes(cfg.ProviderConnections)
 					break
 				}
 			}
@@ -138,6 +144,73 @@ func apiUpdateConnection(store port.CredentialStore) gin.HandlerFunc {
 		}
 		c.JSON(200, gin.H{"ok": true})
 	}
+}
+
+func apiClearConnectionError(store port.CredentialStore) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id := c.Param("id")
+		var req struct {
+			Model string `json:"model,omitempty"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil && err.Error() != "EOF" {
+			c.JSON(400, gin.H{"error": "Invalid request"})
+			return
+		}
+
+		found := false
+		if err := store.Update(func(cfg *domain.AppConfig) {
+			for i := range cfg.ProviderConnections {
+				if cfg.ProviderConnections[i].ID != id {
+					continue
+				}
+				conn := &cfg.ProviderConnections[i]
+				found = true
+				if req.Model != "" {
+					model := clearErrorModelKey(req.Model, *conn)
+					if conn.ModelLocks != nil {
+						delete(conn.ModelLocks, model)
+						if len(conn.ModelLocks) == 0 {
+							conn.ModelLocks = nil
+						}
+					}
+					if strings.Contains(conn.LastError, req.Model) || strings.Contains(conn.LastError, model) {
+						conn.LastError = ""
+						conn.LastErrorAt = ""
+					}
+				} else {
+					conn.RateLimitedUntil = ""
+					conn.BackoffLevel = 0
+					conn.LastError = ""
+					conn.LastErrorAt = ""
+					conn.ModelLocks = nil
+				}
+				conn.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+				break
+			}
+		}); err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+		if !found {
+			c.JSON(404, gin.H{"error": "Connection not found"})
+			return
+		}
+		c.JSON(200, gin.H{"ok": true})
+	}
+}
+
+func clearErrorModelKey(model string, conn domain.ProviderConnection) string {
+	if conn.Provider != "openai-compatible" || !strings.Contains(model, "/") {
+		return model
+	}
+	prefix := domain.NormalizeRoutePrefix(conn.RoutePrefix)
+	if prefix == "" {
+		prefix = domain.NormalizeRoutePrefix(conn.Name)
+	}
+	if prefix != "" && strings.HasPrefix(model, prefix+"/") {
+		return strings.TrimPrefix(model, prefix+"/")
+	}
+	return model
 }
 
 // === Reset Cooldown ===

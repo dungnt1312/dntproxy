@@ -46,6 +46,8 @@ export default function AddConnectionPage() {
         name: '',
         apiKey: '',
         baseUrl: '',
+        routePrefix: '',
+        modelPrefix: '',
         supportedModels: '',
     });
     const [glmForm, setGlmForm] = useState({
@@ -143,7 +145,7 @@ export default function AddConnectionPage() {
             authMethod: 'builder-id',
         });
         setOpenaiForm({ name: '', apiKey: '', supportedModels: '' });
-        setCustomForm({ name: '', apiKey: '', baseUrl: '', supportedModels: '' });
+        setCustomForm({ name: '', apiKey: '', baseUrl: '', routePrefix: '', modelPrefix: '', supportedModels: '' });
         setGlmForm({ name: '', apiKey: '', baseUrl: '', supportedModels: '' });
         setMinimaxForm({ name: '', apiKey: '', baseUrl: '', supportedModels: '' });
         setQwenForm({ name: '', apiKey: '', baseUrl: '', supportedModels: '' });
@@ -353,6 +355,8 @@ export default function AddConnectionPage() {
                 name: customForm.name || undefined,
                 apiKey: customForm.apiKey || undefined,
                 baseUrl: customForm.baseUrl,
+                routePrefix: customForm.routePrefix || undefined,
+                modelPrefix: customForm.modelPrefix || undefined,
                 supportedModels: models.length > 0 ? models : undefined,
             });
             handleSuccess('Custom added!');
@@ -1448,6 +1452,20 @@ export default function AddConnectionPage() {
                                         onChange={(e) => setCustomForm({ ...customForm, name: e.target.value })}
                                         placeholder="Display Name"
                                         className="text-xs"
+                                    />
+                                </div>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <Input
+                                        value={customForm.routePrefix}
+                                        onChange={(e) => setCustomForm({ ...customForm, routePrefix: e.target.value })}
+                                        placeholder="Route prefix (e.g. windsurf)"
+                                        className="text-xs font-mono"
+                                    />
+                                    <Input
+                                        value={customForm.modelPrefix}
+                                        onChange={(e) => setCustomForm({ ...customForm, modelPrefix: e.target.value })}
+                                        placeholder="Model prefix to strip (optional)"
+                                        className="text-xs font-mono"
                                     />
                                 </div>
                                 <Textarea

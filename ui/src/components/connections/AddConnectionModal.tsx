@@ -28,7 +28,7 @@ export default function AddConnectionModal({ onSuccess, onClose }: AddConnection
   const [importMode, setImportMode] = useState<ImportMode>('detect')
   const [form, setForm] = useState({ refreshToken: '', clientId: '', clientSecret: '', region: '', authMethod: 'builder-id' })
   const [openaiForm, setOpenaiForm] = useState({ name: '', apiKey: '', supportedModels: '' })
-  const [customForm, setCustomForm] = useState({ name: '', apiKey: '', baseUrl: '', modelPrefix: '', supportedModels: '' })
+  const [customForm, setCustomForm] = useState({ name: '', apiKey: '', baseUrl: '', routePrefix: '', modelPrefix: '', supportedModels: '' })
   const [glmForm, setGlmForm] = useState({ name: '', apiKey: '', baseUrl: '', supportedModels: '' })
   const [minimaxForm, setMinimaxForm] = useState({ name: '', apiKey: '', baseUrl: '', supportedModels: '' })
   const [anthropicForm, setAnthropicForm] = useState({ name: '', apiKey: '', baseUrl: '', supportedModels: '' })
@@ -63,7 +63,7 @@ export default function AddConnectionModal({ onSuccess, onClose }: AddConnection
   const resetForm = () => {
     setForm({ refreshToken: '', clientId: '', clientSecret: '', region: '', authMethod: 'builder-id' })
     setOpenaiForm({ name: '', apiKey: '', supportedModels: '' })
-    setCustomForm({ name: '', apiKey: '', baseUrl: '', modelPrefix: '', supportedModels: '' })
+    setCustomForm({ name: '', apiKey: '', baseUrl: '', routePrefix: '', modelPrefix: '', supportedModels: '' })
     setGlmForm({ name: '', apiKey: '', baseUrl: '', supportedModels: '' })
     setMinimaxForm({ name: '', apiKey: '', baseUrl: '', supportedModels: '' })
     setAnthropicForm({ name: '', apiKey: '', baseUrl: '', supportedModels: '' })
@@ -176,6 +176,7 @@ export default function AddConnectionModal({ onSuccess, onClose }: AddConnection
         name: customForm.name || undefined,
         apiKey: customForm.apiKey || undefined,
         baseUrl: customForm.baseUrl,
+        routePrefix: customForm.routePrefix || undefined,
         modelPrefix: customForm.modelPrefix || undefined,
         supportedModels: models.length > 0 ? models : undefined,
       })
@@ -568,7 +569,10 @@ export default function AddConnectionModal({ onSuccess, onClose }: AddConnection
                   <Input type="password" value={customForm.apiKey} onChange={e => setCustomForm({ ...customForm, apiKey: e.target.value })} placeholder="API Key (optional)" className="text-xs font-mono" />
                   <Input value={customForm.name} onChange={e => setCustomForm({ ...customForm, name: e.target.value })} placeholder="Display Name" className="text-xs" />
                 </div>
-                <Input value={customForm.modelPrefix} onChange={e => setCustomForm({ ...customForm, modelPrefix: e.target.value })} placeholder="Model Prefix (optional, e.g. my-provider/)" className="text-xs font-mono" />
+                <div className="grid grid-cols-2 gap-3">
+                  <Input value={customForm.routePrefix} onChange={e => setCustomForm({ ...customForm, routePrefix: e.target.value })} placeholder="Route prefix (e.g. windsurf)" className="text-xs font-mono" />
+                  <Input value={customForm.modelPrefix} onChange={e => setCustomForm({ ...customForm, modelPrefix: e.target.value })} placeholder="Model prefix to strip" className="text-xs font-mono" />
+                </div>
                 <Textarea value={customForm.supportedModels} onChange={e => setCustomForm({ ...customForm, supportedModels: e.target.value })} placeholder="Supported Models (one per line, optional)" rows={3} className="text-xs font-mono" />
                 <Button onClick={handleAddCustom} disabled={loading || !customForm.baseUrl} size="sm" className="w-full bg-purple-600 hover:bg-purple-700">
                   {loading ? 'Adding…' : 'Add Custom Connection'}

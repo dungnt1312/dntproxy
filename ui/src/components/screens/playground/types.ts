@@ -9,6 +9,7 @@ export type Model = {
   id: string;
   displayName: string;
   provider: string;
+  routePrefix?: string;
   capabilities?: string[];
 };
 
@@ -16,6 +17,7 @@ export type Connection = {
   id: string;
   name: string;
   provider: string;
+  routePrefix?: string;
   isActive: boolean;
   supportedModels?: string[];
 };

@@ -37,7 +37,7 @@ func (s *ModelAccessService) BuildPool(policy *port.APIKeyPolicy) (*EffectiveMod
 	effectiveConns := s.buildEffectiveConnections(cfg, policy)
 	models := s.buildDirectModels(cfg, effectiveConns, policy)
 	aliases := s.buildEffectiveAliases(cfg, models, policy)
-	combos := s.buildEffectiveCombos(cfg, models, effectiveConns, policy)
+	combos := s.buildEffectiveCombos(cfg, models, policy)
 
 	return &EffectiveModelPool{
 		Models:  models,
@@ -118,6 +118,7 @@ func (s *ModelAccessService) buildDirectModels(cfg *domain.AppConfig, conns []do
 	var order []string
 
 	for _, conn := range conns {
+		modelProvider := publicModelProvider(conn)
 		if len(conn.SupportedModels) == 0 {
 			// Connection supports all registry models for its provider
 			if cfg.ModelRegistry != nil {
@@ -125,25 +126,31 @@ func (s *ModelAccessService) buildDirectModels(cfg *domain.AppConfig, conns []do
 					if m.Provider != conn.Provider || !m.IsActive {
 						continue
 					}
-					if !ModelAllowedByPolicy(key, policy) {
+					publicKey := key
+					publicModel := strings.TrimPrefix(key, m.Provider+"/")
+					if modelProvider != conn.Provider {
+						publicKey = modelProvider + "/" + publicModel
+					}
+					if !ModelAllowedByPolicy(publicKey, policy) {
 						continue
 					}
-					if ref, exists := seen[key]; exists {
+					if ref, exists := seen[publicKey]; exists {
 						ref.ConnectionIDs = appendUnique(ref.ConnectionIDs, conn.ID)
 					} else {
-						seen[key] = &ModelRef{
-							QualifiedID:   key,
-							Provider:      m.Provider,
-							Model:         strings.TrimPrefix(key, m.Provider+"/"),
-							ConnectionIDs: []string{conn.ID},
+						seen[publicKey] = &ModelRef{
+							QualifiedID:    publicKey,
+							Provider:       m.Provider,
+							DisplayProvider: modelProvider,
+							Model:          publicModel,
+							ConnectionIDs:  []string{conn.ID},
 						}
-						order = append(order, key)
+						order = append(order, publicKey)
 					}
 				}
 			}
 		} else {
 			for _, modelID := range conn.SupportedModels {
-				key := conn.Provider + "/" + modelID
+				key := modelProvider + "/" + modelID
 				if !ModelAllowedByPolicy(key, policy) {
 					continue
 				}
@@ -151,10 +158,11 @@ func (s *ModelAccessService) buildDirectModels(cfg *domain.AppConfig, conns []do
 					ref.ConnectionIDs = appendUnique(ref.ConnectionIDs, conn.ID)
 				} else {
 					seen[key] = &ModelRef{
-						QualifiedID:   key,
-						Provider:      conn.Provider,
-						Model:         modelID,
-						ConnectionIDs: []string{conn.ID},
+						QualifiedID:    key,
+						Provider:       conn.Provider,
+						DisplayProvider: modelProvider,
+						Model:          modelID,
+						ConnectionIDs:  []string{conn.ID},
 					}
 					order = append(order, key)
 				}
@@ -217,17 +225,29 @@ func (s *ModelAccessService) buildEffectiveAliases(cfg *domain.AppConfig, models
 		}
 
 		// Check if target is routable (exists in model pool)
+		if _, ok := modelSet[StripConnectionPin(target)]; ok {
+			result = append(result, AliasRef{Name: alias, Target: target})
+			continue
+		}
+
 		normalizedTarget := NormalizeModelPolicyString(target)
 		stripped := StripConnectionPin(normalizedTarget)
 		if modelSet[stripped] {
 			result = append(result, AliasRef{Name: alias, Target: normalizedTarget})
+			continue
+		}
+
+		if resolvedTarget, ok := resolveOpenAICompatibleKey(stripped, models); ok {
+			if modelSet[resolvedTarget] {
+				result = append(result, AliasRef{Name: alias, Target: resolvedTarget})
+			}
 		}
 	}
 	return result
 }
 
 // buildEffectiveCombos returns combos that have at least one effective member.
-func (s *ModelAccessService) buildEffectiveCombos(cfg *domain.AppConfig, models []ModelRef, conns []domain.ProviderConnection, policy *port.APIKeyPolicy) []ComboRef {
+func (s *ModelAccessService) buildEffectiveCombos(cfg *domain.AppConfig, models []ModelRef, policy *port.APIKeyPolicy) []ComboRef {
 	if len(cfg.Combos) == 0 {
 		return nil
 	}
@@ -235,11 +255,6 @@ func (s *ModelAccessService) buildEffectiveCombos(cfg *domain.AppConfig, models 
 	modelSet := make(map[string]bool, len(models))
 	for _, m := range models {
 		modelSet[m.QualifiedID] = true
-	}
-
-	connSet := make(map[string]bool, len(conns))
-	for _, c := range conns {
-		connSet[c.ID] = true
 	}
 
 	var result []ComboRef
@@ -256,10 +271,21 @@ func (s *ModelAccessService) buildEffectiveCombos(cfg *domain.AppConfig, models 
 
 		var effectiveModels []string
 		for _, m := range combo.Models {
+			stripped := StripConnectionPin(m)
+			if modelSet[stripped] && ModelAllowedByPolicy(m, policy) {
+				effectiveModels = append(effectiveModels, m)
+				continue
+			}
 			normalized := NormalizeModelPolicyString(m)
-			stripped := StripConnectionPin(normalized)
+			stripped = StripConnectionPin(normalized)
 			if modelSet[stripped] && ModelAllowedByPolicy(normalized, policy) {
 				effectiveModels = append(effectiveModels, normalized)
+				continue
+			}
+			if resolved, ok := resolveOpenAICompatibleKey(stripped, models); ok {
+				if modelSet[resolved] && ModelAllowedByPolicy(normalized, policy) {
+					effectiveModels = append(effectiveModels, resolved)
+				}
 			}
 		}
 
@@ -294,6 +320,9 @@ func (s *ModelAccessService) buildRouteAttempt(qualifiedModel string, effectiveC
 	var connIDs []string
 	for _, conn := range effectiveConns {
 		if conn.Provider != parsed.Provider {
+			continue
+		}
+		if parsed.Provider == "openai-compatible" && parsed.ConnectionID != "" && conn.ID != parsed.ConnectionID {
 			continue
 		}
 		if !conn.SupportsModel(parsed.Model) {
@@ -333,6 +362,33 @@ func (s *ModelAccessService) buildRouteAttempt(qualifiedModel string, effectiveC
 		PinnedConnectionID:   parsed.ConnectionID,
 		AllowedConnectionIDs: attemptConnIDs,
 	}, true
+}
+
+func publicModelProvider(conn domain.ProviderConnection) string {
+	if conn.Provider == "openai-compatible" {
+		prefix := domain.NormalizeRoutePrefix(conn.RoutePrefix)
+		if prefix == "" {
+			prefix = domain.NormalizeRoutePrefix(conn.Name)
+		}
+		if prefix != "" {
+			return prefix
+		}
+	}
+	return conn.Provider
+}
+
+func resolveOpenAICompatibleKey(qualifiedModel string, models []ModelRef) (string, bool) {
+	parsed, err := ParseModelString(qualifiedModel)
+	if err != nil || parsed.Provider != "openai-compatible" {
+		return "", false
+	}
+	for _, model := range models {
+		if model.Provider != "openai-compatible" || model.Model != parsed.Model {
+			continue
+		}
+		return model.QualifiedID, true
+	}
+	return "", false
 }
 
 // policyConnectionIDs extracts the connection allowlist from a policy (nil-safe).

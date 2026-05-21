@@ -453,8 +453,11 @@ func (s *AccountSelector) MarkUnavailable(connectionID string, status int, error
 		}
 
 		if fb.CooldownMs > 0 {
-			conn.RateLimitedUntil = domain.CooldownUntil(fb.CooldownMs)
-			conn.BackoffLevel = fb.NewBackoffLevel
+			until := domain.CooldownUntil(fb.CooldownMs)
+			if !fb.ModelOnly {
+				conn.RateLimitedUntil = until
+				conn.BackoffLevel = fb.NewBackoffLevel
+			}
 			conn.LastError = errorText
 			conn.LastErrorAt = time.Now().UTC().Format(time.RFC3339)
 
@@ -462,7 +465,7 @@ func (s *AccountSelector) MarkUnavailable(connectionID string, status int, error
 				if conn.ModelLocks == nil {
 					conn.ModelLocks = make(map[string]string)
 				}
-				conn.ModelLocks[model] = domain.CooldownUntil(fb.CooldownMs)
+				conn.ModelLocks[model] = until
 			}
 		}
 	})

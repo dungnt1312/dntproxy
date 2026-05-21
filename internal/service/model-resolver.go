@@ -11,9 +11,10 @@ import (
 
 // ParsedModel represents a parsed model string with optional connection pinning.
 type ParsedModel struct {
-	Provider     string
-	Model        string
-	ConnectionID string // empty if not pinned
+	Provider      string
+	ProviderAlias string
+	Model         string
+	ConnectionID  string // empty if not pinned
 }
 
 // ParseModelString parses "provider/model@connectionId" format.
@@ -59,9 +60,10 @@ func ParseModelString(modelStr string) (*ParsedModel, error) {
 	provider := resolveProviderAlias(providerOrAlias)
 
 	return &ParsedModel{
-		Provider:     provider,
-		Model:        model,
-		ConnectionID: connID,
+		Provider:      provider,
+		ProviderAlias: providerOrAlias,
+		Model:         model,
+		ConnectionID:  connID,
 	}, nil
 }
 
@@ -156,6 +158,10 @@ func (r *ModelResolver) normalizeModelStr(modelStr string) (string, error) {
 		return "", err
 	}
 
+	if resolved, ok := r.resolveOpenAICompatiblePrefix(parsed); ok {
+		return resolved, nil
+	}
+
 	// Detect duplicate prefix: if model starts with "provider/", strip it
 	// Example: provider="glm", model="glm/glm-5.1" -> model="glm-5.1"
 	if strings.HasPrefix(parsed.Model, parsed.Provider+"/") {
@@ -168,6 +174,33 @@ func (r *ModelResolver) normalizeModelStr(modelStr string) (string, error) {
 		result += "@" + parsed.ConnectionID
 	}
 	return result, nil
+}
+
+func (r *ModelResolver) resolveOpenAICompatiblePrefix(parsed *ParsedModel) (string, bool) {
+	cfg, err := r.store.Load()
+	if err != nil || cfg == nil {
+		return "", false
+	}
+
+	for _, conn := range cfg.ProviderConnections {
+		if conn.Provider != "openai-compatible" || !conn.IsActive {
+			continue
+		}
+		routePrefix := domain.NormalizeRoutePrefix(conn.RoutePrefix)
+		if routePrefix == "" {
+			routePrefix = domain.NormalizeRoutePrefix(conn.Name)
+		}
+		if routePrefix == "" || routePrefix != parsed.ProviderAlias {
+			continue
+		}
+		model := parsed.Model
+		if strings.HasPrefix(model, parsed.ProviderAlias+"/") {
+			model = strings.TrimPrefix(model, parsed.ProviderAlias+"/")
+		}
+		return "openai-compatible/" + model + "@" + conn.ID, true
+	}
+
+	return "", false
 }
 
 // Resolve parses a model string and returns provider + model.

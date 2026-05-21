@@ -44,6 +44,7 @@ func RegisterAPIRoutes(r *gin.Engine, store port.CredentialStore, providers port
 		api.GET("/connections/:id/export", apiExportConnection(store))
 		api.POST("/connections/:id/test", apiTestConnection(store))
 		api.PUT("/connections/:id", apiUpdateConnection(store))
+		api.POST("/connections/:id/clear-error", apiClearConnectionError(store))
 		api.POST("/connections/:id/reset-cooldown", apiResetCooldown(store))
 		api.POST("/connections/:id/check-quota", apiCheckQuota(store))
 		api.POST("/connections/:id/test-model", apiTestModel(store, providers))

@@ -11,9 +11,11 @@ export function usePlaygroundModelSelection(models: Model[]) {
     return buildPlaygroundModelId(selectedProvider, selectedModel, selectedAccount);
   }, [selectedAccount, selectedModel, selectedProvider]);
 
+  const displayProvider = (m: Model) => m.routePrefix || m.provider
+
   const selectedModelDetails = useMemo(() => {
     return models.find((model) => (
-      model.provider === selectedProvider && getSelectableModelValue(model) === selectedModel
+      displayProvider(model) === selectedProvider && getSelectableModelValue(model) === selectedModel
     ));
   }, [models, selectedModel, selectedProvider]);
 
@@ -26,7 +28,7 @@ export function usePlaygroundModelSelection(models: Model[]) {
   const initializeSelection = useCallback((availableModels: Model[]) => {
     if (availableModels.length === 0) return;
     const first = availableModels[0];
-    setSelectedProvider(first.provider);
+    setSelectedProvider(displayProvider(first));
     setSelectedModel(getSelectableModelValue(first));
     setSelectedAccount("auto");
   }, []);
@@ -34,7 +36,7 @@ export function usePlaygroundModelSelection(models: Model[]) {
   const handleProviderChange = useCallback((provider: string) => {
     setSelectedProvider(provider);
     setSelectedAccount("auto");
-    const firstModel = models.find((model) => model.provider === provider);
+    const firstModel = models.find((model) => displayProvider(model) === provider);
     setSelectedModel(firstModel ? getSelectableModelValue(firstModel) : "");
   }, [models]);
 

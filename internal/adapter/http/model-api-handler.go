@@ -26,6 +26,7 @@ func apiListModels(store port.CredentialStore) gin.HandlerFunc {
 		if cfg != nil {
 			seen := make(map[string]bool)
 			reachableModels := make(map[string]bool)
+			reachablePublicModels := make(map[string]bool)
 			// Track which connections each model is available on
 			modelConnections := make(map[string][]gin.H)
 
@@ -37,61 +38,73 @@ func apiListModels(store port.CredentialStore) gin.HandlerFunc {
 				if !service.ConnectionAllowed(conn.ID, policy) {
 					continue
 				}
-				if providerFilter != "" && conn.Provider != providerFilter {
+				modelProvider := modelProviderForConnection(conn)
+				if providerFilter != "" && conn.Provider != providerFilter && modelProvider != providerFilter {
 					continue
 				}
 
 				connInfo := gin.H{
-					"id":       conn.ID,
-					"name":     conn.Name,
-					"provider": conn.Provider,
-					"isActive": conn.IsActive,
+					"id":          conn.ID,
+					"name":        conn.Name,
+					"provider":    conn.Provider,
+					"routePrefix": conn.RoutePrefix,
+					"isActive":    conn.IsActive,
 				}
 
 				if len(conn.SupportedModels) == 0 {
 					// No restriction — add all registry models for this provider
 					if cfg.ModelRegistry != nil {
 						for key, m := range cfg.ModelRegistry.Models {
-							if m.Provider == conn.Provider && m.IsActive {
-								reachableModels[key] = true
-							}
-							if !service.ModelAllowedByPolicy(key, policy) {
+							if m.Provider != conn.Provider || !m.IsActive {
 								continue
 							}
-							if m.Provider == conn.Provider && m.IsActive && !seen[key] {
-								seen[key] = true
-								modelConnections[key] = []gin.H{connInfo}
+							publicKey := key
+							publicModel := m.Name
+							if modelProvider != conn.Provider {
+								publicKey = modelProvider + "/" + key[len(m.Provider)+1:]
+							}
+							reachableModels[publicKey] = true
+							reachablePublicModels[publicKey] = true
+							if !service.ModelAllowedByPolicy(publicKey, policy) {
+								continue
+							}
+							if !seen[publicKey] {
+								seen[publicKey] = true
+								modelConnections[publicKey] = []gin.H{connInfo}
 								allModels = append(allModels, gin.H{
-									"id":              key,
-									"name":            m.Name,
-									"provider":        m.Provider,
+									"id":              publicKey,
+									"name":            publicModel,
+									"provider":        modelProvider,
+									"routePrefix":     conn.RoutePrefix,
 									"contextWindow":   m.ContextWindow,
 									"maxOutputTokens": m.MaxOutputTokens,
 									"inputPrice":      m.InputPrice,
 									"outputPrice":     m.OutputPrice,
 									"capabilities":    m.Capabilities,
 								})
-							} else if m.Provider == conn.Provider && m.IsActive && seen[key] {
+							} else {
 								// Model already seen, just add connection info
-								modelConnections[key] = append(modelConnections[key], connInfo)
+								modelConnections[publicKey] = append(modelConnections[publicKey], connInfo)
 							}
 						}
 					}
 				} else {
 					for _, modelID := range conn.SupportedModels {
-						key := conn.Provider + "/" + modelID
+						key := modelProvider + "/" + modelID
 						reachableModels[key] = true
+						reachablePublicModels[key] = true
 						if !service.ModelAllowedByPolicy(key, policy) {
 							continue
 						}
 						entry := gin.H{
-							"id":       key,
-							"name":     modelID,
-							"provider": conn.Provider,
+							"id":          key,
+							"name":        modelID,
+							"provider":    modelProvider,
+							"routePrefix": conn.RoutePrefix,
 						}
 						// Enrich with registry metadata if available
 						if cfg.ModelRegistry != nil {
-							if m := cfg.ModelRegistry.GetModel(key); m != nil {
+							if m := cfg.ModelRegistry.GetModel(conn.Provider + "/" + modelID); m != nil {
 								entry["name"] = m.Name
 								entry["contextWindow"] = m.ContextWindow
 								entry["maxOutputTokens"] = m.MaxOutputTokens
@@ -153,7 +166,7 @@ func apiListModels(store port.CredentialStore) gin.HandlerFunc {
 
 			// Add aliases
 			for alias, model := range cfg.ModelAliases {
-				if !aliasAllowedByPolicy(alias, model, reachableModels, policy) {
+				if !aliasAllowedByPolicy(alias, model, reachableModels, reachablePublicModels, policy) {
 					continue
 				}
 				allModels = append(allModels, gin.H{
@@ -166,7 +179,7 @@ func apiListModels(store port.CredentialStore) gin.HandlerFunc {
 
 			// Add combos
 			for _, combo := range cfg.Combos {
-				if !comboAllowedByPolicy(combo.Models, combo.Name, reachableModels, policy) {
+				if !comboAllowedByPolicy(combo.Models, combo.Name, reachableModels, reachablePublicModels, policy) {
 					continue
 				}
 				allModels = append(allModels, gin.H{
@@ -182,11 +195,11 @@ func apiListModels(store port.CredentialStore) gin.HandlerFunc {
 	}
 }
 
-func aliasAllowedByPolicy(alias string, target string, directModels map[string]bool, policy *port.APIKeyPolicy) bool {
+func aliasAllowedByPolicy(alias string, target string, directModels map[string]bool, publicModels map[string]bool, policy *port.APIKeyPolicy) bool {
 	if policy == nil {
 		return true
 	}
-	if len(policy.AllowedConnectionIDs) > 0 && !directModels[service.StripConnectionPin(service.NormalizeModelPolicyString(target))] {
+	if len(policy.AllowedConnectionIDs) > 0 && !hasReachableModel(target, directModels, publicModels) {
 		return false
 	}
 	if len(policy.AllowedModels) > 0 {
@@ -200,7 +213,7 @@ func aliasAllowedByPolicy(alias string, target string, directModels map[string]b
 	return true
 }
 
-func comboAllowedByPolicy(models []string, comboName string, directModels map[string]bool, policy *port.APIKeyPolicy) bool {
+func comboAllowedByPolicy(models []string, comboName string, directModels map[string]bool, publicModels map[string]bool, policy *port.APIKeyPolicy) bool {
 	if policy == nil {
 		return true
 	}
@@ -209,26 +222,62 @@ func comboAllowedByPolicy(models []string, comboName string, directModels map[st
 			if len(policy.AllowedConnectionIDs) == 0 {
 				return true
 			}
-			return comboHasReachableMember(models, directModels)
+			return comboHasReachableMember(models, directModels, publicModels)
 		}
 	}
 	for _, model := range models {
 		normalized := service.NormalizeModelPolicyString(model)
-		if directModels[service.StripConnectionPin(normalized)] && service.ModelAllowedByPolicy(normalized, policy) {
+		if hasReachableModel(model, directModels, publicModels) && service.ModelAllowedByPolicy(normalized, policy) {
 			return true
 		}
 	}
 	return false
 }
 
-func comboHasReachableMember(models []string, directModels map[string]bool) bool {
+func comboHasReachableMember(models []string, directModels map[string]bool, publicModels map[string]bool) bool {
 	for _, model := range models {
-		normalized := service.NormalizeModelPolicyString(model)
-		if directModels[service.StripConnectionPin(normalized)] {
+		if hasReachableModel(model, directModels, publicModels) {
 			return true
 		}
 	}
 	return false
+}
+
+func hasReachableModel(model string, directModels map[string]bool, publicModels map[string]bool) bool {
+	if directModels[service.StripConnectionPin(model)] {
+		return true
+	}
+	normalized := service.NormalizeModelPolicyString(model)
+	stripped := service.StripConnectionPin(normalized)
+	if directModels[stripped] {
+		return true
+	}
+	if publicModels == nil {
+		return false
+	}
+	parsed, err := service.ParseModelString(stripped)
+	if err == nil && parsed.Provider == "openai-compatible" {
+		for key := range directModels {
+			keyParsed, keyErr := service.ParseModelString(key)
+			if keyErr == nil && keyParsed.Provider != "openai-compatible" && keyParsed.Model == parsed.Model && publicModels[key] {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func modelProviderForConnection(conn domain.ProviderConnection) string {
+	if conn.Provider == "openai-compatible" {
+		prefix := domain.NormalizeRoutePrefix(conn.RoutePrefix)
+		if prefix == "" {
+			prefix = domain.NormalizeRoutePrefix(conn.Name)
+		}
+		if prefix != "" {
+			return prefix
+		}
+	}
+	return conn.Provider
 }
 
 // === Model Registry Management ===

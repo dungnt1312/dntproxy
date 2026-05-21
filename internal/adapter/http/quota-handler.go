@@ -58,11 +58,12 @@ func apiCheckQuota(store port.CredentialStore) gin.HandlerFunc {
 			return
 		}
 
-		// For OpenAI API Key / OpenAI-compatible: call /v1/models and read rate-limit headers
-		if conn.Provider == "openai" || conn.Provider == "openai-compatible" {
-			handleOpenAIAPIKeyQuota(c, conn, store, result)
-			return
-		}
+	// For OpenAI API key: call /v1/models and read rate-limit headers.
+	// OpenAI-compatible endpoints vary too much, so respect SupportsQuota=false.
+	if conn.Provider == "openai" {
+		handleOpenAIAPIKeyQuota(c, conn, store, result)
+		return
+	}
 
 		// For MiniMax: call /v1/api/openplatform/coding_plan/remains
 		if conn.Provider == "minimax" {
@@ -347,6 +348,7 @@ func handleOpenAIAPIKeyQuota(c *gin.Context, conn *domain.ProviderConnection, st
 		c.JSON(400, gin.H{"error": "No base URL configured"})
 		return
 	}
+	baseURL = domain.StripVersionSuffix(baseURL)
 
 	req, _ := http.NewRequest("GET", baseURL+"/v1/models", nil)
 	if conn.APIKey != "" {

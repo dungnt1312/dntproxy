@@ -50,7 +50,7 @@ export const api = {
     request('/connections/import', { method: 'POST', body: JSON.stringify(data) }),
   addOpenAIConnection: (data: { name?: string; apiKey: string; supportedModels?: string[] }) =>
     request('/connections/add-openai', { method: 'POST', body: JSON.stringify(data) }),
-  addCustomConnection: (data: { name?: string; apiKey?: string; baseUrl: string; modelPrefix?: string; supportedModels?: string[] }) =>
+  addCustomConnection: (data: { name?: string; apiKey?: string; baseUrl: string; routePrefix?: string; modelPrefix?: string; supportedModels?: string[] }) =>
     request('/connections/add-custom', { method: 'POST', body: JSON.stringify(data) }),
   addGLMConnection: (data: { name?: string; apiKey: string; baseUrl?: string; supportedModels?: string[] }) =>
     request('/connections/add-glm', { method: 'POST', body: JSON.stringify(data) }),
@@ -68,6 +68,8 @@ export const api = {
     request(`/connections/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   detectKiroToken: () => request('/connections/detect-kiro', { method: 'POST' }),
   resetCooldown: (id: string) => request(`/connections/${id}/reset-cooldown`, { method: 'POST' }),
+  clearConnectionError: (id: string, model?: string) =>
+    request(`/connections/${id}/clear-error`, { method: 'POST', body: JSON.stringify(model ? { model } : {}) }),
 
   // Kiro Auth Flows
   startBuilderID: () => request('/auth/kiro/start-builderid', { method: 'POST' }),

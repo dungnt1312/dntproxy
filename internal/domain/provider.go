@@ -1,6 +1,10 @@
 package domain
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+	"unicode"
+)
 
 // ProviderConnection represents a saved provider account.
 type ProviderConnection struct {
@@ -27,8 +31,11 @@ type ProviderConnection struct {
 	ModelLocks           map[string]string      `json:"modelLocks,omitempty"`
 	SupportedModels      []string               `json:"supportedModels,omitempty"`
 	BaseURL              string                 `json:"baseUrl,omitempty"`
+	// RoutePrefix is the public provider prefix for openai-compatible connections.
+	// Example: routePrefix "windsurf" exposes models as "windsurf/<model>" and pins routing to this connection.
+	RoutePrefix string `json:"routePrefix,omitempty"`
 	// ModelPrefix is used by openai-compatible connections to strip a prefix
-	// from incoming model names before forwarding (e.g. "my-" → strip so "my-gpt-4" → "gpt-4").
+	// from incoming model names before forwarding (e.g. "my-" to strip so "my-gpt-4" becomes "gpt-4").
 	ModelPrefix string `json:"modelPrefix,omitempty"`
 	CreatedAt   string `json:"createdAt,omitempty"`
 	UpdatedAt   string `json:"updatedAt,omitempty"`
@@ -97,4 +104,56 @@ func (c *Credentials) GetAuthMethod() string {
 		}
 	}
 	return ""
+}
+
+// NormalizeRoutePrefix converts free-form provider labels into a stable route prefix.
+func NormalizeRoutePrefix(prefix string) string {
+	prefix = strings.TrimSpace(strings.ToLower(prefix))
+	var b strings.Builder
+	lastDash := false
+	for _, r := range prefix {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if (r == '-' || r == '_' || r == '.') && b.Len() > 0 && !lastDash {
+			b.WriteRune('-')
+			lastDash = true
+		}
+	}
+	return strings.Trim(b.String(), "-")
+}
+
+// EnsureOpenAICompatibleRoutePrefixes fills missing custom route prefixes and avoids duplicates.
+func EnsureOpenAICompatibleRoutePrefixes(conns []ProviderConnection) {
+	used := make(map[string]bool, len(conns))
+	for i := range conns {
+		if conns[i].Provider != "openai-compatible" {
+			continue
+		}
+
+		base := NormalizeRoutePrefix(conns[i].RoutePrefix)
+		isExplicit := base != ""
+		if base == "" {
+			base = NormalizeRoutePrefix(conns[i].Name)
+		}
+		if base == "" {
+			base = "custom"
+		}
+		if isExplicit {
+			if _, reserved := ProviderAliasToID[base]; reserved {
+				base += "-custom"
+			}
+		} else if _, reserved := ProviderAliasToID[base]; reserved {
+			base += "-custom"
+		}
+
+		prefix := base
+		for n := 2; used[prefix]; n++ {
+			prefix = base + "-" + strconv.Itoa(n)
+		}
+		conns[i].RoutePrefix = prefix
+		used[prefix] = true
+	}
 }

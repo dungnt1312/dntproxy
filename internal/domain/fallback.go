@@ -36,6 +36,7 @@ type FallbackResult struct {
 	ShouldFallback  bool
 	CooldownMs      int
 	NewBackoffLevel int
+	ModelOnly       bool
 }
 
 // GetQuotaCooldown returns exponential backoff cooldown for a given level.
@@ -51,15 +52,19 @@ func GetQuotaCooldown(level int) int {
 func CheckFallbackError(status int, errorText string, backoffLevel int) FallbackResult {
 	lower := strings.ToLower(errorText)
 
+	if status == 403 && isModelEntitlementError(lower) {
+		return FallbackResult{ShouldFallback: true, CooldownMs: CooldownPaymentReq, NewBackoffLevel: backoffLevel, ModelOnly: true}
+	}
+
 	// Error text patterns take priority
 	if strings.Contains(lower, "no credentials") {
-		return FallbackResult{true, CooldownNotFound, backoffLevel}
+		return FallbackResult{ShouldFallback: true, CooldownMs: CooldownNotFound, NewBackoffLevel: backoffLevel}
 	}
 	if strings.Contains(lower, "request not allowed") {
-		return FallbackResult{true, CooldownRequestNotAlwd, backoffLevel}
+		return FallbackResult{ShouldFallback: true, CooldownMs: CooldownRequestNotAlwd, NewBackoffLevel: backoffLevel}
 	}
 	if strings.Contains(lower, "improperly formed request") {
-		return FallbackResult{true, CooldownTransient, backoffLevel}
+		return FallbackResult{ShouldFallback: true, CooldownMs: CooldownTransient, NewBackoffLevel: backoffLevel}
 	}
 
 	// Rate limit keywords → exponential backoff
@@ -70,33 +75,51 @@ func CheckFallbackError(status int, errorText string, backoffLevel int) Fallback
 			if newLevel > BackoffMaxLevel {
 				newLevel = BackoffMaxLevel
 			}
-			return FallbackResult{true, GetQuotaCooldown(backoffLevel), newLevel}
+			return FallbackResult{ShouldFallback: true, CooldownMs: GetQuotaCooldown(backoffLevel), NewBackoffLevel: newLevel}
 		}
 	}
 
 	// Status code based
 	if IsNonFallbackStatus(status) {
-		return FallbackResult{false, 0, backoffLevel}
+		return FallbackResult{ShouldFallback: false, CooldownMs: 0, NewBackoffLevel: backoffLevel}
 	}
 	switch status {
 	case 401:
-		return FallbackResult{true, CooldownUnauthorized, backoffLevel}
+		return FallbackResult{ShouldFallback: true, CooldownMs: CooldownUnauthorized, NewBackoffLevel: backoffLevel}
 	case 402, 403:
-		return FallbackResult{true, CooldownPaymentReq, backoffLevel}
+		return FallbackResult{ShouldFallback: true, CooldownMs: CooldownPaymentReq, NewBackoffLevel: backoffLevel}
 	case 404:
-		return FallbackResult{true, CooldownNotFound, backoffLevel}
+		return FallbackResult{ShouldFallback: true, CooldownMs: CooldownNotFound, NewBackoffLevel: backoffLevel}
 	case 429:
 		newLevel := backoffLevel + 1
 		if newLevel > BackoffMaxLevel {
 			newLevel = BackoffMaxLevel
 		}
-		return FallbackResult{true, GetQuotaCooldown(backoffLevel), newLevel}
+		return FallbackResult{ShouldFallback: true, CooldownMs: GetQuotaCooldown(backoffLevel), NewBackoffLevel: newLevel}
 	case 406, 408, 500, 502, 503, 504:
-		return FallbackResult{true, CooldownTransient, backoffLevel}
+		return FallbackResult{ShouldFallback: true, CooldownMs: CooldownTransient, NewBackoffLevel: backoffLevel}
 	}
 
 	// Default: fallback with transient cooldown
-	return FallbackResult{true, CooldownTransient, backoffLevel}
+	return FallbackResult{ShouldFallback: true, CooldownMs: CooldownTransient, NewBackoffLevel: backoffLevel}
+}
+
+func isModelEntitlementError(lower string) bool {
+	entitlementHints := []string{
+		"model_not_entitled",
+		"not entitled",
+		"not subscribed",
+		"not available",
+		"unavailable model",
+		"未订阅",
+		"封禁",
+	}
+	for _, hint := range entitlementHints {
+		if strings.Contains(lower, hint) {
+			return true
+		}
+	}
+	return false
 }
 
 // IsAccountUnavailable checks if a cooldown timestamp is still active.

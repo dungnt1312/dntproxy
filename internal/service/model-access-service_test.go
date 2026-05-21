@@ -318,6 +318,108 @@ func TestResolveRoute_Alias(t *testing.T) {
 	}
 }
 
+func TestBuildPool_OpenAICompatibleUsesRoutePrefix(t *testing.T) {
+	cfg := newTestConfig()
+	cfg.ProviderConnections = append(cfg.ProviderConnections, domain.ProviderConnection{
+		ID:              "conn-custom-1",
+		Provider:        "openai-compatible",
+		Name:            "Windsurf",
+		RoutePrefix:     "windsurf",
+		IsActive:        true,
+		SupportedModels: []string{"RL-4m"},
+	})
+	store := &testStore{cfg: cfg}
+	svc := NewModelAccessService(store)
+
+	pool, err := svc.BuildPool(nil)
+	if err != nil {
+		t.Fatalf("BuildPool: %v", err)
+	}
+
+	assertContains(t, modelRefIDs(pool.Models), "windsurf/RL-4m")
+	assertNotContains(t, modelRefIDs(pool.Models), "openai-compatible/RL-4m")
+}
+
+func TestResolveRoute_OpenAICompatibleRoutePrefixPinsConnection(t *testing.T) {
+	cfg := newTestConfig()
+	cfg.ProviderConnections = append(cfg.ProviderConnections,
+		domain.ProviderConnection{ID: "conn-windsurf", Provider: "openai-compatible", Name: "Windsurf", RoutePrefix: "windsurf", IsActive: true, SupportedModels: []string{"RL-4m"}},
+		domain.ProviderConnection{ID: "conn-other", Provider: "openai-compatible", Name: "Other", RoutePrefix: "other", IsActive: true, SupportedModels: []string{"RL-4m"}},
+	)
+	store := &testStore{cfg: cfg}
+	svc := NewModelAccessService(store)
+
+	plan, err := svc.ResolveRoute("windsurf/RL-4m", nil)
+	if err != nil {
+		t.Fatalf("ResolveRoute: %v", err)
+	}
+	if len(plan.Attempts) != 1 {
+		t.Fatalf("expected 1 attempt, got %d", len(plan.Attempts))
+	}
+	attempt := plan.Attempts[0]
+	if attempt.QualifiedModel != "openai-compatible/RL-4m@conn-windsurf" {
+		t.Fatalf("unexpected qualified model: %q", attempt.QualifiedModel)
+	}
+	if len(attempt.AllowedConnectionIDs) != 1 || attempt.AllowedConnectionIDs[0] != "conn-windsurf" {
+		t.Fatalf("expected pinned windsurf connection, got %v", attempt.AllowedConnectionIDs)
+	}
+}
+
+func TestResolveRoute_OpenAICompatibleRoutePrefixIgnoresMismatchedPin(t *testing.T) {
+	cfg := newTestConfig()
+	cfg.ProviderConnections = append(cfg.ProviderConnections,
+		domain.ProviderConnection{ID: "conn-windsurf", Provider: "openai-compatible", Name: "Windsurf", RoutePrefix: "windsurf", IsActive: true, SupportedModels: []string{"RL-4m"}},
+		domain.ProviderConnection{ID: "conn-other", Provider: "openai-compatible", Name: "Other", RoutePrefix: "other", IsActive: true, SupportedModels: []string{"RL-4m"}},
+	)
+	store := &testStore{cfg: cfg}
+	svc := NewModelAccessService(store)
+
+	plan, err := svc.ResolveRoute("windsurf/RL-4m@conn-other", nil)
+	if err != nil {
+		t.Fatalf("ResolveRoute: %v", err)
+	}
+	if len(plan.Attempts) != 1 {
+		t.Fatalf("expected 1 attempt, got %d", len(plan.Attempts))
+	}
+	attempt := plan.Attempts[0]
+	if attempt.QualifiedModel != "openai-compatible/RL-4m@conn-windsurf" {
+		t.Fatalf("route prefix must pin to owning connection, got %q", attempt.QualifiedModel)
+	}
+	if len(attempt.AllowedConnectionIDs) != 1 || attempt.AllowedConnectionIDs[0] != "conn-windsurf" {
+		t.Fatalf("expected windsurf connection, got %v", attempt.AllowedConnectionIDs)
+	}
+}
+
+func TestBuildPool_OpenAICompatibleAliasRespectsConnectionPolicy(t *testing.T) {
+	cfg := newTestConfig()
+	cfg.ProviderConnections = append(cfg.ProviderConnections,
+		domain.ProviderConnection{ID: "conn-windsurf", Provider: "openai-compatible", Name: "Windsurf", RoutePrefix: "windsurf", IsActive: true, SupportedModels: []string{"RL-4m"}},
+		domain.ProviderConnection{ID: "conn-other", Provider: "openai-compatible", Name: "Other", RoutePrefix: "other", IsActive: true, SupportedModels: []string{"RL-4m"}},
+	)
+	cfg.ModelAliases["legacy-custom"] = "openai-compatible/RL-4m"
+	store := &testStore{cfg: cfg}
+	svc := NewModelAccessService(store)
+
+	pool, err := svc.BuildPool(&port.APIKeyPolicy{AllowedConnectionIDs: []string{"conn-other"}})
+	if err != nil {
+		t.Fatalf("BuildPool: %v", err)
+	}
+
+	var found *AliasRef
+	for i := range pool.Aliases {
+		if pool.Aliases[i].Name == "legacy-custom" {
+			found = &pool.Aliases[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("expected legacy-custom alias to be visible")
+	}
+	if found.Target != "other/RL-4m" {
+		t.Fatalf("expected alias to resolve to policy-allowed route prefix, got %q", found.Target)
+	}
+}
+
 // --- helpers ---
 
 func modelRefIDs(refs []ModelRef) []string {

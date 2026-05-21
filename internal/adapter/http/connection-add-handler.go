@@ -85,7 +85,7 @@ func apiAddConnection(store port.CredentialStore, providerID string) gin.Handler
 			return
 		}
 
-		c.JSON(200, gin.H{"id": conn.ID, "name": conn.Name})
+		c.JSON(200, gin.H{"id": conn.ID, "name": conn.Name, "routePrefix": conn.RoutePrefix})
 	}
 }
 
@@ -99,6 +99,7 @@ func apiAddCustomConnection(store port.CredentialStore) gin.HandlerFunc {
 			Name            string   `json:"name"`
 			APIKey          string   `json:"apiKey"`
 			BaseURL         string   `json:"baseUrl"`
+			RoutePrefix     string   `json:"routePrefix,omitempty"`
 			ModelPrefix     string   `json:"modelPrefix,omitempty"`
 			SupportedModels []string `json:"supportedModels,omitempty"`
 		}
@@ -116,7 +117,9 @@ func apiAddCustomConnection(store port.CredentialStore) gin.HandlerFunc {
 			IsActive:        true,
 			APIKey:          req.APIKey,
 			BaseURL:         req.BaseURL,
+			RoutePrefix:     domain.NormalizeRoutePrefix(req.RoutePrefix),
 			ModelPrefix:     req.ModelPrefix,
+			TestStatus:      "active",
 			SupportedModels: req.SupportedModels,
 			CreatedAt:       now,
 			UpdatedAt:       now,
@@ -137,6 +140,12 @@ func apiAddCustomConnection(store port.CredentialStore) gin.HandlerFunc {
 				}
 			}
 			conn.Name = name
+			if conn.RoutePrefix == "" {
+				conn.RoutePrefix = domain.NormalizeRoutePrefix(name)
+			}
+			allConns := append(append([]domain.ProviderConnection(nil), appCfg.ProviderConnections...), conn)
+			domain.EnsureOpenAICompatibleRoutePrefixes(allConns)
+			conn.RoutePrefix = allConns[len(allConns)-1].RoutePrefix
 			appCfg.ProviderConnections = append(appCfg.ProviderConnections, conn)
 		}); err != nil {
 			c.JSON(500, gin.H{"error": "Failed to save: " + err.Error()})

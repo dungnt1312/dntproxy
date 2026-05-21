@@ -23,6 +23,7 @@ export default function EditConnectionModal({ conn, onSuccess, onClose }: EditCo
   const [name, setName] = useState(conn.name || '')
   const [apiKey, setApiKey] = useState('')
   const [baseUrl, setBaseUrl] = useState(conn.baseUrl || '')
+  const [routePrefix, setRoutePrefix] = useState(conn.routePrefix || '')
   const [modelPrefix, setModelPrefix] = useState(conn.modelPrefix || '')
   const [priority, setPriority] = useState(String(conn.priority ?? 0))
   const [weight, setWeight] = useState(String(conn.weight ?? 100))
@@ -38,6 +39,7 @@ export default function EditConnectionModal({ conn, onSuccess, onClose }: EditCo
       if (name.trim() && name !== conn.name) payload.name = name.trim()
       if (apiKey.trim()) payload.apiKey = apiKey.trim()
       if (baseUrl !== conn.baseUrl) payload.baseUrl = baseUrl.trim()
+      if (routePrefix !== (conn.routePrefix || '')) payload.routePrefix = routePrefix.trim()
       if (modelPrefix !== (conn.modelPrefix || '')) payload.modelPrefix = modelPrefix.trim()
       const nextPriority = parseInt(priority, 10)
       const nextWeight = parseInt(weight, 10)
@@ -112,16 +114,29 @@ export default function EditConnectionModal({ conn, onSuccess, onClose }: EditCo
             </div>
 
             {conn.provider === 'openai-compatible' && (
-              <div className="space-y-1">
-                <Label className="text-xs">Model Prefix <span className="opacity-70 font-normal">(optional, stripped from model names)</span></Label>
-                <Input
-                  value={modelPrefix}
-                  onChange={e => setModelPrefix(e.target.value)}
-                  placeholder="e.g. my-provider/"
-                  className="text-xs font-mono"
-                  autoComplete="off"
-                  data-1p-ignore
-                />
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label className="text-xs">Route Prefix</Label>
+                  <Input
+                    value={routePrefix}
+                    onChange={e => setRoutePrefix(e.target.value)}
+                    placeholder="e.g. windsurf"
+                    className="text-xs font-mono"
+                    autoComplete="off"
+                    data-1p-ignore
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Model Prefix <span className="opacity-70 font-normal">(strip)</span></Label>
+                  <Input
+                    value={modelPrefix}
+                    onChange={e => setModelPrefix(e.target.value)}
+                    placeholder="optional"
+                    className="text-xs font-mono"
+                    autoComplete="off"
+                    data-1p-ignore
+                  />
+                </div>
               </div>
             )}
 

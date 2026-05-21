@@ -13,13 +13,15 @@ interface ModelSelectorProps {
   selected: string[]
   onChange: (models: string[]) => void
   provider?: string
-  allowedModels?: string[] // if set, only show these model IDs
+  routePrefix?: string
+  allowedModels?: string[]
 }
 
 export default function ModelSelector({
   selected,
   onChange,
   provider,
+  routePrefix,
   allowedModels,
 }: ModelSelectorProps) {
   const [customInput, setCustomInput] = useState('')
@@ -88,7 +90,7 @@ export default function ModelSelector({
     onChange(selected.filter((m) => m !== modelId))
   }
 
-  const modelIdPrefix = modelProvider ?? provider ?? null
+  const modelIdPrefix = routePrefix || (modelProvider ?? provider ?? null)
 
   const addCustomModel = (): void => {
     const trimmed = customInput.trim()

@@ -124,6 +124,7 @@ func (db *JsonDB) readFromDisk() (*domain.AppConfig, error) {
 			cfg.ProviderConnections[i].Weight = 100
 		}
 	}
+	domain.EnsureOpenAICompatibleRoutePrefixes(cfg.ProviderConnections)
 	if cfg.Settings.ComboStrategy == "" {
 		cfg.Settings.ComboStrategy = "fallback"
 	}

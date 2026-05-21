@@ -27,7 +27,11 @@ func modelsHandler(modelAccess *service.ModelAccessService) gin.HandlerFunc {
 		var models []modelObject
 
 		for _, m := range pool.Models {
-			models = append(models, newModelObject(m.QualifiedID, m.Provider))
+			ownedBy := m.DisplayProvider
+			if ownedBy == "" {
+				ownedBy = m.Provider
+			}
+			models = append(models, newModelObject(m.QualifiedID, ownedBy))
 		}
 		for _, combo := range pool.Combos {
 			models = append(models, newModelObject(combo.Name, "combo"))

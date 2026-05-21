@@ -133,6 +133,43 @@ func TestHandleChat_RateLimit_FallbackToNextAccount(t *testing.T) {
 	}
 }
 
+func TestHandleChat_ModelEntitlementLocksModelOnly(t *testing.T) {
+	store := newTestCredentialStore(&domain.AppConfig{
+		ProviderConnections: []domain.ProviderConnection{
+			{ID: "conn-1", Name: "p1", Provider: "openai-compatible", Priority: 1, Weight: 100, IsActive: true},
+			{ID: "conn-2", Name: "p2", Provider: "openai-compatible", Priority: 2, Weight: 100, IsActive: true},
+		},
+		Settings: domain.Settings{ConnectionStrategy: ConnectionStrategyPriorityFallback},
+	})
+
+	exec := newFakeExecutor(map[string]fakeExecuteResponse{
+		"conn-1|claude-4-opus": {Status: 403, Err: errors.New(`returned 403: {"error":{"type":"model_not_entitled","message":"model claude-4-opus is not entitled"}}`)},
+		"conn-2|claude-4-opus": {Status: 200, Body: "data: [DONE]\n\n"},
+	})
+
+	registry := newTestProviderRegistry()
+	registry.RegisterExecutor("openai-compatible", exec)
+
+	svc := NewChatService(store, registry)
+
+	result := svc.HandleChat([]byte(`{"model":"openai-compatible/claude-4-opus","messages":[]}`), "openai-compatible/claude-4-opus", "req-entitlement", nil)
+	if result.StatusCode != 200 || result.Stream == nil {
+		t.Fatalf("expected fallback success, got status=%d err=%q", result.StatusCode, result.Error)
+	}
+	result.Stream.Close()
+
+	conn1, _ := store.GetConnectionByID("conn-1")
+	if conn1 == nil {
+		t.Fatal("conn-1 missing")
+	}
+	if conn1.RateLimitedUntil != "" {
+		t.Fatalf("model entitlement should not cooldown whole connection, got rateLimitedUntil=%q", conn1.RateLimitedUntil)
+	}
+	if !domain.IsModelLockActive(conn1.ModelLocks, "claude-4-opus") {
+		t.Fatalf("expected claude-4-opus model lock, got %#v", conn1.ModelLocks)
+	}
+}
+
 func TestHandleChat_UnsupportedModel_Returns400WithoutExecution(t *testing.T) {
 	store := newTestCredentialStore(&domain.AppConfig{
 		ProviderConnections: []domain.ProviderConnection{{
@@ -433,6 +470,31 @@ func TestHandleChat_ConnectionStrategyRoundRobin(t *testing.T) {
 	}
 	if exec.calls[0].ConnectionID != "conn-a" || exec.calls[1].ConnectionID != "conn-b" {
 		t.Fatalf("expected conn-a then conn-b, calls=%+v", exec.calls)
+	}
+}
+
+func TestHandleChat_OpenAICompatibleRoutePrefixUsesPinnedCredentials(t *testing.T) {
+	cfg := domain.DefaultConfig()
+	cfg.ProviderConnections = []domain.ProviderConnection{
+		{ID: "conn-windsurf", Provider: "openai-compatible", Name: "Windsurf", RoutePrefix: "windsurf", IsActive: true, APIKey: "ws-key", Weight: 100, SupportedModels: []string{"RL-4m"}},
+		{ID: "conn-other", Provider: "openai-compatible", Name: "Other", RoutePrefix: "other", IsActive: true, APIKey: "other-key", Weight: 100, SupportedModels: []string{"RL-4m"}},
+	}
+	store := newTestCredentialStore(&cfg)
+	exec := newFakeExecutor(map[string]fakeExecuteResponse{
+		"conn-windsurf|RL-4m": {Status: 200, Body: "data: [DONE]\n\n"},
+	})
+	registry := newTestProviderRegistry()
+	registry.RegisterExecutor("openai-compatible", exec)
+
+	svc := NewChatService(store, registry)
+	result := svc.HandleChat([]byte(`{"model":"windsurf/RL-4m","messages":[]}`), "windsurf/RL-4m", "req-custom", nil)
+	if result.StatusCode != 200 || result.Stream == nil {
+		t.Fatalf("expected success, got status=%d err=%q", result.StatusCode, result.Error)
+	}
+	result.Stream.Close()
+
+	if len(exec.calls) != 1 || exec.calls[0].ConnectionID != "conn-windsurf" {
+		t.Fatalf("expected windsurf connection, calls=%+v", exec.calls)
 	}
 }
 

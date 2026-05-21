@@ -14,6 +14,7 @@ export interface Connection {
   authType?: string;
   apiKey?: string;
   supportedModels?: string[];
+  routePrefix?: string;
   modelPrefix?: string;
   rateLimitedUntil?: string;
   expiresAt?: string;

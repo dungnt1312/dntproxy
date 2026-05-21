@@ -8,6 +8,8 @@ type ModelRef struct {
 	Provider string
 	// Model is the model name without provider prefix.
 	Model string
+	// DisplayProvider is the prefix shown to users (routePrefix for custom connections).
+	DisplayProvider string
 	// ConnectionIDs lists connections that can serve this model.
 	ConnectionIDs []string
 }

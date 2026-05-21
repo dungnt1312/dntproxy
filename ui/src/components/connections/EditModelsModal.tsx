@@ -14,6 +14,11 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 
+function connectionModelPrefix(conn: Connection): string {
+  if (conn.provider === 'openai-compatible' && conn.routePrefix) return conn.routePrefix
+  return getModelProviderId(conn.provider)
+}
+
 interface EditModelsModalProps {
   conn: Connection
   onSave: () => void
@@ -27,12 +32,12 @@ export default function EditModelsModal({ conn, onSave, onClose }: EditModelsMod
   const [fetchError, setFetchError] = useState('')
 
   useEffect(() => {
-    const modelProvider = getModelProviderId(conn.provider)
+    const prefix = connectionModelPrefix(conn)
     const withPrefix = (conn.supportedModels || []).map((m: string) =>
-      m.includes('/') ? m : `${modelProvider}/${m}`
+      m.includes('/') ? m : `${prefix}/${m}`
     )
     setSelectedModels(withPrefix)
-  }, [conn.id, conn.supportedModels, conn.provider])
+  }, [conn.id, conn.supportedModels, conn.provider, conn.routePrefix])
 
   const handleFetchModels = async () => {
     setFetching(true)
@@ -40,8 +45,8 @@ export default function EditModelsModal({ conn, onSave, onClose }: EditModelsMod
     try {
       const res = await api.fetchConnectionModels(conn.id)
       const fetched = res.models || []
-      const modelProvider = getModelProviderId(conn.provider)
-      setSelectedModels(fetched.map((m: string) => m.includes('/') ? m : `${modelProvider}/${m}`))
+      const prefix = connectionModelPrefix(conn)
+      setSelectedModels(fetched.map((m: string) => m.includes('/') ? m : `${prefix}/${m}`))
     } catch (e: any) {
       setFetchError(e.message || 'Failed to fetch models')
     } finally {
@@ -52,9 +57,9 @@ export default function EditModelsModal({ conn, onSave, onClose }: EditModelsMod
   const handleSave = async () => {
     setSaving(true)
     try {
-      const modelProvider = getModelProviderId(conn.provider)
+      const prefix = connectionModelPrefix(conn)
       const models = selectedModels.map(m => {
-        if (m.startsWith(modelProvider + '/')) return m.slice(modelProvider.length + 1)
+        if (m.startsWith(prefix + '/')) return m.slice(prefix.length + 1)
         const slash = m.indexOf('/')
         return slash >= 0 ? m.slice(slash + 1) : m
       })
@@ -90,7 +95,7 @@ export default function EditModelsModal({ conn, onSave, onClose }: EditModelsMod
               {fetchError && <span className="text-xs text-amber-600">{fetchError}</span>}
             </div>
           )}
-          <ModelSelector selected={selectedModels} onChange={setSelectedModels} provider={conn.provider} />
+          <ModelSelector selected={selectedModels} onChange={setSelectedModels} provider={conn.provider} routePrefix={conn.provider === 'openai-compatible' && conn.routePrefix ? conn.routePrefix : undefined} />
         </div>
 
         <DialogFooter>

@@ -18,6 +18,7 @@ import (
 	"github.com/dungnt/dntproxy/internal/adapter/provider"
 	"github.com/dungnt/dntproxy/internal/adapter/storage"
 	"github.com/dungnt/dntproxy/internal/adapter/telegram"
+	"github.com/dungnt/dntproxy/internal/adapter/xai"
 	"github.com/dungnt/dntproxy/internal/logger"
 	"github.com/dungnt/dntproxy/internal/service"
 	appversion "github.com/dungnt/dntproxy/internal/version"
@@ -137,6 +138,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	providers.RegisterExecutor("qwen", openaiAdapter.NewExecutor())
 	providers.RegisterExecutor("anthropic", anthropic.NewExecutor())
 	providers.RegisterExecutor("gemini", openaiAdapter.NewExecutor())
+	providers.RegisterExecutor("xai", xai.NewExecutor())
 
 	// Create tunnel manager (optional - can be nil)
 	tunnelService, err := service.NewTunnelService(store)

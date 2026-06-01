@@ -53,6 +53,7 @@ var ProviderAliasToID = map[string]string{
 	"kimi":       "kimi",
 	"minimax":    "minimax",
 	"deepseek":   "deepseek",
+	"grok":       "xai",
 	"groq":       "groq",
 	"xai":        "xai",
 	"mistral":    "mistral",

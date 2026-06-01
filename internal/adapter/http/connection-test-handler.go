@@ -172,12 +172,11 @@ func testProviderAPI(conn *domain.ProviderConnection) testProviderResult {
 	if baseURL == "" {
 		baseURL = cfg.DefaultBaseURL
 	}
-	baseURL = domain.StripVersionSuffix(baseURL)
 	chatPath := cfg.ChatPath
 	if chatPath == "" {
 		chatPath = "/v1/chat/completions"
 	}
-	url := baseURL + chatPath
+	url := providerTestURL(conn, cfg)
 
 	// Use first supported model for test, fallback to a generic one
 	testModel := "test"
@@ -187,11 +186,21 @@ func testProviderAPI(conn *domain.ProviderConnection) testProviderResult {
 		testModel = cfg.DefaultModels[0]
 	}
 
-	body := map[string]interface{}{
-		"model":      testModel,
-		"messages":   []map[string]string{{"role": "user", "content": "Hi"}},
-		"max_tokens": 1,
-		"stream":     false,
+	var body map[string]interface{}
+	if cfg.ChatPath == "/responses" {
+		body = map[string]interface{}{
+			"model":           testModel,
+			"input":           []map[string]string{{"role": "user", "content": "Hi"}},
+			"max_output_tokens": 1,
+			"stream":          false,
+		}
+	} else {
+		body = map[string]interface{}{
+			"model":      testModel,
+			"messages":   []map[string]string{{"role": "user", "content": "Hi"}},
+			"max_tokens": 1,
+			"stream":     false,
+		}
 	}
 	bodyBytes, _ := json.Marshal(body)
 
@@ -243,6 +252,21 @@ func testProviderAPI(conn *domain.ProviderConnection) testProviderResult {
 	// Other status codes
 	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 	return testProviderResult{OK: false, Error: fmt.Sprintf("HTTP %d: %s", resp.StatusCode, string(respBody))}
+}
+
+func providerTestURL(conn *domain.ProviderConnection, cfg domain.ProviderConfig) string {
+	baseURL := conn.BaseURL
+	if baseURL == "" {
+		baseURL = cfg.DefaultBaseURL
+	}
+	chatPath := cfg.ChatPath
+	if chatPath == "" {
+		chatPath = "/v1/chat/completions"
+	}
+	if conn.Provider != "xai" {
+		baseURL = domain.StripVersionSuffix(baseURL)
+	}
+	return baseURL + chatPath
 }
 
 // === Test Model ===

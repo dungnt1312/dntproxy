@@ -92,6 +92,11 @@ export const api = {
   pollQwenOAuth: (sessionId: string) =>
     request('/auth/qwen/poll', { method: 'POST', body: JSON.stringify({ sessionId }) }),
 
+  // xAI/Grok OAuth (PKCE)
+  startXAIOAuth: () => request('/auth/xai/start', { method: 'POST' }),
+  exchangeXAIOAuth: (sessionId: string, callbackUrl?: string, code?: string, state?: string) =>
+    request('/auth/xai/exchange', { method: 'POST', body: JSON.stringify({ sessionId, callbackUrl, code, state }) }),
+
   // Fetch models from provider API
   fetchConnectionModels: (id: string) =>
     request(`/connections/${id}/fetch-models`, { method: 'POST', body: JSON.stringify({}) }),

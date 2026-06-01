@@ -51,6 +51,8 @@ export default function AddConnectionModal({ onSuccess, onClose }: AddConnection
   const [openaiOAuthSession, setOpenaiOAuthSession] = useState<{ sessionId: string; authUrl: string } | null>(null)
   const [openaiManualCallback, setOpenaiManualCallback] = useState('')
   const openaiPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [xaiOAuthSession, setXaiOAuthSession] = useState<{ sessionId: string; authUrl: string; state?: string; redirectUri?: string } | null>(null)
+  const [xaiManualCallback, setXaiManualCallback] = useState('')
 
   useEffect(() => {
     return () => {
@@ -75,6 +77,7 @@ export default function AddConnectionModal({ onSuccess, onClose }: AddConnection
     setDeviceCode(null); setPolling(false)
     setSocialLogin(null); setSocialCallbackUrl('')
     setOpenaiOAuthSession(null); setOpenaiManualCallback('')
+    setXaiOAuthSession(null); setXaiManualCallback('')
     if (openaiPollRef.current) { clearInterval(openaiPollRef.current); openaiPollRef.current = null }
     setError('')
     if (pollTimerRef.current) { clearTimeout(pollTimerRef.current); pollTimerRef.current = null }
@@ -252,6 +255,26 @@ export default function AddConnectionModal({ onSuccess, onClose }: AddConnection
     } catch (e: any) { setError(e.message) } finally { setLoading(false) }
   }
 
+  const handleStartXAIOAuth = async () => {
+    setLoading(true); setError('')
+    try {
+      const res = await api.startXAIOAuth()
+      setXaiOAuthSession({ sessionId: res.sessionId, authUrl: res.authUrl, state: res.state, redirectUri: res.redirectUri })
+      window.open(res.authUrl, '_blank')
+    } catch (e: any) { setError(e.message) } finally { setLoading(false) }
+  }
+
+  const handleExchangeXAIOAuth = async () => {
+    if (!xaiOAuthSession) return
+    const callback = xaiManualCallback.trim()
+    if (!callback) { setError('Callback URL is required'); return }
+    setLoading(true); setError('')
+    try {
+      await api.exchangeXAIOAuth(xaiOAuthSession.sessionId, callback)
+      done('Grok Build connected!')
+    } catch (e: any) { setError(e.message) } finally { setLoading(false) }
+  }
+
   const DeviceCodePanel = () => deviceCode ? (
     <div className="space-y-3 mt-4 rounded-lg border bg-muted/40 p-4">
       <div className="text-center">
@@ -275,6 +298,7 @@ export default function AddConnectionModal({ onSuccess, onClose }: AddConnection
     { id: 'kiro', name: 'AWS / Kiro', icon: <ProviderLogoIcon provider="kiro" size={14} /> },
     { id: 'openai', name: 'OpenAI', icon: <ProviderLogoIcon provider="openai" size={14} /> },
     { id: 'qwen', name: 'Qwen', icon: <ProviderLogoIcon provider="qwen" size={14} /> },
+    { id: 'xai', name: 'Grok', icon: <ProviderLogoIcon provider="xai" size={14} /> },
     { id: 'glm', name: 'GLM', icon: <ProviderLogoIcon provider="glm" size={14} /> },
     { id: 'minimax', name: 'MiniMax', icon: <ProviderLogoIcon provider="minimax" size={14} /> },
     { id: 'anthropic', name: 'Anthropic', icon: <ProviderLogoIcon provider="anthropic" size={14} /> },
@@ -577,6 +601,46 @@ export default function AddConnectionModal({ onSuccess, onClose }: AddConnection
                 <Button onClick={handleAddCustom} disabled={loading || !customForm.baseUrl} size="sm" className="w-full bg-purple-600 hover:bg-purple-700">
                   {loading ? 'Adding…' : 'Add Custom Connection'}
                 </Button>
+              </div>
+            )}
+
+            {/* Grok Build */}
+            {provider === 'xai' && (
+              <div className="space-y-4 max-w-md mx-auto">
+                <div className="text-center space-y-1">
+                  <p className="text-xs text-muted-foreground">Connect your Grok Build account with xAI OAuth. dntproxy stores the refresh token locally and routes models as <code className="bg-muted px-1 rounded">grok/&lt;model&gt;</code>.</p>
+                </div>
+
+                {!xaiOAuthSession ? (
+                  <Button onClick={handleStartXAIOAuth} disabled={loading} size="sm" className="w-full gap-2 bg-slate-900 hover:bg-slate-800 text-white">
+                    {loading ? <Loader2 size={13} className="animate-spin" /> : <ExternalLink size={13} />}
+                    {loading ? 'Starting…' : 'Connect Grok Build'}
+                  </Button>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="rounded-lg border bg-muted/40 p-4 text-sm space-y-2">
+                      <p className="font-medium">Finish Grok authorization</p>
+                      <ol className="list-decimal list-inside text-xs text-muted-foreground space-y-1">
+                        <li>Complete login in the browser.</li>
+                        <li>Copy the final callback URL from the browser.</li>
+                        <li>Paste it below to save the connection.</li>
+                      </ol>
+                      {xaiOAuthSession.redirectUri && (
+                        <p className="text-[10px] text-muted-foreground break-all">Expected redirect: <code className="bg-muted px-1 rounded">{xaiOAuthSession.redirectUri}</code></p>
+                      )}
+                    </div>
+                    <Input value={xaiManualCallback} onChange={e => setXaiManualCallback(e.target.value)} placeholder="http://127.0.0.1:56121/callback?code=...&state=..." className="text-xs font-mono" />
+                    <div className="flex gap-2">
+                      <Button onClick={handleExchangeXAIOAuth} disabled={loading || !xaiManualCallback.trim()} size="sm" className="flex-1 bg-slate-900 hover:bg-slate-800 text-white">
+                        {loading ? <><Loader2 size={13} className="animate-spin mr-2" />Saving…</> : 'Save Connection'}
+                      </Button>
+                      <Button asChild variant="outline" size="sm">
+                        <a href={xaiOAuthSession.authUrl} target="_blank" rel="noopener noreferrer"><ExternalLink size={13} /></a>
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => { setXaiOAuthSession(null); setXaiManualCallback(''); setError('') }}>Cancel</Button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 

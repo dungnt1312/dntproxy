@@ -199,8 +199,8 @@ func (e *Executor) executeCodexResponses(model string, body []byte, credentials 
 
 	start := time.Now()
 
-	// Execute request using shared client (connection reuse, no stream timeout)
-	resp, err := shared.StreamingHTTPClient.Do(req)
+	// Execute request using Codex-specific client: no stream timeout, longer time-to-first-byte.
+	resp, err := doCodexRequestWithRetry(req, codexRetryAttempts(), time.Second, codexHTTPClient.Do)
 	duration := time.Since(start)
 
 	if err != nil {

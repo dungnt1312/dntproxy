@@ -155,6 +155,12 @@ func (h *UsageHandler) fetchUsage(conn *domain.ProviderConnection) (*UsageRespon
 		return fetchKiroUsage(conn)
 	case "minimax":
 		return fetchMiniMaxUsage(conn)
+	case "xai":
+		return &UsageResponse{
+			Provider: "xai",
+			Message:  "xAI does not expose live quota for Grok Build OAuth; local usage appears in logs after successful requests.",
+			Quotas:   []QuotaBucket{},
+		}, nil
 	default:
 		return &UsageResponse{
 			Provider: conn.Provider,

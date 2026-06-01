@@ -10,6 +10,7 @@ export const PROVIDERS = [
     { id: 'kiro', name: getProviderLabel('kiro'), icon: 'KI' },
     { id: 'openai', name: getProviderLabel('openai'), icon: 'OA' },
     { id: 'qwen', name: getProviderLabel('qwen'), icon: 'QW' },
+    { id: 'xai', name: getProviderLabel('xai'), icon: 'XA' },
     { id: 'glm', name: getProviderLabel('glm'), icon: 'GL' },
     { id: 'minimax', name: getProviderLabel('minimax'), icon: 'MM' },
     { id: 'anthropic', name: getProviderLabel('anthropic'), icon: 'AN' },
@@ -186,4 +187,3 @@ export function StatusRow({ conn }: { conn: Connection }) {
 }
 
 // EOF
-

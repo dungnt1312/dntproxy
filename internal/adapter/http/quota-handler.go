@@ -71,6 +71,17 @@ func apiCheckQuota(store port.CredentialStore) gin.HandlerFunc {
 			return
 		}
 
+		if conn.Provider == "xai" {
+			c.JSON(200, gin.H{
+				"provider": conn.Provider,
+				"name":     conn.Name,
+				"hasData":  false,
+				"message":  "xAI does not expose live quota for Grok Build OAuth; usage appears after successful requests.",
+				"buckets":  []interface{}{},
+			})
+			return
+		}
+
 		// For providers without quota check support (GLM, Qwen, etc.)
 		providerCfg := domain.GetProviderConfig(conn.Provider)
 		c.JSON(200, gin.H{

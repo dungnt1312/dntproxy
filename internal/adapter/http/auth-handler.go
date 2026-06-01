@@ -19,6 +19,9 @@ var (
 	qwenSessions   = make(map[string]*qwenSession)
 	qwenSessionsMu sync.Mutex
 
+	xaiSessions   = make(map[string]*xaiSession)
+	xaiSessionsMu sync.Mutex
+
 	maxAuthSessions = 1000
 )
 
@@ -47,6 +50,7 @@ func init() {
 			cleanupAuthSessions()
 			cleanupOpenAISessions()
 			cleanupQwenSessions()
+			cleanupXAISessions()
 		}
 	}()
 }
@@ -96,6 +100,10 @@ func RegisterAuthRoutes(r *gin.Engine, store port.CredentialStore) {
 		// Qwen OAuth (Device Code Flow)
 		authGroup.POST("/qwen/start", authQwenStart())
 		authGroup.POST("/qwen/poll", authQwenPoll(store))
+
+		// xAI/Grok OAuth (PKCE, Authorization Code)
+		authGroup.POST("/xai/start", authXAIStart())
+		authGroup.POST("/xai/exchange", authXAIExchange(store))
 	}
 
 	// Fetch models from provider API

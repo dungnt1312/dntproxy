@@ -100,6 +100,12 @@ export default function AddConnectionPage() {
     } | null>(null);
     const [openaiManualCallback, setOpenaiManualCallback] = useState('');
     const openaiPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const [xaiOAuthSession, setXaiOAuthSession] = useState<{
+        sessionId: string;
+        authUrl: string;
+        redirectUri?: string;
+    } | null>(null);
+    const [xaiManualCallback, setXaiManualCallback] = useState('');
 
     useEffect(() => {
         return () => {
@@ -125,6 +131,11 @@ export default function AddConnectionPage() {
         }
         setOpenaiOAuthSession(null);
         setOpenaiManualCallback('');
+    }, []);
+
+    const clearXAIAuth = useCallback(() => {
+        setXaiOAuthSession(null);
+        setXaiManualCallback('');
     }, []);
 
     const clearQwenPolling = useCallback(() => {
@@ -157,6 +168,7 @@ export default function AddConnectionPage() {
         setSocialLogin(null);
         setSocialCallbackUrl('');
         clearOpenAIPolling();
+        clearXAIAuth();
         setError('');
     };
 
@@ -339,6 +351,38 @@ export default function AddConnectionPage() {
                 supportedModels: models.length > 0 ? models : undefined,
             });
             handleSuccess('OpenAI added!');
+        } catch (e: any) {
+            setError(e.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleStartXAIOAuth = async () => {
+        setLoading(true);
+        setError('');
+        try {
+            const res = await api.startXAIOAuth();
+            setXaiOAuthSession({
+                sessionId: res.sessionId,
+                authUrl: res.authUrl,
+                redirectUri: res.redirectUri,
+            });
+            window.open(res.authUrl, '_blank');
+        } catch (e: any) {
+            setError(e.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleExchangeXAIOAuth = async () => {
+        if (!xaiOAuthSession || !xaiManualCallback.trim()) return;
+        setLoading(true);
+        setError('');
+        try {
+            const res = await api.exchangeXAIOAuth(xaiOAuthSession.sessionId, xaiManualCallback.trim());
+            handleSuccess(`Grok Build connected! ${res.email || res.name || ''}`);
         } catch (e: any) {
             setError(e.message);
         } finally {
@@ -553,6 +597,13 @@ export default function AddConnectionPage() {
             icon: <ProviderLogoIcon provider="qwen" size={24} />,
             description: 'Alibaba Qwen models',
             auth: 'OAuth, API key',
+        },
+        {
+            id: 'xai',
+            name: 'Grok',
+            icon: <ProviderLogoIcon provider="xai" size={24} />,
+            description: 'Grok Build / xAI',
+            auth: 'OAuth',
         },
         {
             id: 'glm',
@@ -1489,6 +1540,79 @@ export default function AddConnectionPage() {
                                     {loading ? 'Adding…' : 'Add Custom Connection'}
                                 </Button>
                             </div>
+                        </div>
+                    )}
+
+                    {/* GLM (Zhipu AI) */}
+                    {provider === 'xai' && (
+                        <div className="max-w-lg mx-auto space-y-5">
+                            <div className="text-center">
+                                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-slate-500/10 mx-auto">
+                                    <ProviderLogoIcon provider="xai" size={20} />
+                                </div>
+                                <p className="font-medium text-sm mt-3 mb-1">Grok Build</p>
+                                <p className="text-xs text-muted-foreground">
+                                    Connect your Grok Build account with xAI OAuth. Models route as{' '}
+                                    <code className="bg-muted px-1.5 py-0.5 rounded text-[11px]">grok/&lt;model&gt;</code>.
+                                </p>
+                            </div>
+
+                            {!xaiOAuthSession ? (
+                                <div className="space-y-4 text-center">
+                                    <Button
+                                        onClick={handleStartXAIOAuth}
+                                        disabled={loading}
+                                        size="sm"
+                                        className="gap-2 bg-slate-900 hover:bg-slate-800 text-white"
+                                    >
+                                        {loading ? (
+                                            <Loader2 size={13} className="animate-spin" />
+                                        ) : (
+                                            <ExternalLink size={13} />
+                                        )}
+                                        {loading ? 'Starting…' : 'Connect Grok Build'}
+                                    </Button>
+                                    <p className="text-[10px] text-muted-foreground">
+                                        Browser opens to xAI OAuth. Paste the callback URL here after authorization.
+                                    </p>
+                                </div>
+                            ) : (
+                                <div className="space-y-4 rounded-lg border bg-muted/40 p-5">
+                                    <div className="text-center space-y-1">
+                                        <p className="text-sm font-medium">Finish Grok authorization</p>
+                                        {xaiOAuthSession.redirectUri && (
+                                            <p className="text-[10px] text-muted-foreground break-all">
+                                                Expected redirect:{' '}
+                                                <code className="bg-muted px-1 rounded">{xaiOAuthSession.redirectUri}</code>
+                                            </p>
+                                        )}
+                                    </div>
+                                    <Input
+                                        value={xaiManualCallback}
+                                        onChange={(e) => setXaiManualCallback(e.target.value)}
+                                        placeholder="http://127.0.0.1:56121/callback?code=...&state=..."
+                                        className="text-xs font-mono"
+                                    />
+                                    <div className="flex gap-2">
+                                        <Button
+                                            onClick={handleExchangeXAIOAuth}
+                                            disabled={loading || !xaiManualCallback.trim()}
+                                            size="sm"
+                                            className="flex-1 bg-slate-900 hover:bg-slate-800 text-white"
+                                        >
+                                            {loading ? 'Processing…' : 'Submit Callback'}
+                                        </Button>
+                                        <Button asChild variant="outline" size="sm">
+                                            <a href={xaiOAuthSession.authUrl} target="_blank" rel="noopener noreferrer">
+                                                <ExternalLink size={13} />
+                                            </a>
+                                        </Button>
+                                        <Button type="button" variant="outline" size="sm" onClick={clearXAIAuth}>
+                                            Cancel
+                                        </Button>
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     )}
 

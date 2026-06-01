@@ -56,6 +56,12 @@ func (s *TokenRefreshService) Refresh(conn *domain.ProviderConnection) (*domain.
 		return s.refreshQwen(conn)
 	}
 
+	// xAI OAuth refresh
+	if conn.Provider == "xai" {
+		log.Printf("[TOKEN] Refreshing xAI token for %s", conn.Name)
+		return s.refreshXAI(conn)
+	}
+
 	// Kiro refresh
 	authMethod := getStringFromMap(conn.ProviderSpecificData, "authMethod")
 	clientID := getStringFromMap(conn.ProviderSpecificData, "clientId")
@@ -145,6 +151,46 @@ func (s *TokenRefreshService) refreshQwen(conn *domain.ProviderConnection) (*dom
 	conn.ExpiresIn = expiresIn
 	conn.ExpiresAt = time.Now().Add(time.Duration(expiresIn) * time.Second).UTC().Format(time.RFC3339)
 	conn.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+
+	return conn, nil
+}
+
+// refreshXAI refreshes xAI OAuth token.
+func (s *TokenRefreshService) refreshXAI(conn *domain.ProviderConnection) (*domain.ProviderConnection, error) {
+	tokenEndpoint := getStringFromMap(conn.ProviderSpecificData, "tokenEndpoint")
+	tokens, err := RefreshXAIToken(conn.RefreshToken, tokenEndpoint)
+	if err != nil {
+		return nil, fmt.Errorf("xai refresh failed: %w", err)
+	}
+
+	conn.AccessToken = tokens.AccessToken
+	if tokens.RefreshToken != "" {
+		conn.RefreshToken = tokens.RefreshToken
+	}
+
+	expiresIn := tokens.ExpiresIn
+	if expiresIn == 0 {
+		expiresIn = 3600
+	}
+	conn.ExpiresIn = expiresIn
+	conn.ExpiresAt = time.Now().Add(time.Duration(expiresIn) * time.Second).UTC().Format(time.RFC3339)
+	conn.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+
+	if conn.ProviderSpecificData == nil {
+		conn.ProviderSpecificData = make(map[string]interface{})
+	}
+	if tokens.IDToken != "" {
+		conn.ProviderSpecificData["idToken"] = tokens.IDToken
+	}
+	if tokens.Subject != "" {
+		conn.ProviderSpecificData["subject"] = tokens.Subject
+	}
+	if tokenEndpoint != "" {
+		conn.ProviderSpecificData["tokenEndpoint"] = tokenEndpoint
+	}
+	if tokens.Email != "" {
+		conn.Email = tokens.Email
+	}
 
 	return conn, nil
 }

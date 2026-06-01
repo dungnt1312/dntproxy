@@ -106,6 +106,25 @@ func TestParseModelString(t *testing.T) {
 	}
 }
 
+func TestParseModelStringGrokPrefix(t *testing.T) {
+	parsed, err := ParseModelString("grok/grok-4.3@conn-xai")
+	if err != nil {
+		t.Fatalf("ParseModelString() error = %v", err)
+	}
+	if parsed.Provider != "xai" {
+		t.Fatalf("provider = %q, want xai", parsed.Provider)
+	}
+	if parsed.ProviderAlias != "grok" {
+		t.Fatalf("provider alias = %q, want grok", parsed.ProviderAlias)
+	}
+	if parsed.Model != "grok-4.3" {
+		t.Fatalf("model = %q, want grok-4.3", parsed.Model)
+	}
+	if parsed.ConnectionID != "conn-xai" {
+		t.Fatalf("connection ID = %q, want conn-xai", parsed.ConnectionID)
+	}
+}
+
 func TestNormalizeModelStr(t *testing.T) {
 	store := &mockCredentialStore{}
 	resolver := NewModelResolver(store)

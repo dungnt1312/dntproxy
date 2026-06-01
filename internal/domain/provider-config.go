@@ -155,6 +155,18 @@ var ProviderConfigs = map[string]ProviderConfig{
 		SupportsQuota:  false,
 		// DefaultModels auto-populated from model-definition registry
 	},
+
+	"xai": {
+		ID:             "xai",
+		Name:           "Grok Build (xAI)",
+		Icon:           "grok",
+		AuthMethods:    []string{"oauth"},
+		DefaultBaseURL: "https://api.x.ai/v1",
+		ChatPath:       "/responses",
+		Format:         FormatOpenAIChat,
+		SupportsQuota:  false,
+		// DefaultModels auto-populated from model-definition registry
+	},
 }
 
 // GetProviderConfig returns the config for a provider ID.

@@ -160,6 +160,11 @@ func serveStaticUI(r *gin.Engine) {
 	r.GET("/dashboard", serveIndex)
 	r.GET("/dashboard/", serveIndex)
 
+	// Redirect root to dashboard
+	r.GET("/", func(c *gin.Context) {
+		c.Redirect(http.StatusFound, "/dashboard/")
+	})
+
 	// SPA fallback
 	r.NoRoute(func(c *gin.Context) {
 		path := c.Request.URL.Path
@@ -181,16 +186,6 @@ func serveStaticUI(r *gin.Engine) {
 				f.Close()
 			}
 			serveIndex(c)
-			return
-		}
-
-		if path == "/" {
-			c.JSON(http.StatusOK, gin.H{
-				"name":      "dntproxy",
-				"version":   version.Version,
-				"status":    "running",
-				"dashboard": "/dashboard",
-			})
 			return
 		}
 

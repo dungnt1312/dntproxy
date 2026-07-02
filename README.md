@@ -44,6 +44,15 @@ Or download binaries directly from [Releases](https://github.com/dungnt1312/dntp
 
 The binary includes the web UI — no extra files needed. Just download and run.
 
+**Install from local source:**
+```bash
+git clone https://github.com/dungnt1312/dntproxy.git
+cd dntproxy
+bash ./install-local.sh
+```
+
+This builds the UI and Go binary from the current source tree, then installs `dntproxy` to `~/.local/bin`.
+
 ### 2. Run the Server
 ```bash
 dntproxy

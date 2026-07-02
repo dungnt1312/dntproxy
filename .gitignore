@@ -15,6 +15,7 @@ db.json
 logs.db
 logs.db-shm
 logs.db-wal
+/logs/
 
 # UI
 ui/node_modules/

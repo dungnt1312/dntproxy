@@ -65,7 +65,9 @@ func NewRouter(store port.CredentialStore, providers port.ProviderRegistry, tunn
 	{
 		v1.POST("/chat/completions", chatHandler(chatService, store, comp))
 		v1.POST("/messages", messagesHandler(chatService, store, comp))
-		v1.GET("/models", modelsHandler(modelAccess))
+		v1.POST("/images/generations", imageGenerationsHandler(store, providers))
+		v1.POST("/images/edits", imageEditsHandler(store, providers))
+		v1.GET("/models", modelsHandler(modelAccess, store))
 	}
 
 	// Dashboard API endpoints

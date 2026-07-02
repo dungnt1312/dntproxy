@@ -7,86 +7,48 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { ProviderLogo } from '@/components/connections/ProviderLogo'
 import { cn } from '@/lib/utils'
-import { getStoredApiKey } from '@/lib/go-api'
+import { goApi } from '@/lib/go-api'
 import type { LogEntry } from '@/types/logs'
 
-const SSE_BASE = import.meta.env.VITE_GO_API_URL || '/api'
-
+const POLL_INTERVAL_MS = 3000
 const MAX_ENTRIES = 30
 
 export function LiveRequestStream() {
   const [entries, setEntries] = useState<LogEntry[]>([])
   const [paused, setPaused] = useState(false)
   const [open, setOpen] = useState(true)
-  const esRef = useRef<EventSource | null>(null)
-  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const pausedRef = useRef(false)
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  useEffect(() => {
-    pausedRef.current = paused
-  }, [paused])
-
-  const clearReconnectTimer = useCallback(() => {
-    if (!reconnectTimerRef.current) return
-    clearTimeout(reconnectTimerRef.current)
-    reconnectTimerRef.current = null
+  const fetchLogs = useCallback(async () => {
+    try {
+      const res = await goApi.getLogs({ range: '1h', limit: MAX_ENTRIES })
+      if (Array.isArray(res)) {
+        setEntries(res.slice(0, MAX_ENTRIES))
+      }
+    } catch {
+      // retry on next poll
+    }
   }, [])
 
-  const connect = useCallback(() => {
-    clearReconnectTimer()
-    if (esRef.current) {
-      esRef.current.close()
-      esRef.current = null
-    }
-
-    const apiKey = getStoredApiKey()
-    const keyParam = apiKey ? `&key=${encodeURIComponent(apiKey)}` : ''
-    const es = new EventSource(`${SSE_BASE}/logs/stream?range=1h&limit=${MAX_ENTRIES}${keyParam}`)
-    esRef.current = es
-
-    es.onmessage = (e) => {
-      try {
-        const data = JSON.parse(e.data)
-        if (data.type === 'init' && Array.isArray(data.logs)) {
-          setEntries(data.logs.slice(0, MAX_ENTRIES))
-        } else if (data.type === 'delta' && data.log) {
-          setEntries(prev => {
-            if (prev.some(entry => entry.id === data.log.id)) return prev
-            return [data.log, ...prev].slice(0, MAX_ENTRIES)
-          })
-        }
-      } catch {
-        // ignore parse errors
-      }
-    }
-
-    es.onerror = () => {
-      es.close()
-      esRef.current = null
-      // reconnect after 5s
-      clearReconnectTimer()
-      reconnectTimerRef.current = setTimeout(() => {
-        reconnectTimerRef.current = null
-        if (!pausedRef.current) connect()
-      }, 5000)
-    }
-  }, [clearReconnectTimer])
-
   useEffect(() => {
-    if (!paused) connect()
-    else if (esRef.current) {
-      esRef.current.close()
-      esRef.current = null
+    if (paused) {
+      if (pollRef.current) {
+        clearInterval(pollRef.current)
+        pollRef.current = null
+      }
+      return
     }
+
+    fetchLogs()
+    pollRef.current = setInterval(fetchLogs, POLL_INTERVAL_MS)
 
     return () => {
-      clearReconnectTimer()
-      if (esRef.current) {
-        esRef.current.close()
-        esRef.current = null
+      if (pollRef.current) {
+        clearInterval(pollRef.current)
+        pollRef.current = null
       }
     }
-  }, [paused, connect, clearReconnectTimer])
+  }, [paused, fetchLogs])
 
   const handleClear = () => setEntries([])
 
@@ -132,7 +94,7 @@ export function LiveRequestStream() {
           <CardContent>
             {entries.length === 0 ? (
               <div className="text-center py-6 text-muted-foreground text-sm">
-                {paused ? 'Stream paused' : 'Waiting for requests...'}
+                {paused ? 'Polling paused' : 'Waiting for requests...'}
               </div>
             ) : (
               <ScrollArea className="h-[280px]">

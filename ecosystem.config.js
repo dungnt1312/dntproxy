@@ -2,8 +2,9 @@ module.exports = {
   apps: [
     {
       name: 'dntproxy',
-      script: 'bash',
-      args: 'dev.sh',
+      script: 'C:\\Users\\dungnt\\.local\\bin\\dntproxy.exe',
+      args: '--port=20199',
+      interpreter: 'none',
       cwd: 'C:\\laragon\\www\\dntproxy',
       env: {
         PORT: '20199',

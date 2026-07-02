@@ -30,28 +30,38 @@ func apiListModels(store port.CredentialStore) gin.HandlerFunc {
 			// Track which connections each model is available on
 			modelConnections := make(map[string][]gin.H)
 
-			// Build from active connections' SupportedModels
-			for _, conn := range cfg.ProviderConnections {
-				if !conn.IsActive {
-					continue
-				}
-				if !service.ConnectionAllowed(conn.ID, policy) {
-					continue
-				}
-				modelProvider := modelProviderForConnection(conn)
-				if providerFilter != "" && conn.Provider != providerFilter && modelProvider != providerFilter {
-					continue
-				}
+				// Build from active connections' SupportedModels
+				for _, conn := range cfg.ProviderConnections {
+					if !conn.IsActive {
+						continue
+					}
+					if !service.ConnectionAllowed(conn.ID, policy) {
+						continue
+					}
+					modelProvider := modelProviderForConnection(conn)
+					if providerFilter != "" && conn.Provider != providerFilter && modelProvider != providerFilter {
+						continue
+					}
 
-				connInfo := gin.H{
-					"id":          conn.ID,
-					"name":        conn.Name,
-					"provider":    conn.Provider,
-					"routePrefix": conn.RoutePrefix,
-					"isActive":    conn.IsActive,
-				}
+					connInfo := gin.H{
+						"id":          conn.ID,
+						"name":        conn.Name,
+						"provider":    conn.Provider,
+						"routePrefix": conn.RoutePrefix,
+						"isActive":    conn.IsActive,
+					}
 
-				if len(conn.SupportedModels) == 0 {
+					// Runtime fill: use RecommendedModels if SupportedModels is empty
+					// This ensures the model list shown in UI respects the curated defaults
+					effectiveModels := conn.SupportedModels
+					if len(effectiveModels) == 0 {
+						provCfg := domain.GetProviderConfig(conn.Provider)
+						if len(provCfg.RecommendedModels) > 0 {
+							effectiveModels = provCfg.RecommendedModels
+						}
+					}
+
+					if len(effectiveModels) == 0 {
 					// No restriction — add all registry models for this provider
 					if cfg.ModelRegistry != nil {
 						for key, m := range cfg.ModelRegistry.Models {
@@ -88,8 +98,8 @@ func apiListModels(store port.CredentialStore) gin.HandlerFunc {
 							}
 						}
 					}
-				} else {
-					for _, modelID := range conn.SupportedModels {
+					} else {
+						for _, modelID := range effectiveModels {
 						key := modelProvider + "/" + modelID
 						reachableModels[key] = true
 						reachablePublicModels[key] = true
@@ -292,6 +302,24 @@ func apiGetModelRegistry(store port.CredentialStore) gin.HandlerFunc {
 
 		if cfg.ModelRegistry == nil {
 			cfg.ModelRegistry = domain.DefaultModelRegistry()
+		}
+
+		// Support filtering by provider for the "Edit Models" modal.
+		// When ?provider=openai is passed, only return models for that provider.
+		// This prevents the modal from showing outdated models (gpt-4.1, gpt-4o, o3, etc.)
+		// that are not in the RecommendedModels list.
+		providerFilter := c.Query("provider")
+		if providerFilter != "" {
+			filtered := &domain.ModelRegistry{
+				Models: make(map[string]*domain.ModelDefinition),
+			}
+			for key, m := range cfg.ModelRegistry.Models {
+				if m.Provider == providerFilter && m.IsActive {
+					filtered.Models[key] = m
+				}
+			}
+			c.JSON(200, filtered)
+			return
 		}
 
 		c.JSON(200, cfg.ModelRegistry)

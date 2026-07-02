@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { Bot, Loader2, Send, Settings2, Terminal, Trash2, Zap } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Bot, ImageIcon, Loader2, Send, Settings2, Terminal, Trash2, Zap } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -16,6 +16,7 @@ import { ModelSelector } from "./playground/model-selector";
 import { AttachmentInput } from "./playground/attachment-input";
 import { ChatView } from "./playground/chat-view";
 import { PlaygroundLogView } from "./playground/log-view";
+import { ImageGenerator } from "./playground/image-generator";
 import { useChatQueue } from "./playground/use-chat-queue";
 import { usePlaygroundModelSelection } from "./playground/use-playground-model-selection";
 
@@ -33,10 +34,19 @@ export default function PlaygroundScreen() {
   const [requestLogs, setRequestLogs] = useState<RequestLog[]>([]);
   const [selectedLogId, setSelectedLogId] = useState<string | null>(null);
   const [showParams, setShowParams] = useState(false);
-  const [activeTab, setActiveTab] = useState("chat");
-  const scrollAnchorRef = useRef<HTMLDivElement | null>(null);
+	  const [activeTab, setActiveTab] = useState("chat");
+	  const scrollAnchorRef = useRef<HTMLDivElement | null>(null);
 
-  const {
+	  // Filter: chat models exclude image-generation-only models
+	  const chatModels = useMemo(() => models.filter((m) => {
+	    const caps = m.capabilities;
+	    if (!Array.isArray(caps) || caps.length === 0) return true;
+	    // If the only capability is image-generation, hide from chat
+	    if (caps.length === 1 && caps[0] === "image-generation") return false;
+	    return true;
+	  }), [models]);
+
+	  const {
     selectedProvider,
     selectedModel,
     selectedAccount,
@@ -44,9 +54,9 @@ export default function PlaygroundScreen() {
     setSelectedAccount,
     finalModelString,
     supportsImages,
-    initializeSelection,
-    handleProviderChange,
-  } = usePlaygroundModelSelection(models);
+	    initializeSelection,
+	    handleProviderChange,
+	  } = usePlaygroundModelSelection(chatModels);
 
   const { messages, sending, queuedCount, enqueueTurn, clearQueue } = useChatQueue((log) => {
     setRequestLogs((prev) => [log, ...prev].slice(0, 50));
@@ -105,48 +115,39 @@ export default function PlaygroundScreen() {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex flex-col gap-3 border-b bg-background/95 px-4 py-3 backdrop-blur-sm md:px-6">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Bot className="h-5 w-5 text-emerald-600" />
-            <div>
-              <h1 className="text-lg font-semibold">Playground</h1>
-              <p className="text-xs text-muted-foreground">Test models, inspect requests, and debug responses</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button aria-label="Toggle parameters" variant="outline" size="icon" onClick={() => setShowParams(!showParams)} className={showParams ? "bg-accent" : ""}>
-                    <Settings2 className="h-4 w-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent><p>Toggle parameters</p></TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-            <Button aria-label="Clear chat" variant="outline" size="icon" onClick={handleClear}><Trash2 className="h-4 w-4" /></Button>
+      {/* Shared header */}
+      <div className="flex items-center justify-between border-b bg-background/95 px-4 py-2.5 backdrop-blur-sm md:px-6">
+        <div className="flex items-center gap-2">
+          <Bot className="h-5 w-5 text-emerald-600" />
+          <div>
+            <h1 className="text-lg font-semibold">Playground</h1>
+            <p className="text-xs text-muted-foreground">Test chat, generate images, inspect requests</p>
           </div>
         </div>
-
-        <ModelSelector
-          models={models}
-          connections={connections}
-          selectedProvider={selectedProvider}
-          selectedModel={selectedModel}
-          selectedAccount={selectedAccount}
-          onProviderChange={handleProviderChange}
-          onModelChange={setSelectedModel}
-          onAccountChange={setSelectedAccount}
-          disabled={loadingModels}
-        />
-        {showParams && <PlaygroundParamsPanel params={params} setParams={setParams} defaultParams={DEFAULT_PARAMS} />}
+        <div className="flex items-center gap-2">
+          {activeTab === "chat" && (
+            <>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button aria-label="Toggle parameters" variant="outline" size="icon" onClick={() => setShowParams(!showParams)} className={showParams ? "bg-accent" : ""}>
+                      <Settings2 className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent><p>Toggle parameters</p></TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+              <Button aria-label="Clear chat" variant="outline" size="icon" onClick={handleClear}><Trash2 className="h-4 w-4" /></Button>
+            </>
+          )}
+        </div>
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-h-0">
         <div className="px-4 md:px-6 border-b">
           <TabsList className="h-8">
             <TabsTrigger value="chat" className="text-xs gap-1"><Bot className="h-3 w-3" />Chat</TabsTrigger>
+            <TabsTrigger value="images" className="text-xs gap-1"><ImageIcon className="h-3 w-3" />Images</TabsTrigger>
             <TabsTrigger value="logs" className="text-xs gap-1">
               <Terminal className="h-3 w-3" />Logs
               {requestLogs.length > 0 && <Badge variant="secondary" className="ml-1 text-[10px] h-4 px-1">{requestLogs.length}</Badge>}
@@ -155,6 +156,21 @@ export default function PlaygroundScreen() {
         </div>
 
         <TabsContent value="chat" className="flex-1 flex flex-col min-h-0 m-0">
+          {/* Chat-specific header: model selector + params */}
+          <div className="flex flex-col gap-2 border-b bg-background/95 px-4 py-2.5 md:px-6">
+            <ModelSelector
+              models={chatModels}
+              connections={connections}
+              selectedProvider={selectedProvider}
+              selectedModel={selectedModel}
+              selectedAccount={selectedAccount}
+              onProviderChange={handleProviderChange}
+              onModelChange={setSelectedModel}
+              onAccountChange={setSelectedAccount}
+              disabled={loadingModels}
+            />
+            {showParams && <PlaygroundParamsPanel params={params} setParams={setParams} defaultParams={DEFAULT_PARAMS} />}
+          </div>
           <ScrollArea className="flex-1">
             <div className="mx-auto flex max-w-3xl flex-col gap-4 p-4 md:p-6">
               {messages.length === 0 ? (
@@ -207,6 +223,10 @@ export default function PlaygroundScreen() {
               </div>
             </div>
           </div>
+        </TabsContent>
+
+        <TabsContent value="images" className="flex-1 flex flex-col min-h-0 m-0">
+          <ImageGenerator />
         </TabsContent>
 
         <TabsContent value="logs" className="flex-1 flex flex-col min-h-0 m-0">

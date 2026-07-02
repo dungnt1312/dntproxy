@@ -32,18 +32,27 @@ func apiListConnections(store port.CredentialStore) gin.HandlerFunc {
 			c.JSON(500, gin.H{"error": "Failed to load config"})
 			return
 		}
-		views := make([]connectionView, len(cfg.ProviderConnections))
-		for i, conn := range cfg.ProviderConnections {
-			provCfg := domain.GetProviderConfig(conn.Provider)
-			supportsQuota := provCfg.SupportsQuota
-			if conn.Provider == "openai" && conn.AuthType != "oauth" {
-				supportsQuota = false
+			views := make([]connectionView, len(cfg.ProviderConnections))
+			for i, conn := range cfg.ProviderConnections {
+				provCfg := domain.GetProviderConfig(conn.Provider)
+				supportsQuota := provCfg.SupportsQuota
+				if conn.Provider == "openai" && conn.AuthType != "oauth" {
+					supportsQuota = false
+				}
+
+				// Runtime fill: if connection has no SupportedModels, use RecommendedModels
+				// This ensures old connections (created before RecommendedModels existed)
+				// still show the correct curated model list in the UI.
+				displayConn := conn
+				if len(displayConn.SupportedModels) == 0 && len(provCfg.RecommendedModels) > 0 {
+					displayConn.SupportedModels = provCfg.RecommendedModels
+				}
+
+				views[i] = connectionView{
+					ProviderConnection: displayConn,
+					SupportsQuota:      supportsQuota,
+				}
 			}
-			views[i] = connectionView{
-				ProviderConnection: conn,
-				SupportsQuota:      supportsQuota,
-			}
-		}
 		c.JSON(200, views)
 	}
 }

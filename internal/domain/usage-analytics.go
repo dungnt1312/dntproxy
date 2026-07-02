@@ -2,14 +2,14 @@ package domain
 
 // UsageStatsResponse is the aggregated usage stats payload for GET /api/usage/stats.
 type UsageStatsResponse struct {
-	Period           string                       `json:"period"`
-	TotalRequests    int                          `json:"totalRequests"`
-	TotalPromptTokens int                         `json:"totalPromptTokens"`
-	TotalCompletionTokens int                     `json:"totalCompletionTokens"`
-	TotalCost        float64                      `json:"totalCost"`
-	ByProvider       []UsageGroup                 `json:"byProvider"`
-	ByModel          []UsageGroup                 `json:"byModel"`
-	ByConnection     []UsageGroup                 `json:"byConnection"`
+	Period                string       `json:"period"`
+	TotalRequests         int          `json:"totalRequests"`
+	TotalPromptTokens     int          `json:"totalPromptTokens"`
+	TotalCompletionTokens int          `json:"totalCompletionTokens"`
+	TotalCost             float64      `json:"totalCost"`
+	ByProvider            []UsageGroup `json:"byProvider"`
+	ByModel               []UsageGroup `json:"byModel"`
+	ByConnection          []UsageGroup `json:"byConnection"`
 }
 
 // UsageGroup is one row in a grouped usage table.

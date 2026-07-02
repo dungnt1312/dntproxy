@@ -13,12 +13,17 @@ import (
 
 const (
 	defaultCodexResponseHeaderTimeout = 120 * time.Second
-	defaultCodexRetryAttempts          = 1
+	defaultCodexRetryAttempts         = 1
 )
 
 type codexDoFunc func(*http.Request) (*http.Response, error)
 
 var codexHTTPClient = newCodexHTTPClient()
+
+// CodexHTTPClientExport returns the Codex HTTP client (exported for image handler).
+func CodexHTTPClientExport() *http.Client {
+	return codexHTTPClient
+}
 
 func newCodexHTTPClient() *http.Client {
 	return &http.Client{

@@ -31,13 +31,13 @@ func TestDefaultModelRegistryIncludesXAIModels(t *testing.T) {
 func TestDefaultXAIModelsIncludeExpandedRegistry(t *testing.T) {
 	models := GetProviderConfig("xai").DefaultModels
 	want := map[string]bool{
-		"grok-build-0.1":                 false,
-		"grok-4.3":                       false,
-		"grok-4.20-0309-reasoning":       false,
-		"grok-4.20-0309-non-reasoning":   false,
-		"grok-4.20-multi-agent-0309":     false,
-		"grok-3-mini":                    false,
-		"grok-3-mini-fast":               false,
+		"grok-build-0.1":               false,
+		"grok-4.3":                     false,
+		"grok-4.20-0309-reasoning":     false,
+		"grok-4.20-0309-non-reasoning": false,
+		"grok-4.20-multi-agent-0309":   false,
+		"grok-3-mini":                  false,
+		"grok-3-mini-fast":             false,
 	}
 	for _, model := range models {
 		if _, ok := want[model]; ok {

@@ -76,14 +76,14 @@ func TestAPIClearConnectionErrorNormalizesPublicModelID(t *testing.T) {
 	future := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
 	cfg := domain.DefaultConfig()
 	cfg.ProviderConnections = []domain.ProviderConnection{{
-		ID:           "conn-ws",
-		Provider:     "openai-compatible",
-		Name:         "Windsurf",
-		RoutePrefix:  "windsurf",
-		IsActive:     true,
-		LastError:    "returned 403: model_not_entitled RL-4m",
-		LastErrorAt:  future,
-		ModelLocks:   map[string]string{"RL-4m": future},
+		ID:          "conn-ws",
+		Provider:    "openai-compatible",
+		Name:        "Windsurf",
+		RoutePrefix: "windsurf",
+		IsActive:    true,
+		LastError:   "returned 403: model_not_entitled RL-4m",
+		LastErrorAt: future,
+		ModelLocks:  map[string]string{"RL-4m": future},
 	}}
 	if err := store.Save(&cfg); err != nil {
 		t.Fatalf("save db: %v", err)

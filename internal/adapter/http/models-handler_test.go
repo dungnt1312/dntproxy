@@ -52,7 +52,7 @@ func TestModelsHandlerAppliesAPIKeyPolicy(t *testing.T) {
 	group := router.Group("/v1")
 	group.Use(apiKeyMiddleware(store))
 	modelAccess := service.NewModelAccessService(store)
-	group.GET("/models", modelsHandler(modelAccess))
+	group.GET("/models", modelsHandler(modelAccess, store))
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 	req.Header.Set("Authorization", "Bearer sk-test")

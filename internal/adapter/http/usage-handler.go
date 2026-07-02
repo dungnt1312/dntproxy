@@ -155,12 +155,8 @@ func (h *UsageHandler) fetchUsage(conn *domain.ProviderConnection) (*UsageRespon
 		return fetchKiroUsage(conn)
 	case "minimax":
 		return fetchMiniMaxUsage(conn)
-	case "xai":
-		return &UsageResponse{
-			Provider: "xai",
-			Message:  "xAI does not expose live quota for Grok Build OAuth; local usage appears in logs after successful requests.",
-			Quotas:   []QuotaBucket{},
-		}, nil
+		case "xai":
+			return fetchXAIGrokChatUsage(conn)
 	default:
 		return &UsageResponse{
 			Provider: conn.Provider,
@@ -547,4 +543,81 @@ func isAuthExpiredError(err error) bool {
 		}
 	}
 	return false
+}
+
+// fetchXAIGrokChatUsage calls the Grok Chat Web billing endpoint and returns a UsageResponse
+// compatible with the QuotaPanel UI (quotas[] array).
+func fetchXAIGrokChatUsage(conn *domain.ProviderConnection) (*UsageResponse, error) {
+	if conn.AccessToken == "" {
+		return &UsageResponse{
+			Provider: "xai",
+			Message:  "No access token available for xAI Grok Chat",
+			Quotas:   []QuotaBucket{},
+		}, nil
+	}
+
+	billingURL := "https://cli-chat-proxy.grok.com/v1/billing"
+
+	req, err := http.NewRequest("GET", billingURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create xai billing request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+conn.AccessToken)
+	req.Header.Set("Accept", "application/json")
+
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("xai billing request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != 200 {
+		return &UsageResponse{
+			Provider: "xai",
+			Message:  fmt.Sprintf("Billing endpoint returned HTTP %d", resp.StatusCode),
+			Quotas:   []QuotaBucket{},
+		}, nil
+	}
+
+	var billingData map[string]interface{}
+	if err := json.Unmarshal(bodyBytes, &billingData); err != nil {
+		return nil, fmt.Errorf("parse xai billing response: %w", err)
+	}
+
+	respObj := &UsageResponse{
+		Provider: "xai",
+		Message:  "xAI Grok Chat billing info retrieved",
+		Quotas:   []QuotaBucket{},
+	}
+
+	// Parse config block
+	if config, ok := billingData["config"].(map[string]interface{}); ok {
+		monthlyLimit := 0
+		used := 0
+
+		if ml, ok := config["monthlyLimit"].(map[string]interface{}); ok {
+			if v, ok := ml["val"].(float64); ok {
+				monthlyLimit = int(v)
+			}
+		}
+		if u, ok := config["used"].(map[string]interface{}); ok {
+			if v, ok := u["val"].(float64); ok {
+				used = int(v)
+			}
+		}
+
+		if monthlyLimit > 0 {
+			respObj.addBucket("requests", "Monthly Requests", used, monthlyLimit, "", false)
+		}
+
+		// Billing period (optional metadata)
+		if start, ok := config["billingPeriodStart"].(string); ok {
+			respObj.Plan = fmt.Sprintf("Billing: %s → %s", start[:10], config["billingPeriodEnd"].(string)[:10])
+		}
+	}
+
+	return respObj, nil
 }

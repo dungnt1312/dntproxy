@@ -44,6 +44,16 @@ func resolveChatPath(credentials *domain.Credentials) string {
 	return cfg.ChatPath
 }
 
+// IsCodexOAuthExport checks if credentials need Codex Responses API (exported for image handler).
+func IsCodexOAuthExport(credentials *domain.Credentials) bool {
+	return isCodexOAuth(credentials)
+}
+
+// CodexResponsesURLExport returns the Codex Responses API URL (exported for image handler).
+func CodexResponsesURLExport() string {
+	return codexResponsesURL
+}
+
 // isCodexOAuth returns true if this credential is an OpenAI OAuth token
 // (from auth.openai.com) which needs to use the Codex Responses API.
 func isCodexOAuth(credentials *domain.Credentials) bool {

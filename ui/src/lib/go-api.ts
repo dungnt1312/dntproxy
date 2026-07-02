@@ -578,5 +578,92 @@ export const goApi: any = {
   getTelegramStatus: () => goRequest<any>("/telegram/status"),
   startTelegram: () => goRequest("/telegram/start", { method: "POST" }),
   stopTelegram: () => goRequest("/telegram/stop", { method: "POST" }),
-  testTelegram: () => goRequest("/telegram/test", { method: "POST" }),
+	testTelegram: () => goRequest("/telegram/test", { method: "POST" }),
+
+  // Image generation
+  getImageModels: () => {
+    const apiKey = getStoredApiKey();
+    const headers: Record<string, string> = {};
+    if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
+
+    const base = GO_API_BASE.replace(/\/api$/, "");
+    return fetch(`${base}/v1/models?type=image`, { headers })
+      .then((res) => {
+        if (res.status === 401 || res.status === 403) { on401Callback?.(); throw new Error("Unauthorized"); }
+        return res.json();
+      })
+      .then((payload) => {
+        const list = Array.isArray(payload?.data) ? payload.data : [];
+        return list.map((m: any) => ({
+          id: m.id || "",
+          displayName: m.id || "",
+          provider: m.owned_by || "unknown",
+          capabilities: m.capabilities || [],
+        }));
+      });
+  },
+
+  generateImage: (params: {
+    model: string;
+    prompt: string;
+    n?: number;
+    size?: string;
+    quality?: string;
+    response_format?: string;
+  }) => {
+    const apiKey = getStoredApiKey();
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
+
+    const base = GO_API_BASE.replace(/\/api$/, "");
+    return fetch(`${base}/v1/images/generations`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(params),
+    }).then((res) => {
+      if (res.status === 401 || res.status === 403) {
+        on401Callback?.();
+        throw new Error("Unauthorized");
+      }
+      if (!res.ok) {
+        return res.json().then((err: any) => {
+          throw new Error(err?.error?.message || err?.message || res.statusText);
+        });
+      }
+      return res.json();
+    });
+  },
+
+  editImage: (params: {
+    model: string;
+    prompt: string;
+    image?: string;
+    images?: { image_url: string }[];
+    mask?: string;
+    n?: number;
+    size?: string;
+    response_format?: string;
+  }) => {
+    const apiKey = getStoredApiKey();
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
+
+    const base = GO_API_BASE.replace(/\/api$/, "");
+    return fetch(`${base}/v1/images/edits`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(params),
+    }).then((res) => {
+      if (res.status === 401 || res.status === 403) {
+        on401Callback?.();
+        throw new Error("Unauthorized");
+      }
+      if (!res.ok) {
+        return res.json().then((err: any) => {
+          throw new Error(err?.error?.message || err?.message || res.statusText);
+        });
+      }
+      return res.json();
+    });
+  },
 };

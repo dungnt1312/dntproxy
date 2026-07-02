@@ -6,81 +6,50 @@ import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { ProviderLogo } from '@/components/connections/ProviderLogo'
 import { cn } from '@/lib/utils'
-import { getStoredApiKey } from '@/lib/go-api'
-import { formatTokens, formatRelativeTime } from './helpers'
+import { goApi } from '@/lib/go-api'
+import { formatTokens } from './helpers'
 import type { LogEntry } from '@/types/logs'
 
-// ─── Live Feed (SSE) ─────────────────────────────────────────────────────────
+// ─── Live Feed (API poll) ────────────────────────────────────────────────────
 
-const SSE_BASE = import.meta.env.VITE_GO_API_URL || '/api'
+const POLL_INTERVAL_MS = 3000
 const MAX_ENTRIES = 50
 
 export function LiveFeed() {
   const [entries, setEntries] = useState<LogEntry[]>([])
   const [paused, setPaused] = useState(false)
-  const esRef = useRef<EventSource | null>(null)
-  const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const pausedRef = useRef(false)
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  useEffect(() => { pausedRef.current = paused }, [paused])
-
-  const clearReconnect = useCallback(() => {
-    if (reconnectRef.current) {
-      clearTimeout(reconnectRef.current)
-      reconnectRef.current = null
+  const fetchLogs = useCallback(async () => {
+    try {
+      const res = await goApi.getLogs({ range: '1h', limit: MAX_ENTRIES })
+      if (Array.isArray(res)) {
+        setEntries(res.slice(0, MAX_ENTRIES))
+      }
+    } catch {
+      // retry on next poll
     }
   }, [])
 
-  const connect = useCallback(() => {
-    clearReconnect()
-    if (esRef.current) {
-      esRef.current.close()
-      esRef.current = null
-    }
-
-    const keyParam = getStoredApiKey() ? `&key=${encodeURIComponent(getStoredApiKey())}` : ''
-    const es = new EventSource(`${SSE_BASE}/logs/stream?range=1h&limit=${MAX_ENTRIES}${keyParam}`)
-    esRef.current = es
-
-    es.onmessage = (e) => {
-      try {
-        const data = JSON.parse(e.data)
-        if (data.type === 'init' && Array.isArray(data.logs)) {
-          setEntries(data.logs.slice(0, MAX_ENTRIES))
-        } else if (data.type === 'delta' && data.log) {
-          setEntries(prev => {
-            if (prev.some(entry => entry.id === data.log.id)) return prev
-            return [data.log, ...prev].slice(0, MAX_ENTRIES)
-          })
-        }
-      } catch { /* ignore */ }
-    }
-
-    es.onerror = () => {
-      es.close()
-      esRef.current = null
-      clearReconnect()
-      reconnectRef.current = setTimeout(() => {
-        reconnectRef.current = null
-        if (!pausedRef.current) connect()
-      }, 5000)
-    }
-  }, [clearReconnect])
-
   useEffect(() => {
-    if (!paused) connect()
-    else if (esRef.current) {
-      esRef.current.close()
-      esRef.current = null
+    if (paused) {
+      if (pollRef.current) {
+        clearInterval(pollRef.current)
+        pollRef.current = null
+      }
+      return
     }
+
+    fetchLogs()
+    pollRef.current = setInterval(fetchLogs, POLL_INTERVAL_MS)
+
     return () => {
-      clearReconnect()
-      if (esRef.current) {
-        esRef.current.close()
-        esRef.current = null
+      if (pollRef.current) {
+        clearInterval(pollRef.current)
+        pollRef.current = null
       }
     }
-  }, [paused, connect, clearReconnect])
+  }, [paused, fetchLogs])
 
   return (
     <Card className="flex flex-col overflow-hidden">
@@ -120,7 +89,7 @@ export function LiveFeed() {
       <CardContent className="pt-0 flex-1 overflow-hidden">
         {entries.length === 0 ? (
           <div className="flex items-center justify-center h-full text-muted-foreground text-sm py-10">
-            {paused ? 'Stream paused' : 'Waiting for requests...'}
+            {paused ? 'Polling paused' : 'Waiting for requests...'}
           </div>
         ) : (
           <ScrollArea className="flex-1 min-h-0">

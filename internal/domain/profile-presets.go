@@ -8,9 +8,9 @@ var BuiltinPresets = map[string]Profile{
 		Description: "Route Claude models through Kiro (AWS CodeWhisperer) — free tier",
 		Aliases: AliasMap{
 			// Standard Claude model names used by Claude CLI
-			"claude-sonnet":   "kr/claude-sonnet-4.5",
-			"claude-opus":     "kr/claude-opus-4.5",
-			"claude-haiku":    "kr/claude-haiku-4.5",
+			"claude-sonnet": "kr/claude-sonnet-4.5",
+			"claude-opus":   "kr/claude-opus-4.5",
+			"claude-haiku":  "kr/claude-haiku-4.5",
 			// Versioned model names that Claude CLI may send
 			"claude-sonnet-4-5-20250514": "kr/claude-sonnet-4.5",
 			"claude-opus-4-5-20250514":   "kr/claude-opus-4.5",

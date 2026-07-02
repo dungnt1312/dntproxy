@@ -189,10 +189,10 @@ func testProviderAPI(conn *domain.ProviderConnection) testProviderResult {
 	var body map[string]interface{}
 	if cfg.ChatPath == "/responses" {
 		body = map[string]interface{}{
-			"model":           testModel,
-			"input":           []map[string]string{{"role": "user", "content": "Hi"}},
+			"model":             testModel,
+			"input":             []map[string]string{{"role": "user", "content": "Hi"}},
 			"max_output_tokens": 1,
-			"stream":          false,
+			"stream":            false,
 		}
 	} else {
 		body = map[string]interface{}{

@@ -20,14 +20,14 @@ const codexResponsesURL = "https://chatgpt.com/backend-api/codex/responses"
 
 // responsesRequest is the Codex Responses API request format.
 type responsesRequest struct {
-	Model        string        `json:"model"`
-	Input        []interface{} `json:"input"`
-	Instructions string        `json:"instructions"`
-	Stream       bool          `json:"stream"`
-	Store        bool          `json:"store"`
-	Tools        []interface{} `json:"tools,omitempty"`
+	Model        string          `json:"model"`
+	Input        []interface{}   `json:"input"`
+	Instructions string          `json:"instructions"`
+	Stream       bool            `json:"stream"`
+	Store        bool            `json:"store"`
+	Tools        []interface{}   `json:"tools,omitempty"`
 	Reasoning    *codexReasoning `json:"reasoning,omitempty"`
-	Include      []string      `json:"include,omitempty"`
+	Include      []string        `json:"include,omitempty"`
 }
 
 // codexReasoning configures the thinking/reasoning effort for Codex models.
@@ -338,10 +338,10 @@ type CodexResponseState struct {
 }
 
 type codexUsage struct {
-	InputTokens          int `json:"input_tokens"`
-	OutputTokens         int `json:"output_tokens"`
-	CacheReadTokens      int `json:"cache_read_input_tokens"`
-	CacheCreationTokens  int `json:"cache_creation_input_tokens"`
+	InputTokens         int `json:"input_tokens"`
+	OutputTokens        int `json:"output_tokens"`
+	CacheReadTokens     int `json:"cache_read_input_tokens"`
+	CacheCreationTokens int `json:"cache_creation_input_tokens"`
 }
 
 // NewCodexResponseState creates a new state for response translation.
@@ -479,7 +479,7 @@ func TranslateCodexEvent(eventType string, data []byte, state *CodexResponseStat
 				"completion_tokens": completionTokens,
 				"total_tokens":      promptTokens + completionTokens,
 			}
-			
+
 			state.PromptTokens = promptTokens
 			state.CompletionTokens = completionTokens
 

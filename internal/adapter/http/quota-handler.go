@@ -58,12 +58,12 @@ func apiCheckQuota(store port.CredentialStore) gin.HandlerFunc {
 			return
 		}
 
-	// For OpenAI API key: call /v1/models and read rate-limit headers.
-	// OpenAI-compatible endpoints vary too much, so respect SupportsQuota=false.
-	if conn.Provider == "openai" {
-		handleOpenAIAPIKeyQuota(c, conn, store, result)
-		return
-	}
+		// For OpenAI API key: call /v1/models and read rate-limit headers.
+		// OpenAI-compatible endpoints vary too much, so respect SupportsQuota=false.
+		if conn.Provider == "openai" {
+			handleOpenAIAPIKeyQuota(c, conn, store, result)
+			return
+		}
 
 		// For MiniMax: call /v1/api/openplatform/coding_plan/remains
 		if conn.Provider == "minimax" {
@@ -71,16 +71,10 @@ func apiCheckQuota(store port.CredentialStore) gin.HandlerFunc {
 			return
 		}
 
-		if conn.Provider == "xai" {
-			c.JSON(200, gin.H{
-				"provider": conn.Provider,
-				"name":     conn.Name,
-				"hasData":  false,
-				"message":  "xAI does not expose live quota for Grok Build OAuth; usage appears after successful requests.",
-				"buckets":  []interface{}{},
-			})
-			return
-		}
+			if conn.Provider == "xai" {
+				handleXAIGrokChatQuota(c, conn, result)
+				return
+			}
 
 		// For providers without quota check support (GLM, Qwen, etc.)
 		providerCfg := domain.GetProviderConfig(conn.Provider)
@@ -721,4 +715,146 @@ func checkCodexQuota(accessToken string) map[string]interface{} {
 	}
 
 	return nil
+}
+
+// handleXAIGrokChatQuota calls the Grok Chat Web billing endpoint to get subscription info.
+// Endpoint: POST https://cli-chat-proxy.grok.com/v1/billing
+// Auth: Uses the AccessToken from the connection (Grok Chat Web session).
+func handleXAIGrokChatQuota(c *gin.Context, conn *domain.ProviderConnection, result gin.H) {
+	if conn.AccessToken == "" {
+		result["hasData"] = false
+		result["message"] = "No access token available for xAI Grok Chat"
+		c.JSON(200, result)
+		return
+	}
+
+	billingURL := "https://cli-chat-proxy.grok.com/v1/billing"
+
+	req, err := http.NewRequest("GET", billingURL, nil)
+	if err != nil {
+		result["hasData"] = false
+		result["message"] = "Failed to create billing request: " + err.Error()
+		c.JSON(200, result)
+		return
+	}
+
+	req.Header.Set("Authorization", "Bearer "+conn.AccessToken)
+	req.Header.Set("Accept", "application/json")
+
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		result["hasData"] = false
+		result["message"] = "Billing request failed: " + err.Error()
+		c.JSON(200, result)
+		return
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != 200 {
+		result["hasData"] = false
+		result["message"] = fmt.Sprintf("Billing endpoint returned HTTP %d", resp.StatusCode)
+		result["quotaError"] = string(bodyBytes)
+		c.JSON(200, result)
+		return
+	}
+
+	// Parse billing response
+	var billingData map[string]interface{}
+	if err := json.Unmarshal(bodyBytes, &billingData); err != nil {
+		result["hasData"] = false
+		result["message"] = "Failed to parse billing response: " + err.Error()
+		c.JSON(200, result)
+		return
+	}
+
+	// Extract top-level billing info
+	result["hasData"] = true
+	result["message"] = "xAI Grok Chat billing info retrieved"
+	result["billing"] = billingData
+
+	// Extract plan type if present
+	if planType, ok := billingData["plan_type"].(string); ok {
+		result["planType"] = planType
+	}
+
+	// Parse config block (monthlyLimit, used, billingPeriod, etc.)
+	if config, ok := billingData["config"].(map[string]interface{}); ok {
+		// Monthly limit
+		if monthlyLimit, ok := config["monthlyLimit"].(map[string]interface{}); ok {
+			if val, ok := monthlyLimit["val"].(float64); ok {
+				result["requestsLimit"] = int(val)
+			}
+		}
+		// Used this month
+		if used, ok := config["used"].(map[string]interface{}); ok {
+			if val, ok := used["val"].(float64); ok {
+				result["requestsUsed"] = int(val)
+			}
+		}
+		// Billing period
+		if start, ok := config["billingPeriodStart"].(string); ok {
+			result["billingPeriodStart"] = start
+		}
+		if end, ok := config["billingPeriodEnd"].(string); ok {
+			result["billingPeriodEnd"] = end
+		}
+		// On-demand cap
+		if onDemandCap, ok := config["onDemandCap"].(map[string]interface{}); ok {
+			if val, ok := onDemandCap["val"].(float64); ok {
+				result["onDemandCap"] = int(val)
+			}
+		}
+	}
+
+	// Calculate remaining + pct for UI (QuotaPanel expects these)
+	if limit, hasLimit := result["requestsLimit"].(int); hasLimit {
+		if used, hasUsed := result["requestsUsed"].(int); hasUsed {
+			remaining := limit - used
+			if remaining < 0 {
+				remaining = 0
+			}
+			result["requestsRemaining"] = remaining
+			if limit > 0 {
+				pct := (used * 100) / limit
+				if pct > 100 {
+					pct = 100
+				}
+				result["requestsPct"] = pct
+			}
+		}
+	}
+
+	// Build quotas[] array so QuotaPanel can render it
+	quotas := []gin.H{}
+	if limit, hasLimit := result["requestsLimit"].(int); hasLimit {
+		used := 0
+		if u, ok := result["requestsUsed"].(int); ok {
+			used = u
+		}
+		remaining := limit - used
+		if remaining < 0 {
+			remaining = 0
+		}
+		pct := 0
+		if p, ok := result["requestsPct"].(int); ok {
+			pct = p
+		}
+		quotas = append(quotas, gin.H{
+			"key":       "requests",
+			"label":     "Monthly Requests",
+			"used":      used,
+			"total":     limit,
+			"remaining": remaining,
+			"pct":       pct,
+			"unlimited": false,
+		})
+	}
+	if len(quotas) > 0 {
+		result["quotas"] = quotas
+	}
+
+	c.JSON(200, result)
 }

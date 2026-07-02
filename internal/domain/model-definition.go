@@ -531,6 +531,62 @@ func DefaultModelRegistry() *ModelRegistry {
 				Capabilities:    []string{"tools", "streaming", "reasoning"},
 				IsActive:        true,
 			},
+			// Image generation models
+			"openai/dall-e-3": {
+				ID:              "dall-e-3",
+				Name:            "DALL·E 3",
+				Provider:        "openai",
+				ContextWindow:   1,
+				MaxOutputTokens: 1,
+				InputPrice:      0.0,
+				OutputPrice:     0.0,
+				Capabilities:    []string{"image-generation"},
+				IsActive:        true,
+			},
+			"openai/gpt-image-2": {
+				ID:              "gpt-image-2",
+				Name:            "GPT Image 2",
+				Provider:        "openai",
+				ContextWindow:   1,
+				MaxOutputTokens: 1,
+				InputPrice:      0.0,
+				OutputPrice:     0.0,
+				Capabilities:    []string{"image-generation"},
+				IsActive:        true,
+			},
+			"openai/gpt-image-1.5": {
+					ID:              "gpt-image-1.5",
+					Name:            "GPT Image 1.5",
+					Provider:        "openai",
+					ContextWindow:   1,
+					MaxOutputTokens: 1,
+					InputPrice:      0.0,
+					OutputPrice:     0.0,
+					Capabilities:    []string{"image-generation"},
+					IsActive:        true,
+				},
+				"xai/grok-imagine-image": {
+					ID:              "grok-imagine-image",
+					Name:            "Grok Imagine Image",
+					Provider:        "xai",
+					ContextWindow:   1,
+					MaxOutputTokens: 1,
+					InputPrice:      0.0,
+					OutputPrice:     0.0,
+					Capabilities:    []string{"image-generation"},
+					IsActive:        true,
+				},
+				"xai/grok-imagine-image-quality": {
+					ID:              "grok-imagine-image-quality",
+					Name:            "Grok Imagine Image Quality",
+					Provider:        "xai",
+					ContextWindow:   1,
+					MaxOutputTokens: 1,
+					InputPrice:      0.0,
+					OutputPrice:     0.0,
+					Capabilities:    []string{"image-generation"},
+					IsActive:        true,
+				},
 		},
 	}
 }
@@ -589,18 +645,79 @@ func (r *ModelRegistry) RemoveModel(key string) {
 	}
 }
 
-// GetDefaultModelsForProvider returns default model IDs for a provider from the model registry.
-func GetDefaultModelsForProvider(providerID string) []string {
-	registry := DefaultModelRegistry()
-	var models []string
-	for key, m := range registry.Models {
-		if m.Provider == providerID && m.IsActive {
-			parts := strings.Split(key, "/")
-			if len(parts) == 2 {
-				models = append(models, parts[1])
+// GetRecommendedModelsForProvider returns a curated, sensible list of models for a provider.
+// This replaces the old filter-everything approach and is used by GetProviderConfig().
+func GetRecommendedModelsForProvider(providerID string) []string {
+	switch providerID {
+	case "kiro":
+		return []string{
+			"claude-sonnet-4.6",
+			"claude-sonnet-4.5",
+			"claude-opus-4.6",
+			"claude-haiku-4.5",
+			"deepseek-3.2",
+			"qwen3-coder-next",
+		}
+	case "openai":
+		return []string{
+			"gpt-4.1-mini",
+			"gpt-4o-mini",
+			"o4-mini",
+			"gpt-4o",
+			"o3-mini",
+		}
+	case "glm":
+		return []string{
+			"glm-5.1",
+			"glm-5",
+			"glm-4.7-flash",
+		}
+	case "minimax":
+		return []string{
+			"MiniMax-M2.7",
+			"MiniMax-M2.7-highspeed",
+			"MiniMax-M2.5",
+		}
+	case "qwen":
+		return []string{
+			"qwen3-coder-plus",
+			"qwen3-coder",
+			"qwen-turbo",
+		}
+	case "anthropic":
+		return []string{
+			"claude-sonnet",
+			"claude-opus",
+			"claude-haiku",
+		}
+	case "gemini":
+		return []string{
+			"gemini-2.5-flash",
+		}
+	case "xai":
+		return []string{
+			"grok-4.20-0309-reasoning",
+			"grok-4.3",
+			"grok-4.20-0309-non-reasoning",
+		}
+	default:
+		// Fallback: return all active models from registry (old behavior)
+		registry := DefaultModelRegistry()
+		var models []string
+		for key, m := range registry.Models {
+			if m.Provider == providerID && m.IsActive {
+				parts := strings.Split(key, "/")
+				if len(parts) == 2 {
+					models = append(models, parts[1])
+				}
 			}
 		}
+		sort.Strings(models)
+		return models
 	}
-	sort.Strings(models)
-	return models
+}
+
+// GetDefaultModelsForProvider is kept for backward compatibility.
+func GetDefaultModelsForProvider(providerID string) []string {
+	return GetRecommendedModelsForProvider(providerID)
 }

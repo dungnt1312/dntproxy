@@ -57,7 +57,9 @@ type Settings struct {
 	// Telegram bot settings
 	Telegram TelegramSettings `json:"telegram,omitempty"`
 	// Migration flags
-	DashboardAccessMigrated bool `json:"dashboardAccessMigrated,omitempty"`
+		DashboardAccessMigrated bool `json:"dashboardAccessMigrated,omitempty"`
+		// Disable image generation endpoints (default: false)
+		DisableImageGeneration bool `json:"disableImageGeneration,omitempty"`
 }
 
 // APIKey represents a generated API key.

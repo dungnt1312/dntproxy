@@ -42,11 +42,11 @@ func apiAddConnection(store port.CredentialStore, providerID string) gin.Handler
 			baseURL = provCfg.DefaultBaseURL
 		}
 
-		// Default models from provider config
-		supportedModels := req.SupportedModels
-		if len(supportedModels) == 0 {
-			supportedModels = provCfg.DefaultModels
-		}
+			// Default models from provider config (RecommendedModels is the source of truth)
+			supportedModels := req.SupportedModels
+			if len(supportedModels) == 0 {
+				supportedModels = provCfg.RecommendedModels
+			}
 
 		now := time.Now().UTC().Format(time.RFC3339)
 		conn := domain.ProviderConnection{
@@ -222,7 +222,7 @@ func apiImportConnection(store port.CredentialStore) gin.HandlerFunc {
 			ExpiresIn:       expiresIn,
 			Email:           email,
 			TestStatus:      "active",
-			SupportedModels: domain.GetProviderConfig("kiro").DefaultModels,
+				SupportedModels: domain.GetProviderConfig("kiro").RecommendedModels,
 			ProviderSpecificData: map[string]interface{}{
 				"profileArn": result.ProfileArn,
 				"authMethod": result.AuthMethod,

@@ -42,8 +42,8 @@ func apiListProfiles(svc *service.ProfileService) gin.HandlerFunc {
 func apiCreateProfile(svc *service.ProfileService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req struct {
-			Name        string         `json:"name"`
-			Description string         `json:"description"`
+			Name        string          `json:"name"`
+			Description string          `json:"description"`
 			Aliases     domain.AliasMap `json:"aliases"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {

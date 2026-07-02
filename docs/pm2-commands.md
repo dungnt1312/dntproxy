@@ -72,6 +72,22 @@ env: {
 }
 ```
 
+## Runtime
+
+`dntproxy` runs from the local installed binary:
+
+```javascript
+script: 'C:\\Users\\dungnt\\.local\\bin\\dntproxy.exe',
+args: '--port=20199',
+```
+
+Rebuild and reinstall from source before restarting when you want PM2 to use fresh local code:
+
+```bash
+bash ./install-local.sh
+pm2 restart dntproxy --update-env
+```
+
 ## Logs Location
 
 - **Output logs:** `C:\laragon\www\dntproxy\logs\pm2-out.log`

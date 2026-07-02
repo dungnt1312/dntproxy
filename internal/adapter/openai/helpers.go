@@ -26,3 +26,8 @@ func randomAlphaNum(n int) string {
 	}
 	return string(b)
 }
+
+// RandomAlphaNumExport generates a random alphanumeric string (exported for image handler).
+func RandomAlphaNumExport(n int) string {
+	return randomAlphaNum(n)
+}

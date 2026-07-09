@@ -433,7 +433,28 @@ func normalizedWeight(weight int) int {
 	return weight
 }
 
+func connectionDisableCooling(conn *domain.ProviderConnection) bool {
+	if conn == nil || conn.ProviderSpecificData == nil {
+		return false
+	}
+	v, ok := conn.ProviderSpecificData["disableCooling"].(bool)
+	return ok && v
+}
+
+func clampCooldownMs(ms int, maxSeconds int) int {
+	if maxSeconds <= 0 || ms <= 0 {
+		return ms
+	}
+	maxMs := maxSeconds * 1000
+	if ms > maxMs {
+		return maxMs
+	}
+	return ms
+}
+
 // MarkUnavailable marks a connection as unavailable with cooldown.
+// Honors CooldownOn / per-connection disableCooling / TransientCooldownSeconds /
+// MaxCooldownSeconds / ModelLockOn from settings.
 func (s *AccountSelector) MarkUnavailable(connectionID string, status int, errorText string, model string) error {
 	return s.store.Update(func(cfg *domain.AppConfig) {
 		var conn *domain.ProviderConnection
@@ -447,10 +468,27 @@ func (s *AccountSelector) MarkUnavailable(connectionID string, status int, error
 			return
 		}
 
+		settings := cfg.Settings
+		// Global or per-connection cooling off: do not persist cooldown/backoff/locks.
+		// Still record last error for ops visibility.
+		if !settings.CooldownOn() || connectionDisableCooling(conn) {
+			conn.LastError = errorText
+			conn.LastErrorAt = time.Now().UTC().Format(time.RFC3339)
+			return
+		}
+
 		fb := domain.CheckFallbackError(status, errorText, conn.BackoffLevel)
 		if !fb.ShouldFallback {
 			return
 		}
+
+		// Transient class: optional override of legacy 2000ms default.
+		if domain.ClassifyUpstream(status, errorText) == domain.UpstreamTransient &&
+			settings.TransientCooldownSeconds > 0 {
+			fb.CooldownMs = settings.TransientCooldownSeconds * 1000
+		}
+
+		fb.CooldownMs = clampCooldownMs(fb.CooldownMs, settings.MaxCooldownSeconds)
 
 		if fb.CooldownMs > 0 {
 			until := domain.CooldownUntil(fb.CooldownMs)
@@ -461,7 +499,7 @@ func (s *AccountSelector) MarkUnavailable(connectionID string, status int, error
 			conn.LastError = errorText
 			conn.LastErrorAt = time.Now().UTC().Format(time.RFC3339)
 
-			if model != "" {
+			if settings.ModelLockOn() && model != "" {
 				if conn.ModelLocks == nil {
 					conn.ModelLocks = make(map[string]string)
 				}

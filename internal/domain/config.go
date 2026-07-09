@@ -38,7 +38,7 @@ type Settings struct {
 	ComboStrategy   string            `json:"comboStrategy"`
 	ComboStrategies map[string]string `json:"comboStrategies,omitempty"`
 	// ConnectionStrategy controls how an account is selected after model routing.
-	// Supported: weighted-random, priority-fallback, round-robin.
+	// Supported: weighted-random, priority-fallback, round-robin, fill-first.
 	ConnectionStrategy string `json:"connectionStrategy,omitempty"`
 	RequireAPIKey      bool   `json:"requireApiKey"`
 	Port               int    `json:"port,omitempty"`
@@ -57,9 +57,28 @@ type Settings struct {
 	// Telegram bot settings
 	Telegram TelegramSettings `json:"telegram,omitempty"`
 	// Migration flags
-		DashboardAccessMigrated bool `json:"dashboardAccessMigrated,omitempty"`
-		// Disable image generation endpoints (default: false)
-		DisableImageGeneration bool `json:"disableImageGeneration,omitempty"`
+	DashboardAccessMigrated bool `json:"dashboardAccessMigrated,omitempty"`
+	// Disable image generation endpoints (default: false)
+	DisableImageGeneration bool `json:"disableImageGeneration,omitempty"`
+
+	// MaxRetryCredentials caps distinct connections attempted per model.
+	// 0 means unlimited (legacy behavior).
+	MaxRetryCredentials int `json:"maxRetryCredentials,omitempty"`
+
+	// CooldownEnabled nil/true = on; pointer so JSON omit keeps default-on.
+	CooldownEnabled *bool `json:"cooldownEnabled,omitempty"`
+	// TransientCooldownSeconds overrides CooldownTransient when > 0.
+	TransientCooldownSeconds int `json:"transientCooldownSeconds,omitempty"`
+	// MaxCooldownSeconds clamps any computed cooldown when > 0.
+	MaxCooldownSeconds int `json:"maxCooldownSeconds,omitempty"`
+	// ModelLockEnabled nil/true = on.
+	ModelLockEnabled *bool `json:"modelLockEnabled,omitempty"`
+
+	SessionAffinityEnabled    bool `json:"sessionAffinityEnabled,omitempty"`
+	SessionAffinityTTLSeconds int  `json:"sessionAffinityTTLSeconds,omitempty"`
+
+	// QuotaModelFallback used in P1 Task 13; add field now so JSON shape is stable.
+	QuotaModelFallback map[string]string `json:"quotaModelFallback,omitempty"`
 }
 
 // APIKey represents a generated API key.
@@ -76,22 +95,24 @@ type APIKey struct {
 
 // DefaultConfig returns a new AppConfig with sensible defaults.
 func DefaultConfig() AppConfig {
+	settings := Settings{
+		ComboStrategy:      "fallback",
+		ConnectionStrategy: "weighted-random",
+		RequireAPIKey:      false,
+		Port:               20199,
+		Compression: CompressionSettings{
+			Enabled:          false,
+			MinContentLength: 500,
+			LogSavings:       true,
+		},
+	}
+	settings.NormalizeRouting()
 	return AppConfig{
 		ProviderConnections: []ProviderConnection{},
 		Combos:              []Combo{},
 		ModelAliases:        AliasMap{},
 		APIKeys:             []APIKey{},
-		Settings: Settings{
-			ComboStrategy:      "fallback",
-			ConnectionStrategy: "weighted-random",
-			RequireAPIKey:      false,
-			Port:               20199,
-			Compression: CompressionSettings{
-				Enabled:          false,
-				MinContentLength: 500,
-				LogSavings:       true,
-			},
-		},
-		ModelRegistry: DefaultModelRegistry(),
+		Settings:            settings,
+		ModelRegistry:       DefaultModelRegistry(),
 	}
 }

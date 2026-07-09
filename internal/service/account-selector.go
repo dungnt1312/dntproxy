@@ -40,6 +40,7 @@ const (
 	ConnectionStrategyWeightedRandom   = "weighted-random"
 	ConnectionStrategyPriorityFallback = "priority-fallback"
 	ConnectionStrategyRoundRobin       = "round-robin"
+	ConnectionStrategyFillFirst        = "fill-first"
 )
 
 type AccountSelectionError struct {
@@ -320,6 +321,8 @@ func (s *AccountSelector) selectConnection(available []domain.ProviderConnection
 		return priorityFallbackSelect(available)
 	case ConnectionStrategyRoundRobin:
 		return s.roundRobinSelect(available, provider, model, allowedConnectionIDs)
+	case ConnectionStrategyFillFirst:
+		return fillFirstSelect(available)
 	default:
 		return weightedRandomSelect(available)
 	}
@@ -331,7 +334,7 @@ func (s *AccountSelector) connectionStrategy() string {
 		return ConnectionStrategyWeightedRandom
 	}
 	switch settings.ConnectionStrategy {
-	case ConnectionStrategyWeightedRandom, ConnectionStrategyPriorityFallback, ConnectionStrategyRoundRobin:
+	case ConnectionStrategyWeightedRandom, ConnectionStrategyPriorityFallback, ConnectionStrategyRoundRobin, ConnectionStrategyFillFirst:
 		return settings.ConnectionStrategy
 	default:
 		return ConnectionStrategyWeightedRandom
@@ -351,6 +354,23 @@ func priorityFallbackSelect(available []domain.ProviderConnection) *domain.Provi
 			return normalizedWeight(sorted[i].Weight) > normalizedWeight(sorted[j].Weight)
 		}
 		return false
+	})
+	return &sorted[0]
+}
+
+func fillFirstSelect(available []domain.ProviderConnection) *domain.ProviderConnection {
+	if len(available) == 1 {
+		return &available[0]
+	}
+	sorted := append([]domain.ProviderConnection(nil), available...)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		if sorted[i].Priority != sorted[j].Priority {
+			return sorted[i].Priority < sorted[j].Priority
+		}
+		if normalizedWeight(sorted[i].Weight) != normalizedWeight(sorted[j].Weight) {
+			return normalizedWeight(sorted[i].Weight) > normalizedWeight(sorted[j].Weight)
+		}
+		return sorted[i].ID < sorted[j].ID
 	})
 	return &sorted[0]
 }

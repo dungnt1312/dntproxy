@@ -39,14 +39,11 @@ func ClassifyUpstream(status int, errorText string) UpstreamClass {
 		return UpstreamQuota
 	case 402, 403:
 		return UpstreamQuota
-	case 502, 503, 504:
-		// Service-unavailable style: temporary upstream outages.
+	case 408, 500, 502, 503, 504:
+		// Temporary upstream outages / timeouts — TransientCooldownSeconds applies.
 		return UpstreamTransient
 	case 404:
 		// Keep legacy CheckFallbackError behavior: still allow account/model failover.
-		return UpstreamRetryable
-	case 408, 500:
-		// Verbatim taxonomy tests treat these as retryable (failover-eligible).
 		return UpstreamRetryable
 	default:
 		if status >= 500 {

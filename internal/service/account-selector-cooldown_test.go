@@ -155,6 +155,39 @@ func TestMarkUnavailableTransientOverrideSeconds(t *testing.T) {
 	}
 }
 
+func TestMarkUnavailableTransientOverrideSeconds_500(t *testing.T) {
+	store := newTestCredentialStore(&domain.AppConfig{
+		ProviderConnections: []domain.ProviderConnection{
+			cooldownTestConn("conn-d5", 0, nil),
+		},
+		Settings: domain.Settings{
+			TransientCooldownSeconds: 5,
+		},
+	})
+	sel := NewAccountSelector(store)
+	before := time.Now()
+
+	if err := sel.MarkUnavailable("conn-d5", 500, "internal", "gpt"); err != nil {
+		t.Fatalf("MarkUnavailable: %v", err)
+	}
+
+	conn, err := store.GetConnectionByID("conn-d5")
+	if err != nil || conn == nil {
+		t.Fatalf("get conn: %v %v", conn, err)
+	}
+	if conn.RateLimitedUntil == "" {
+		t.Fatal("RateLimitedUntil want set for 500 via TransientCooldownSeconds")
+	}
+	until, err := time.Parse(time.RFC3339, conn.RateLimitedUntil)
+	if err != nil {
+		t.Fatalf("parse RateLimitedUntil: %v", err)
+	}
+	dur := until.Sub(before)
+	if dur < 4*time.Second || dur > 6*time.Second {
+		t.Fatalf("500 transient cooldown duration %v want ~5s", dur)
+	}
+}
+
 func TestMarkUnavailableModelLockOff(t *testing.T) {
 	store := newTestCredentialStore(&domain.AppConfig{
 		ProviderConnections: []domain.ProviderConnection{

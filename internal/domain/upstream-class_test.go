@@ -16,8 +16,8 @@ func TestClassifyUpstream(t *testing.T) {
 		{503, "", UpstreamTransient},
 		{401, "unauthorized", UpstreamAuth},
 		{403, "model_not_entitled", UpstreamModelEntitlement},
-		{500, "internal", UpstreamRetryable},
-		{408, "timeout", UpstreamRetryable},
+		{500, "internal", UpstreamTransient},
+		{408, "timeout", UpstreamTransient},
 	}
 	for _, tt := range tests {
 		if got := ClassifyUpstream(tt.status, tt.body); got != tt.want {
@@ -29,6 +29,12 @@ func TestClassifyUpstream(t *testing.T) {
 func TestIsRetryableUpstream(t *testing.T) {
 	if !IsRetryableUpstream(503, "") {
 		t.Fatal("503 should be retryable")
+	}
+	if !IsRetryableUpstream(500, "internal") {
+		t.Fatal("500 transient should be retryable")
+	}
+	if !IsRetryableUpstream(408, "timeout") {
+		t.Fatal("408 transient should be retryable")
 	}
 	if IsRetryableUpstream(400, "invalid json") {
 		t.Fatal("400 invalid should not be retryable")

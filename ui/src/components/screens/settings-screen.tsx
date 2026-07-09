@@ -247,10 +247,12 @@ export default function SettingsScreen() {
                   <SelectItem value="weighted-random">Weighted Random</SelectItem>
                   <SelectItem value="priority-fallback">Primary First</SelectItem>
                   <SelectItem value="round-robin">Round-Robin</SelectItem>
+                  <SelectItem value="fill-first">Fill First (lowest priority)</SelectItem>
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">
                 Controls account selection after a provider/model route is chosen.
+                Fill First always prefers the lowest Priority available connection.
               </p>
             </div>
           </CardContent>

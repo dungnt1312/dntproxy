@@ -59,6 +59,53 @@ func TestAffinityKeyPrecedence(t *testing.T) {
 	}
 }
 
+func TestExecuteOnProvider_SessionAffinityDisabledIgnoresSticky(t *testing.T) {
+	store := newTestCredentialStore(&domain.AppConfig{
+		ProviderConnections: []domain.ProviderConnection{
+			// conn-sticky is high priority number (less preferred); conn-pick is preferred.
+			{ID: "conn-sticky", Name: "sticky", Provider: "kiro", Weight: 1, IsActive: true, Priority: 2},
+			{ID: "conn-pick", Name: "pick", Provider: "kiro", Weight: 1, IsActive: true, Priority: 1},
+		},
+		Settings: domain.Settings{
+			SessionAffinityEnabled:    false,
+			SessionAffinityTTLSeconds: 60,
+			ConnectionStrategy:        ConnectionStrategyPriorityFallback,
+		},
+	})
+
+	exec := newFakeExecutor(map[string]fakeExecuteResponse{
+		"conn-sticky|model-a": {Status: 200, Body: "data: {\"id\":\"sticky\"}\n\ndata: [DONE]\n\n"},
+		"conn-pick|model-a":   {Status: 200, Body: "data: {\"id\":\"pick\"}\n\ndata: [DONE]\n\n"},
+	})
+	registry := newTestProviderRegistry()
+	registry.RegisterExecutor("kiro", exec)
+	svc := NewChatService(store, registry)
+
+	// Seed sticky for the same header key that would be used if affinity were on.
+	key := AffinityKey("", "kiro", "model-a", "sess-disabled")
+	svc.sessionAffinity.Put(key, "conn-sticky", time.Minute)
+
+	meta := port.RequestMetadata{SessionKey: "sess-disabled"}
+	r, err := svc.executeOnProvider([]byte(`{"model":"kiro/model-a","messages":[]}`), "kiro/model-a", "req-aff-off", nil, meta)
+	if err != nil || r == nil || !r.OK {
+		t.Fatalf("request failed: err=%v result=%+v", err, r)
+	}
+	if r.Stream != nil {
+		_ = r.Stream.Close()
+	}
+	if len(exec.calls) != 1 {
+		t.Fatalf("expected 1 call, got %d calls=%+v", len(exec.calls), exec.calls)
+	}
+	// Soft-pin path must not run: selection follows priority (conn-pick), not sticky.
+	if exec.calls[0].ConnectionID != "conn-pick" {
+		t.Fatalf("SessionAffinityEnabled=false must not soft-pin; got %s want conn-pick", exec.calls[0].ConnectionID)
+	}
+	// Seeded sticky entry must remain unchanged (no Put rewrite on success).
+	if id, ok := svc.sessionAffinity.Get(key); !ok || id != "conn-sticky" {
+		t.Fatalf("affinity store must not be updated when disabled, got %s ok=%v", id, ok)
+	}
+}
+
 func TestExecuteOnProvider_SessionAffinitySoftPin(t *testing.T) {
 	store := newTestCredentialStore(&domain.AppConfig{
 		ProviderConnections: []domain.ProviderConnection{
@@ -152,10 +199,7 @@ func TestExecuteOnProvider_SessionAffinityRetryableFailDeletes(t *testing.T) {
 	if exec.calls[1].ConnectionID != "conn-b" {
 		t.Fatalf("second call should be conn-b, got %s", exec.calls[1].ConnectionID)
 	}
-	if _, ok := svc.sessionAffinity.Get(key); ok {
-		// After success on conn-b, affinity should be rewritten to conn-b (Put on success).
-		// Delete happened on sticky fail; Put on success with conn-b.
-	}
+	// Delete on sticky fail, then Put on success rewrites affinity to conn-b.
 	if id, ok := svc.sessionAffinity.Get(key); !ok || id != "conn-b" {
 		t.Fatalf("affinity after success should be conn-b, got %s ok=%v", id, ok)
 	}

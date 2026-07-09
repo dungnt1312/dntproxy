@@ -70,6 +70,10 @@ func (s *SessionAffinityStore) Delete(key string) {
 //   - header → "h:" + headerSession
 //   - else apiKeyID → "k:" + apiKeyID + "|" + provider + "|" + model
 //   - else ""
+//
+// Header keys (h:) are intentionally global: not namespaced by provider/model
+// (plan-locked). A sticky connection that fails for another provider/model will
+// Delete and fall through to normal selection.
 func AffinityKey(apiKeyID, provider, model, headerSession string) string {
 	if headerSession != "" {
 		return "h:" + headerSession

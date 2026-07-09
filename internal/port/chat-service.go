@@ -25,6 +25,9 @@ type APIKeyPolicy struct {
 // RequestMetadata carries optional per-request observability data.
 type RequestMetadata struct {
 	Compression *domain.CompressionLogMetadata
+	TenantID    string
+	SessionKey  string // raw client session header value (optional)
+	APIKeyID    string // authenticated API key id if any
 }
 
 // ChatService defines the chat orchestration contract.

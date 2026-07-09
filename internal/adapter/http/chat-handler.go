@@ -62,10 +62,18 @@ func chatHandler(chatService port.ChatService, store port.CredentialStore, comp 
 
 		log.Printf("[CHAT] POST /v1/chat/completions | model=%s | stream=%v", partial.Model, partial.Stream)
 
-		// Extract API key policy from context (set by apiKeyMiddleware)
-		policy := extractAPIKeyPolicy(c)
+// Extract API key policy from context (set by apiKeyMiddleware)
+			policy := extractAPIKeyPolicy(c)
 
-		result := chatService.HandleChat(body, partial.Model, requestID, policy, compressionMetadata(stats))
+			meta := compressionMetadata(stats)
+			meta.SessionKey = sessionHeader(c)
+			if v, ok := c.Get("apiKeyID"); ok {
+				if id, ok := v.(string); ok {
+					meta.APIKeyID = id
+				}
+			}
+
+			result := chatService.HandleChat(body, partial.Model, requestID, policy, meta)
 
 		if result.Stream != nil {
 			// Only aggregate when client EXPLICITLY sends "stream": false.
@@ -161,6 +169,14 @@ func compressionMetadata(stats compressor.Stats) port.RequestMetadata {
 			Skipped:             stats.Skipped,
 		},
 	}
+}
+
+// sessionHeader returns the first non-empty of X-Session-Id, X-Dntproxy-Session.
+func sessionHeader(c *gin.Context) string {
+	if v := strings.TrimSpace(c.GetHeader("X-Session-Id")); v != "" {
+		return v
+	}
+	return strings.TrimSpace(c.GetHeader("X-Dntproxy-Session"))
 }
 
 func streamChunks(done <-chan struct{}, r io.Reader) (<-chan []byte, <-chan error) {

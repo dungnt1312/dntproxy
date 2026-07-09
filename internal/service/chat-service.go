@@ -21,6 +21,7 @@ type ChatService struct {
 	providers       port.ProviderRegistry
 	store           port.CredentialStore
 	modelAccess     *ModelAccessService
+	sessionAffinity *SessionAffinityStore
 }
 
 // NewChatService creates a new ChatService.
@@ -35,6 +36,7 @@ func NewChatService(
 		providers:       providers,
 		store:           store,
 		modelAccess:     NewModelAccessService(store),
+		sessionAffinity: NewSessionAffinityStore(),
 	}
 }
 
@@ -53,6 +55,7 @@ func NewChatServiceWithDeps(
 		providers:       providers,
 		store:           store,
 		modelAccess:     NewModelAccessService(store),
+		sessionAffinity: NewSessionAffinityStore(),
 	}
 }
 
@@ -140,8 +143,10 @@ func (s *ChatService) HandleChat(body []byte, modelStr string, requestID string,
 func (s *ChatService) executeOnProvider(body []byte, qualifiedModel string, requestID string, allowedConnectionIDs []string, metadata ...port.RequestMetadata) (*ComboResult, error) {
 	reqlog := logger.NewRequestLog(requestID)
 	reqlog.Begin("POST", "/v1/chat/completions", qualifiedModel, len(body))
+	var meta port.RequestMetadata
 	if len(metadata) > 0 {
-		reqlog.AttachCompression(metadata[0].Compression)
+		meta = metadata[0]
+		reqlog.AttachCompression(meta.Compression)
 	}
 
 	// Parse "provider/model@connectionId"
@@ -153,9 +158,10 @@ func (s *ChatService) executeOnProvider(body []byte, qualifiedModel string, requ
 	}
 	provider := parsed.Provider
 	model := parsed.Model
+	hardPin := parsed.ConnectionID != ""
 
 	// Validate pinned connection against allowed list
-	if parsed.ConnectionID != "" && len(allowedConnectionIDs) > 0 {
+	if hardPin && len(allowedConnectionIDs) > 0 {
 		allowed := false
 		for _, id := range allowedConnectionIDs {
 			if id == parsed.ConnectionID {
@@ -197,15 +203,47 @@ func (s *ChatService) executeOnProvider(body []byte, qualifiedModel string, requ
 		return &ComboResult{OK: false, StatusCode: http.StatusInternalServerError, Error: "Failed to serialize request body"}, nil
 	}
 
+	// Soft session affinity: only when enabled, no hard pin, and a key can be built.
+	affinityKey := ""
+	stickyTried := false
+	if !hardPin {
+		if settings, err := s.store.GetSettings(); err == nil && settings != nil && settings.SessionAffinityEnabled {
+			affinityKey = AffinityKey(meta.APIKeyID, provider, model, meta.SessionKey)
+		}
+	}
+
 	// Try connections with weighted random + fallback on failure
 	// If model has @connectionId, SelectCredentialsForModel will pin to that connection
 	excludeIDs := make(map[string]bool)
 	attempted := 0
 
 	for {
+		selectModel := qualifiedModel
+		// Soft-pin: first try only, temporary provider/model@stickyID.
+		if affinityKey != "" && !stickyTried && !hardPin && s.sessionAffinity != nil {
+			if stickyID, ok := s.sessionAffinity.Get(affinityKey); ok {
+				stickyTried = true // only attempt soft-pin once per request
+				if stickyAllowed(stickyID, allowedConnectionIDs) {
+					selectModel = provider + "/" + model + "@" + stickyID
+				}
+				// If sticky id not in allowlist, skip sticky (don't force forbidden conn).
+			}
+		}
+
 		// Use new method that handles @connectionId pinning
-		creds, err := s.accountSelector.SelectCredentialsForModel(qualifiedModel, excludeIDs, allowedConnectionIDs)
+		creds, err := s.accountSelector.SelectCredentialsForModel(selectModel, excludeIDs, allowedConnectionIDs)
 		if err != nil {
+			// Soft sticky miss: clear affinity, exclude sticky id, continue normal loop.
+			if affinityKey != "" && stickyTried && selectModel != qualifiedModel {
+				if stickyParsed, parseErr := ParseModelString(selectModel); parseErr == nil && stickyParsed.ConnectionID != "" {
+					excludeIDs[stickyParsed.ConnectionID] = true
+				}
+				if s.sessionAffinity != nil {
+					s.sessionAffinity.Delete(affinityKey)
+				}
+				// stickyTried stays true so we don't soft-pin again this request.
+				continue
+			}
 			// Map selection errors to appropriate combo results
 			if mapped := mapSelectionErrorToComboResult(err); mapped != nil {
 				reqlog.End(mapped.StatusCode, mapped.Error)
@@ -230,6 +268,13 @@ func (s *ChatService) executeOnProvider(body []byte, qualifiedModel string, requ
 			reqlog.Upstream("", "", status, duration, nil)
 			s.accountSelector.ClearError(creds.ConnectionID, model)
 			s.accountSelector.AdvanceConnectionRotation(provider, model, allowedConnectionIDs)
+
+			// Soft-pin success: remember connection for this affinity key.
+			// Hard @connectionId pin always wins; do not rewrite affinity for hard pins.
+			if affinityKey != "" && !hardPin && s.sessionAffinity != nil {
+				ttl := sessionAffinityTTL(s.store)
+				s.sessionAffinity.Put(affinityKey, creds.ConnectionID, ttl)
+			}
 
 			// Stream wrapper will finalize reqlog.End() when consumer closes stream
 			wrappedStream := reqlog.WrapStream(stream)
@@ -257,8 +302,14 @@ func (s *ChatService) executeOnProvider(body []byte, qualifiedModel string, requ
 		}
 		excludeIDs[creds.ConnectionID] = true
 
-		// If this was a pinned connection, don't retry (no other connections to try)
-		if parsed.ConnectionID != "" {
+		// Soft sticky retryable fail: drop affinity and continue normal loop.
+		if affinityKey != "" && stickyTried && selectModel != qualifiedModel {
+			if s.sessionAffinity != nil {
+				s.sessionAffinity.Delete(affinityKey)
+			}
+			// sticky id stays in excludeIDs; continue without treating as hard pin.
+		} else if hardPin {
+			// If this was a hard-pinned connection, don't retry (no other connections to try)
 			msg := fmt.Sprintf("Pinned connection failed: %s", errMsg)
 			reqlog.End(http.StatusServiceUnavailable, msg)
 			return &ComboResult{OK: false, StatusCode: http.StatusServiceUnavailable, Error: msg}, nil
@@ -274,6 +325,38 @@ func (s *ChatService) executeOnProvider(body []byte, qualifiedModel string, requ
 			return &ComboResult{OK: false, StatusCode: http.StatusServiceUnavailable, Error: msg, AllowFallback: true}, nil
 		}
 	}
+}
+
+// stickyAllowed reports whether stickyID may be used given the allowlist.
+// Empty allowlist means unrestricted.
+func stickyAllowed(stickyID string, allowedConnectionIDs []string) bool {
+	if stickyID == "" {
+		return false
+	}
+	if len(allowedConnectionIDs) == 0 {
+		return true
+	}
+	for _, id := range allowedConnectionIDs {
+		if id == stickyID {
+			return true
+		}
+	}
+	return false
+}
+
+// sessionAffinityTTL returns the configured TTL after NormalizeRouting defaults.
+func sessionAffinityTTL(store port.CredentialStore) time.Duration {
+	settings, err := store.GetSettings()
+	if err != nil || settings == nil {
+		return 1800 * time.Second
+	}
+	// Copy so we don't mutate stored settings unexpectedly.
+	s := *settings
+	s.NormalizeRouting()
+	if s.SessionAffinityTTLSeconds <= 0 {
+		return 1800 * time.Second
+	}
+	return time.Duration(s.SessionAffinityTTLSeconds) * time.Second
 }
 
 // mapSelectionErrorToComboResult converts AccountSelectionError to ComboResult

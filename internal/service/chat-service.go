@@ -200,6 +200,7 @@ func (s *ChatService) executeOnProvider(body []byte, qualifiedModel string, requ
 	// Try connections with weighted random + fallback on failure
 	// If model has @connectionId, SelectCredentialsForModel will pin to that connection
 	excludeIDs := make(map[string]bool)
+	attempted := 0
 
 	for {
 		// Use new method that handles @connectionId pinning
@@ -214,6 +215,10 @@ func (s *ChatService) executeOnProvider(body []byte, qualifiedModel string, requ
 			reqlog.End(http.StatusServiceUnavailable, msg)
 			return &ComboResult{OK: false, StatusCode: http.StatusServiceUnavailable, Error: msg}, nil
 		}
+
+		// Count each successfully selected distinct connection once.
+		// OAuth refresh re-Execute on the same connection must not increment again.
+		attempted++
 
 		reqlog.SelectAccount(creds.ConnectionID, creds.ConnectionName)
 
@@ -257,6 +262,16 @@ func (s *ChatService) executeOnProvider(body []byte, qualifiedModel string, requ
 			msg := fmt.Sprintf("Pinned connection failed: %s", errMsg)
 			reqlog.End(http.StatusServiceUnavailable, msg)
 			return &ComboResult{OK: false, StatusCode: http.StatusServiceUnavailable, Error: msg}, nil
+		}
+
+		max := 0
+		if settings, err := s.store.GetSettings(); err == nil && settings != nil {
+			max = settings.MaxRetryCredentials
+		}
+		if shouldStopCredentialRetry(attempted, max) {
+			msg := fmt.Sprintf("credential retry budget exhausted (%d)", max)
+			reqlog.End(http.StatusServiceUnavailable, msg)
+			return &ComboResult{OK: false, StatusCode: http.StatusServiceUnavailable, Error: msg, AllowFallback: true}, nil
 		}
 	}
 }

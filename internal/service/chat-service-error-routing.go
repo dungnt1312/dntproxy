@@ -12,6 +12,12 @@ func shouldFallbackToNextAccount(status int, errorText string) bool {
 	return domain.IsRetryableUpstream(status, errorText)
 }
 
+// shouldStopCredentialRetry reports whether the per-model credential retry budget
+// is exhausted. max==0 means unlimited; max==N stops after N distinct connections.
+func shouldStopCredentialRetry(attempted int, max int) bool {
+	return max > 0 && attempted >= max
+}
+
 func normalizeExecutorFailure(status int, errMsg string) (int, string) {
 	if status <= 0 {
 		status = http.StatusBadGateway

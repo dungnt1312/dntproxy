@@ -3,34 +3,13 @@ package service
 import (
 	"errors"
 	"net/http"
-	"strings"
 
 	"github.com/dungnt/dntproxy/internal/domain"
 	"github.com/dungnt/dntproxy/internal/port"
 )
 
 func shouldFallbackToNextAccount(status int, errorText string) bool {
-	if domain.IsNonFallbackStatus(status) {
-		return false
-	}
-
-	lower := strings.ToLower(errorText)
-	clientErrorHints := []string{
-		"invalid request",
-		"improperly formed request",
-		"malformed",
-		"invalid json",
-		"missing required",
-		"unsupported parameter",
-		"tool schema",
-	}
-	for _, hint := range clientErrorHints {
-		if strings.Contains(lower, hint) {
-			return false
-		}
-	}
-
-	return true
+	return domain.IsRetryableUpstream(status, errorText)
 }
 
 func normalizeExecutorFailure(status int, errMsg string) (int, string) {

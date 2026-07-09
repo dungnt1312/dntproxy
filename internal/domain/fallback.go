@@ -49,58 +49,57 @@ func GetQuotaCooldown(level int) int {
 }
 
 // CheckFallbackError determines if an error should trigger account fallback.
+// Classification is centralized in ClassifyUpstream; cooldown numbers stay here.
 func CheckFallbackError(status int, errorText string, backoffLevel int) FallbackResult {
 	lower := strings.ToLower(errorText)
+	class := ClassifyUpstream(status, errorText)
 
-	if status == 403 && isModelEntitlementError(lower) {
+	if class == UpstreamNonFallback {
+		// Align with chat routing: client/malformed errors do not failover or cool down.
+		return FallbackResult{ShouldFallback: false, CooldownMs: 0, NewBackoffLevel: backoffLevel}
+	}
+
+	if class == UpstreamModelEntitlement {
 		return FallbackResult{ShouldFallback: true, CooldownMs: CooldownPaymentReq, NewBackoffLevel: backoffLevel, ModelOnly: true}
 	}
 
-	// Error text patterns take priority
+	// Preserve legacy text-specific cooldown durations that are not class distinctions.
 	if strings.Contains(lower, "no credentials") {
 		return FallbackResult{ShouldFallback: true, CooldownMs: CooldownNotFound, NewBackoffLevel: backoffLevel}
 	}
 	if strings.Contains(lower, "request not allowed") {
 		return FallbackResult{ShouldFallback: true, CooldownMs: CooldownRequestNotAlwd, NewBackoffLevel: backoffLevel}
 	}
-	if strings.Contains(lower, "improperly formed request") {
-		return FallbackResult{ShouldFallback: true, CooldownMs: CooldownTransient, NewBackoffLevel: backoffLevel}
-	}
 
-	// Rate limit keywords → exponential backoff
-	rateLimitKeywords := []string{"rate limit", "too many requests", "quota exceeded", "capacity", "overloaded"}
-	for _, kw := range rateLimitKeywords {
-		if strings.Contains(lower, kw) {
-			newLevel := backoffLevel + 1
-			if newLevel > BackoffMaxLevel {
-				newLevel = BackoffMaxLevel
-			}
-			return FallbackResult{ShouldFallback: true, CooldownMs: GetQuotaCooldown(backoffLevel), NewBackoffLevel: newLevel}
-		}
-	}
-
-	// Status code based
-	if IsNonFallbackStatus(status) {
-		return FallbackResult{ShouldFallback: false, CooldownMs: 0, NewBackoffLevel: backoffLevel}
-	}
-	switch status {
-	case 401:
+	switch class {
+	case UpstreamAuth:
 		return FallbackResult{ShouldFallback: true, CooldownMs: CooldownUnauthorized, NewBackoffLevel: backoffLevel}
-	case 402, 403:
-		return FallbackResult{ShouldFallback: true, CooldownMs: CooldownPaymentReq, NewBackoffLevel: backoffLevel}
-	case 404:
-		return FallbackResult{ShouldFallback: true, CooldownMs: CooldownNotFound, NewBackoffLevel: backoffLevel}
-	case 429:
+	case UpstreamQuota:
+		// Preserve legacy: bare 402/403 use payment cooldown; keywords and 429 use exponential.
+		if status == 402 || status == 403 {
+			rateLimitKeywords := []string{"rate limit", "too many requests", "quota exceeded", "capacity", "overloaded"}
+			hasKW := false
+			for _, kw := range rateLimitKeywords {
+				if strings.Contains(lower, kw) {
+					hasKW = true
+					break
+				}
+			}
+			if !hasKW {
+				return FallbackResult{ShouldFallback: true, CooldownMs: CooldownPaymentReq, NewBackoffLevel: backoffLevel}
+			}
+		}
 		newLevel := backoffLevel + 1
 		if newLevel > BackoffMaxLevel {
 			newLevel = BackoffMaxLevel
 		}
 		return FallbackResult{ShouldFallback: true, CooldownMs: GetQuotaCooldown(backoffLevel), NewBackoffLevel: newLevel}
-	case 406, 408, 500, 502, 503, 504:
-		return FallbackResult{ShouldFallback: true, CooldownMs: CooldownTransient, NewBackoffLevel: backoffLevel}
 	}
 
-	// Default: fallback with transient cooldown
+	// UpstreamRetryable / UpstreamTransient (and any future retryable classes)
+	if status == 404 {
+		return FallbackResult{ShouldFallback: true, CooldownMs: CooldownNotFound, NewBackoffLevel: backoffLevel}
+	}
 	return FallbackResult{ShouldFallback: true, CooldownMs: CooldownTransient, NewBackoffLevel: backoffLevel}
 }
 

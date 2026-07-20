@@ -8,7 +8,8 @@ type AccountSelector interface {
 	// using weighted random selection among available connections.
 	// excludeIDs: connections to skip (already failed in this request).
 	// allowedConnectionIDs: optional restriction to specific connections (from combo config).
-	SelectCredentials(provider string, excludeIDs map[string]bool, model string, allowedConnectionIDs []string) (*domain.Credentials, error)
+	// tenantID: filter connections by tenant (empty = legacy single-tenant mode).
+	SelectCredentials(provider string, excludeIDs map[string]bool, model string, allowedConnectionIDs []string, tenantID string) (*domain.Credentials, error)
 
 	// MarkUnavailable marks a connection as unavailable with cooldown.
 	MarkUnavailable(connectionID string, status int, errorText string, model string) error

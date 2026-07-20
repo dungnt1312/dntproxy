@@ -26,6 +26,9 @@ func newKeyTestRouter(t *testing.T) (*gin.Engine, *storage.JsonDB) {
 		{ID: "conn-openai", Name: "OpenAI Main", Provider: "openai", AuthType: "apikey", IsActive: true, Weight: 100},
 		{ID: "conn-kiro", Name: "Kiro Main", Provider: "kiro", AuthType: "oauth", IsActive: true, Weight: 100},
 	}
+	// Mark bootstrap done so the storage layer does not auto-create an admin
+	// key on this fresh test DB, which would skew key-count assertions.
+	cfg.Settings.AdminKeyBootstrapped = true
 	if err := db.Save(&cfg); err != nil {
 		t.Fatalf("seed db: %v", err)
 	}

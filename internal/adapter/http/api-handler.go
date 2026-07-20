@@ -18,7 +18,7 @@ import (
 //   - model-api-handler.go   — model list + registry CRUD
 //   - quota-handler.go       — quota check + Codex probing
 //   - backup-handler.go      — backup export/import
-func RegisterAPIRoutes(r *gin.Engine, store port.CredentialStore, providers port.ProviderRegistry, onComboDelete func(string)) {
+func RegisterAPIRoutes(r *gin.Engine, store port.CredentialStore, providers port.ProviderRegistry, imageProviders port.ImageProviderRegistry, onComboDelete func(string), tunnelMgr port.TunnelManager) {
 	api := r.Group("/api")
 	api.Use(dashboardKeyMiddleware(store))
 	{
@@ -26,8 +26,12 @@ func RegisterAPIRoutes(r *gin.Engine, store port.CredentialStore, providers port
 		api.GET("/debug/providers", apiDebugProviders(store))
 		api.GET("/debug/accounts/:provider", apiDebugAccounts(store))
 
+		// Provider metadata (used by dynamic Add Connection UI)
+		api.GET("/providers", apiListProviders())
+
 		// Connections
 		api.GET("/connections", apiListConnections(store))
+		api.POST("/connections", apiCreateConnection(store))
 		api.POST("/connections/import", apiImportConnection(store))
 		api.POST("/connections/import-file", apiImportConnectionFromFile(store))
 		api.POST("/connections/import-multiple", apiImportConnectionsFromFile(store))
@@ -39,6 +43,7 @@ func RegisterAPIRoutes(r *gin.Engine, store port.CredentialStore, providers port
 		api.POST("/connections/add-qwen", apiAddQwenConnection(store))
 		api.POST("/connections/add-anthropic", apiAddConnection(store, "anthropic"))
 		api.POST("/connections/add-gemini", apiAddConnection(store, "gemini"))
+		api.POST("/connections/add-cline", apiAddConnection(store, "cline"))
 		api.POST("/connections/detect-kiro", apiDetectKiroToken(store))
 		api.DELETE("/connections/:id", apiDeleteConnection(store))
 		api.GET("/connections/:id/export", apiExportConnection(store))
@@ -47,7 +52,7 @@ func RegisterAPIRoutes(r *gin.Engine, store port.CredentialStore, providers port
 		api.POST("/connections/:id/clear-error", apiClearConnectionError(store))
 		api.POST("/connections/:id/reset-cooldown", apiResetCooldown(store))
 		api.POST("/connections/:id/check-quota", apiCheckQuota(store))
-		api.POST("/connections/:id/test-model", apiTestModel(store, providers))
+		api.POST("/connections/:id/test-model", apiTestModel(store, providers, imageProviders))
 
 		// Combos
 		api.GET("/combos", apiListCombos(store))
@@ -65,6 +70,13 @@ func RegisterAPIRoutes(r *gin.Engine, store port.CredentialStore, providers port
 		api.POST("/keys", apiCreateKey(store))
 		api.PUT("/keys/:id", apiUpdateKey(store))
 		api.DELETE("/keys/:id", apiDeleteKey(store))
+
+		// Tenants (admin-only; handlers enforce requireAdmin internally)
+		api.GET("/tenants", apiListTenants(store))
+		api.POST("/tenants", apiCreateTenant(store))
+		api.PUT("/tenants/:id", apiUpdateTenant(store))
+		api.DELETE("/tenants/:id", apiDeleteTenant(store))
+		api.POST("/tenants/:id/keys", apiGenerateTenantKey(store))
 
 		// Model registry management
 		api.GET("/models/registry", apiGetModelRegistry(store))
@@ -115,6 +127,18 @@ func RegisterAPIRoutes(r *gin.Engine, store port.CredentialStore, providers port
 
 		// Auth validation (exempt from middleware, used by UI to verify stored key)
 		api.POST("/auth/validate-key", apiValidateKey(store))
+		// Session info for currently-authenticated key (resolves tenant, admin flag).
+		// Exempt from middleware so the UI can refresh session on page reload.
+		api.GET("/auth/session", apiSession(store))
+
+		// OAuth enrollment + fetch-models (require dashboard key — inherit middleware)
+		RegisterAuthRoutes(api, store)
+
+		// Tunnel control (admin-only; handlers enforce requireAdmin).
+		// Registered on the api group so it inherits dashboard middleware.
+		if tunnelMgr != nil {
+			RegisterTunnelRoutes(api, tunnelMgr, store)
+		}
 	}
 }
 
@@ -127,6 +151,9 @@ func apiGetUsage(store port.CredentialStore) gin.HandlerFunc {
 // apiDebugProviders dumps all registered provider configs and active connections.
 func apiDebugProviders(store port.CredentialStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if !requireAdmin(c) {
+			return
+		}
 		providers := domain.ListProviders()
 		result := make([]gin.H, 0, len(providers))
 		for _, id := range providers {
@@ -150,12 +177,19 @@ func apiDebugProviders(store port.CredentialStore) gin.HandlerFunc {
 // apiDebugAccounts dumps account selection state for debugging (credentials masked).
 func apiDebugAccounts(store port.CredentialStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if !requireAdmin(c) {
+			return
+		}
 		provider := c.Param("provider")
 		connections, err := store.GetActiveConnections(provider)
 		if err != nil {
 			c.JSON(500, gin.H{"error": err.Error()})
 			return
 		}
+		// Tenant isolation for non-admin is enforced by requireAdmin above.
+		// Keep an explicit filter so future relaxation cannot leak cross-tenant data.
+		tenantID := GetTenantID(c)
+		connections = domain.FilterConnectionsByTenant(connections, tenantID)
 		log.Printf("[DEBUG] GetActiveConnections(%s) -> %d connections", provider, len(connections))
 
 		type safeDebugConn struct {

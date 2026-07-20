@@ -23,21 +23,9 @@ import (
 func apiCheckQuota(store port.CredentialStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
-		cfg, err := store.Load()
-		if err != nil {
-			c.JSON(500, gin.H{"error": "Failed to load config"})
-			return
-		}
 
-		var conn *domain.ProviderConnection
-		for i := range cfg.ProviderConnections {
-			if cfg.ProviderConnections[i].ID == id {
-				conn = &cfg.ProviderConnections[i]
-				break
-			}
-		}
-		if conn == nil {
-			c.JSON(404, gin.H{"error": "Connection not found"})
+		conn, ok := requireTenantOwnsConnection(c, store, id)
+		if !ok {
 			return
 		}
 
@@ -71,10 +59,10 @@ func apiCheckQuota(store port.CredentialStore) gin.HandlerFunc {
 			return
 		}
 
-			if conn.Provider == "xai" {
-				handleXAIGrokChatQuota(c, conn, result)
-				return
-			}
+		if conn.Provider == "xai" {
+			handleXAIGrokChatQuota(c, conn, result)
+			return
+		}
 
 		// For providers without quota check support (GLM, Qwen, etc.)
 		providerCfg := domain.GetProviderConfig(conn.Provider)

@@ -10,6 +10,7 @@ export interface ApiKey {
   updatedAt: string
   allowedConnectionIds: string[]
   allowedModels: string[]
+  tenantId?: string
 }
 
 export interface ApiKeyCreatePayload {
@@ -17,6 +18,7 @@ export interface ApiKeyCreatePayload {
   dashboardAccess?: boolean
   allowedConnectionIds: string[]
   allowedModels: string[]
+  tenantId?: string
 }
 
 export interface ApiKeyUpdatePayload {

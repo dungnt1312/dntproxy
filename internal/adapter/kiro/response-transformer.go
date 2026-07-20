@@ -3,6 +3,7 @@ package kiro
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 )
@@ -71,36 +72,42 @@ type PayloadReport struct {
 
 // ResponseTransformer converts parsed EventStream frames to OpenAI SSE chunks.
 type ResponseTransformer struct {
-	model        string
-	responseID   string
-	created      int64
-	chunkIndex   int
-	hasToolCalls bool
-	toolCallIdx  int
-	seenToolIDs  map[string]int
-	usage        *SSEUsage
-	totalContent int
-	ctxPct       float64
-	hasCtxUsage  bool
-	hasMetering  bool
-	finishSent   bool
-	usageSource  string
-	usageSent    bool
-	onUsage      func(UsageReport)
-	preview      strings.Builder
-	previewBytes int
-	previewCut   bool
-	payloadSent  bool
-	onPayload    func(PayloadReport)
+	model         string
+	contextWindow int // used for input token estimation when no metrics available
+	responseID    string
+	created       int64
+	chunkIndex    int
+	hasToolCalls  bool
+	toolCallIdx   int
+	seenToolIDs   map[string]int
+	usage         *SSEUsage
+	totalContent  int
+	ctxPct        float64
+	hasCtxUsage   bool
+	hasMetering   bool
+	stopReceived  bool
+	finishSent    bool
+	usageSource   string
+	usageSent     bool
+	onUsage       func(UsageReport)
+	preview       strings.Builder
+	previewBytes  int
+	previewCut    bool
+	payloadSent   bool
+	onPayload     func(PayloadReport)
 }
 
 // NewResponseTransformer creates a new transformer for a response stream.
-func NewResponseTransformer(model string) *ResponseTransformer {
+func NewResponseTransformer(model string, contextWindow int) *ResponseTransformer {
+	if contextWindow <= 0 {
+		contextWindow = 200000 // fallback
+	}
 	return &ResponseTransformer{
-		model:       model,
-		responseID:  fmt.Sprintf("chatcmpl-%d", time.Now().UnixMilli()),
-		created:     time.Now().Unix(),
-		seenToolIDs: make(map[string]int),
+		model:         model,
+		contextWindow: contextWindow,
+		responseID:    fmt.Sprintf("chatcmpl-%d", time.Now().UnixMilli()),
+		created:       time.Now().Unix(),
+		seenToolIDs:   make(map[string]int),
 	}
 }
 
@@ -136,22 +143,26 @@ func (t *ResponseTransformer) TransformFrame(frame *EventFrame) [][]byte {
 		results = append(results, chunks...)
 
 	case "messageStopEvent":
-		if chunk := t.handleMessageStop(); chunk != nil {
-			results = append(results, chunk)
-		}
+		t.stopReceived = true
 
 	case "contextUsageEvent":
 		t.handleContextUsage(frame)
 
 	case "meteringEvent":
-		t.hasMetering = true
+		t.handleMetering(frame)
 
 	case "metricsEvent":
 		t.handleMetricsEvent(frame)
+
+	default:
+		if eventType != "" {
+			log.Printf("[KIRO] unknown event=%s payload=%s", eventType, string(frame.Payload))
+		}
 	}
 
-	// Emit final chunk after both metering + context usage received
-	if t.hasMetering && t.hasCtxUsage && !t.finishSent {
+	// Emit final chunk when we have usage info or stop is received.
+	hasHints := t.hasMetering && t.hasCtxUsage
+	if !t.finishSent && (hasHints || t.stopReceived) {
 		if chunk := t.emitFinalChunk(); chunk != nil {
 			results = append(results, chunk)
 		}
@@ -313,18 +324,35 @@ func (t *ResponseTransformer) emitToolUse(toolCallID, toolName string, toolInput
 	return results
 }
 
-func (t *ResponseTransformer) handleMessageStop() []byte {
-	if t.finishSent {
-		return nil
-	}
-	finishReason := "stop"
-	if t.hasToolCalls {
-		finishReason = "tool_calls"
-	}
-	t.finishSent = true
+func (t *ResponseTransformer) handleMetering(frame *EventFrame) {
+	t.hasMetering = true
 
-	chunk := t.buildChunk(SSEDelta{}, &finishReason)
-	return t.marshalSSE(chunk)
+	// Try camelCase: {"inputTokens": ..., "outputTokens": ...}
+	var camel struct {
+		InputTokens  int `json:"inputTokens"`
+		OutputTokens int `json:"outputTokens"`
+	}
+	if err := frame.ParsePayloadAs(&camel); err == nil {
+		if camel.InputTokens > 0 || camel.OutputTokens > 0 {
+			t.setMetricsUsage(camel.InputTokens, camel.OutputTokens)
+			return
+		}
+	}
+
+	// Try snake_case: {"input_tokens": ..., "output_tokens": ...}
+	var snake struct {
+		InputTokens  int `json:"input_tokens"`
+		OutputTokens int `json:"output_tokens"`
+	}
+	if err := frame.ParsePayloadAs(&snake); err == nil {
+		if snake.InputTokens > 0 || snake.OutputTokens > 0 {
+			t.setMetricsUsage(snake.InputTokens, snake.OutputTokens)
+			return
+		}
+	}
+
+	// Log payload for debugging
+	log.Printf("[KIRO] meteringEvent payload: %s", string(frame.Payload))
 }
 
 func (t *ResponseTransformer) handleContextUsage(frame *EventFrame) {
@@ -338,35 +366,58 @@ func (t *ResponseTransformer) handleContextUsage(frame *EventFrame) {
 }
 
 func (t *ResponseTransformer) handleMetricsEvent(frame *EventFrame) {
-	// Try nested metricsEvent or flat
-	var payload struct {
+	// Try nested format: {"metricsEvent": {"inputTokens": ..., "outputTokens": ...}}
+	var nested struct {
 		MetricsEvent *struct {
 			InputTokens  int `json:"inputTokens"`
 			OutputTokens int `json:"outputTokens"`
 		} `json:"metricsEvent"`
+	}
+	if err := frame.ParsePayloadAs(&nested); err == nil && nested.MetricsEvent != nil {
+		input := nested.MetricsEvent.InputTokens
+		output := nested.MetricsEvent.OutputTokens
+		if input > 0 || output > 0 {
+			t.setMetricsUsage(input, output)
+			return
+		}
+	}
+
+	// Try flat camelCase: {"inputTokens": ..., "outputTokens": ...}
+	var flatCamel struct {
 		InputTokens  int `json:"inputTokens"`
 		OutputTokens int `json:"outputTokens"`
 	}
-	if err := frame.ParsePayloadAs(&payload); err != nil {
-		return
-	}
-
-	input := payload.InputTokens
-	output := payload.OutputTokens
-	if payload.MetricsEvent != nil {
-		input = payload.MetricsEvent.InputTokens
-		output = payload.MetricsEvent.OutputTokens
-	}
-
-	if input > 0 || output > 0 {
-		t.usage = &SSEUsage{
-			PromptTokens:     input,
-			CompletionTokens: output,
-			TotalTokens:      input + output,
+	if err := frame.ParsePayloadAs(&flatCamel); err == nil {
+		if flatCamel.InputTokens > 0 || flatCamel.OutputTokens > 0 {
+			t.setMetricsUsage(flatCamel.InputTokens, flatCamel.OutputTokens)
+			return
 		}
-		t.usageSource = "provider_metrics"
-		t.notifyUsage()
 	}
+
+	// Try flat snake_case: {"input_tokens": ..., "output_tokens": ...}
+	var flatSnake struct {
+		InputTokens  int `json:"input_tokens"`
+		OutputTokens int `json:"output_tokens"`
+	}
+	if err := frame.ParsePayloadAs(&flatSnake); err == nil {
+		if flatSnake.InputTokens > 0 || flatSnake.OutputTokens > 0 {
+			t.setMetricsUsage(flatSnake.InputTokens, flatSnake.OutputTokens)
+			return
+		}
+	}
+
+	// Log unmapped metricsEvent payload for future fix
+	log.Printf("[KIRO] metricsEvent unparsed: %s", string(frame.Payload))
+}
+
+func (t *ResponseTransformer) setMetricsUsage(input, output int) {
+	t.usage = &SSEUsage{
+		PromptTokens:     input,
+		CompletionTokens: output,
+		TotalTokens:      input + output,
+	}
+	t.usageSource = "provider_metrics"
+	t.notifyUsage()
 }
 
 func (t *ResponseTransformer) emitFinalChunk() []byte {
@@ -395,7 +446,7 @@ func (t *ResponseTransformer) estimateUsage() {
 	}
 	inputTokens := 0
 	if t.ctxPct > 0 {
-		inputTokens = int(t.ctxPct * 200000 / 100)
+		inputTokens = int(t.ctxPct * float64(t.contextWindow) / 100)
 	}
 	t.usage = &SSEUsage{
 		PromptTokens:     inputTokens,

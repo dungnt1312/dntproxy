@@ -14,6 +14,8 @@ import (
 // === Qwen OAuth (Device Code Flow) ===
 
 type qwenSession struct {
+	TenantID     string
+	APIKeyID     string
 	DeviceCode   string
 	CodeVerifier string
 	Interval     int
@@ -46,8 +48,16 @@ func authQwenStart() gin.HandlerFunc {
 		}
 
 		sessionID := uuid.New().String()
+		starterTenant, starterKey := authCallerIDs(c)
 		qwenSessionsMu.Lock()
+		if len(qwenSessions) >= maxAuthSessions {
+			qwenSessionsMu.Unlock()
+			c.JSON(429, gin.H{"error": "too many pending auth sessions"})
+			return
+		}
 		qwenSessions[sessionID] = &qwenSession{
+			TenantID:     starterTenant,
+			APIKeyID:     starterKey,
 			DeviceCode:   deviceAuth.DeviceCode,
 			CodeVerifier: codeVerifier,
 			Interval:     deviceAuth.Interval,
@@ -85,6 +95,11 @@ func authQwenPoll(store port.CredentialStore) gin.HandlerFunc {
 			return
 		}
 
+		if !authSessionAllowed(c, session.TenantID, session.APIKeyID) {
+			c.JSON(403, gin.H{"error": "Access denied"})
+			return
+		}
+
 		result, err := auth.PollQwenDeviceToken(session.DeviceCode, session.CodeVerifier)
 		if err != nil {
 			c.JSON(500, gin.H{"error": "Poll failed: " + err.Error()})
@@ -114,6 +129,7 @@ func authQwenPoll(store port.CredentialStore) gin.HandlerFunc {
 			c.JSON(500, gin.H{"error": "Failed to load config"})
 			return
 		}
+		settings := &cfg.Settings
 		if name == "" {
 			name = "Qwen Account"
 			count := 0
@@ -147,13 +163,14 @@ func authQwenPoll(store port.CredentialStore) gin.HandlerFunc {
 			ExpiresIn:       expiresIn,
 			Email:           email,
 			TestStatus:      "active",
-			SupportedModels: domain.GetProviderConfig("qwen").DefaultModels,
+			SupportedModels: domain.GetDefaultConnectionModels(settings, "qwen"),
 			ProviderSpecificData: map[string]interface{}{
 				"authMethod": "qwen-oauth",
 				"provider":   "Qwen (Alibaba)",
 			},
 			CreatedAt: now,
 			UpdatedAt: now,
+			TenantID:  GetTenantID(c),
 		}
 
 		cfg.ProviderConnections = append(cfg.ProviderConnections, conn)

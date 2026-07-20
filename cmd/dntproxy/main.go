@@ -12,10 +12,16 @@ import (
 	"time"
 
 	"github.com/dungnt/dntproxy/internal/adapter/anthropic"
+	"github.com/dungnt/dntproxy/internal/adapter/byteplus"
+	"github.com/dungnt/dntproxy/internal/adapter/cline"
+	geminiAdapter "github.com/dungnt/dntproxy/internal/adapter/gemini"
+
 	httpAdapter "github.com/dungnt/dntproxy/internal/adapter/http"
 	"github.com/dungnt/dntproxy/internal/adapter/kiro"
+	minimaxAdapter "github.com/dungnt/dntproxy/internal/adapter/minimax"
 	openaiAdapter "github.com/dungnt/dntproxy/internal/adapter/openai"
 	"github.com/dungnt/dntproxy/internal/adapter/provider"
+	"github.com/dungnt/dntproxy/internal/adapter/shared"
 	"github.com/dungnt/dntproxy/internal/adapter/storage"
 	"github.com/dungnt/dntproxy/internal/adapter/telegram"
 	"github.com/dungnt/dntproxy/internal/adapter/xai"
@@ -31,7 +37,7 @@ func main() {
 	rootCmd := &cobra.Command{
 		Use:   "dntproxy",
 		Short: "AI proxy router with multi-provider support",
-		Long:  "dntproxy - OpenAI-compatible proxy router. Routes requests to Kiro, OpenAI, GLM, MiniMax, Qwen, Anthropic with multi-account fallback.",
+		Long:  "dntproxy - OpenAI-compatible proxy router. Configuration is managed via the dashboard UI and management API. The CLI is limited to server ops: serve, version, update.",
 		RunE:  runServe,
 	}
 
@@ -55,33 +61,6 @@ func main() {
 			fmt.Printf("dntproxy %s\n", appversion.Version)
 		},
 	})
-
-	// Auth commands
-	rootCmd.AddCommand(buildAuthCmd())
-
-	// Combo commands
-	rootCmd.AddCommand(buildComboCmd())
-
-	// Alias commands
-	rootCmd.AddCommand(buildAliasCmd())
-
-	// Key commands
-	rootCmd.AddCommand(buildKeyCmd())
-
-	// Backup commands
-	rootCmd.AddCommand(buildBackupCmd())
-
-	// Tunnel commands
-	rootCmd.AddCommand(buildTunnelCmd())
-
-	// Profile commands
-	rootCmd.AddCommand(buildProfileCmd())
-
-	// Connection commands
-	rootCmd.AddCommand(buildConnectionCmd())
-
-	// Tools commands
-	rootCmd.AddCommand(buildToolsCmd())
 
 	// Update command
 	rootCmd.AddCommand(buildUpdateCmd())
@@ -108,6 +87,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 	logger.Init(logStore)
 	logRetentionDone := make(chan struct{})
 	go runLogRetention(logStore, logRetentionDone)
+	oauthRefreshDone := make(chan struct{})
+	go service.RunOAuthAutoRefresh(store, oauthRefreshDone)
 
 	cfg, err := store.Load()
 	if err != nil {
@@ -136,9 +117,18 @@ func runServe(cmd *cobra.Command, args []string) error {
 	providers.RegisterExecutor("glm", openaiAdapter.NewExecutor())
 	providers.RegisterExecutor("minimax", openaiAdapter.NewExecutor())
 	providers.RegisterExecutor("qwen", openaiAdapter.NewExecutor())
+
 	providers.RegisterExecutor("anthropic", anthropic.NewExecutor())
+	providers.RegisterExecutor("cline", cline.NewExecutor())
 	providers.RegisterExecutor("gemini", openaiAdapter.NewExecutor())
 	providers.RegisterExecutor("xai", xai.NewExecutor())
+	imageProviders := provider.NewImageRegistry()
+	imageProviders.RegisterImageProvider("openai", openaiAdapter.NewImageProvider())
+	imageProviders.RegisterImageProvider("openai-compatible", openaiAdapter.NewCompatibleImageProvider())
+	imageProviders.RegisterImageProvider("xai", xai.NewImageProvider())
+	imageProviders.RegisterImageProvider("minimax", minimaxAdapter.NewImageProvider())
+	imageProviders.RegisterImageProvider("byteplus", byteplus.NewImageProvider())
+	imageProviders.RegisterImageProvider("gemini", geminiAdapter.NewImageProvider(shared.LoadImageInput))
 
 	// Create tunnel manager (optional - can be nil)
 	tunnelService, err := service.NewTunnelService(store)
@@ -147,7 +137,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		tunnelService = nil
 	}
 
-	router := httpAdapter.NewRouter(store, providers, tunnelService)
+	router := httpAdapter.NewRouter(store, providers, imageProviders, tunnelService)
 
 	// Set actual server port in router context
 	httpAdapter.SetServerPort(router, port)
@@ -211,6 +201,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	close(logRetentionDone)
+	close(oauthRefreshDone)
 
 	// Stop tunnel
 	if tunnelService != nil {

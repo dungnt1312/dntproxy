@@ -29,6 +29,9 @@ func getTelegramBot(c *gin.Context) *telegram.Bot {
 
 func apiTelegramStatus(store port.CredentialStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if !requireAdmin(c) {
+			return
+		}
 		bot := getTelegramBot(c)
 
 		settings, err := store.GetSettings()
@@ -57,6 +60,9 @@ func apiTelegramStatus(store port.CredentialStore) gin.HandlerFunc {
 
 func apiTelegramStart(store port.CredentialStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if !requireAdmin(c) {
+			return
+		}
 		bot := getTelegramBot(c)
 		if bot == nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "telegram bot not initialized"})
@@ -92,6 +98,9 @@ func apiTelegramStart(store port.CredentialStore) gin.HandlerFunc {
 
 func apiTelegramStop(store port.CredentialStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if !requireAdmin(c) {
+			return
+		}
 		bot := getTelegramBot(c)
 		if bot == nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "telegram bot not initialized"})
@@ -115,6 +124,9 @@ func apiTelegramStop(store port.CredentialStore) gin.HandlerFunc {
 
 func apiTelegramTest(store port.CredentialStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if !requireAdmin(c) {
+			return
+		}
 		bot := getTelegramBot(c)
 		if bot == nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "telegram bot not initialized"})

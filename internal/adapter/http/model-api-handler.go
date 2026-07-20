@@ -9,6 +9,17 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// === Provider Metadata + Dashboard Model List ===
+
+// apiListProviders returns rich metadata for all registered providers.
+// Used by frontend to render dynamic Add Connection forms.
+func apiListProviders() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		metadata := domain.GetAllProviderMetadata()
+		c.JSON(200, metadata)
+	}
+}
+
 // === Dashboard Model List (different from OpenAI /v1/models) ===
 
 func apiListModels(store port.CredentialStore) gin.HandlerFunc {
@@ -30,38 +41,40 @@ func apiListModels(store port.CredentialStore) gin.HandlerFunc {
 			// Track which connections each model is available on
 			modelConnections := make(map[string][]gin.H)
 
-				// Build from active connections' SupportedModels
-				for _, conn := range cfg.ProviderConnections {
-					if !conn.IsActive {
-						continue
-					}
-					if !service.ConnectionAllowed(conn.ID, policy) {
-						continue
-					}
-					modelProvider := modelProviderForConnection(conn)
-					if providerFilter != "" && conn.Provider != providerFilter && modelProvider != providerFilter {
-						continue
-					}
+			// Build from active connections' SupportedModels
+			tenantID := GetTenantID(c)
+			conns := domain.FilterConnectionsByTenant(cfg.ProviderConnections, tenantID)
+			for _, conn := range conns {
+				if !conn.IsActive {
+					continue
+				}
+				if !service.ConnectionAllowed(conn.ID, policy) {
+					continue
+				}
+				modelProvider := modelProviderForConnection(conn)
+				if providerFilter != "" && conn.Provider != providerFilter && modelProvider != providerFilter {
+					continue
+				}
 
-					connInfo := gin.H{
-						"id":          conn.ID,
-						"name":        conn.Name,
-						"provider":    conn.Provider,
-						"routePrefix": conn.RoutePrefix,
-						"isActive":    conn.IsActive,
-					}
+				connInfo := gin.H{
+					"id":          conn.ID,
+					"name":        conn.Name,
+					"provider":    conn.Provider,
+					"routePrefix": conn.RoutePrefix,
+					"isActive":    conn.IsActive,
+				}
 
-					// Runtime fill: use RecommendedModels if SupportedModels is empty
-					// This ensures the model list shown in UI respects the curated defaults
-					effectiveModels := conn.SupportedModels
-					if len(effectiveModels) == 0 {
-						provCfg := domain.GetProviderConfig(conn.Provider)
-						if len(provCfg.RecommendedModels) > 0 {
-							effectiveModels = provCfg.RecommendedModels
-						}
+				// Runtime fill: use RecommendedModels if SupportedModels is empty
+				// This ensures the model list shown in UI respects the curated defaults
+				effectiveModels := conn.SupportedModels
+				if len(effectiveModels) == 0 {
+					provCfg := domain.GetProviderConfig(conn.Provider)
+					if len(provCfg.RecommendedModels) > 0 {
+						effectiveModels = provCfg.RecommendedModels
 					}
+				}
 
-					if len(effectiveModels) == 0 {
+				if len(effectiveModels) == 0 {
 					// No restriction — add all registry models for this provider
 					if cfg.ModelRegistry != nil {
 						for key, m := range cfg.ModelRegistry.Models {
@@ -98,8 +111,8 @@ func apiListModels(store port.CredentialStore) gin.HandlerFunc {
 							}
 						}
 					}
-					} else {
-						for _, modelID := range effectiveModels {
+				} else {
+					for _, modelID := range effectiveModels {
 						key := modelProvider + "/" + modelID
 						reachableModels[key] = true
 						reachablePublicModels[key] = true
@@ -132,35 +145,6 @@ func apiListModels(store port.CredentialStore) gin.HandlerFunc {
 							// Model already seen, just add connection info
 							modelConnections[key] = append(modelConnections[key], connInfo)
 						}
-					}
-				}
-			}
-
-			// Fallback: no connections → show full registry
-			if len(cfg.ProviderConnections) == 0 && cfg.ModelRegistry != nil {
-				for key, m := range cfg.ModelRegistry.Models {
-					if !m.IsActive {
-						continue
-					}
-					reachableModels[key] = true
-					if providerFilter != "" && m.Provider != providerFilter {
-						continue
-					}
-					if !service.ModelAllowedByPolicy(key, policy) {
-						continue
-					}
-					if !seen[key] {
-						seen[key] = true
-						allModels = append(allModels, gin.H{
-							"id":              key,
-							"name":            m.Name,
-							"provider":        m.Provider,
-							"contextWindow":   m.ContextWindow,
-							"maxOutputTokens": m.MaxOutputTokens,
-							"inputPrice":      m.InputPrice,
-							"outputPrice":     m.OutputPrice,
-							"capabilities":    m.Capabilities,
-						})
 					}
 				}
 			}
@@ -328,6 +312,9 @@ func apiGetModelRegistry(store port.CredentialStore) gin.HandlerFunc {
 
 func apiAddModelDefinition(store port.CredentialStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if !requireAdmin(c) {
+			return
+		}
 		var req struct {
 			Key   string                 `json:"key"` // e.g. "kiro/my-model"
 			Model domain.ModelDefinition `json:"model"`
@@ -372,6 +359,9 @@ func apiAddModelDefinition(store port.CredentialStore) gin.HandlerFunc {
 
 func apiUpdateModelDefinition(store port.CredentialStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if !requireAdmin(c) {
+			return
+		}
 		key := c.Param("key")
 		if key == "" {
 			c.JSON(400, gin.H{"error": "Key is required"})
@@ -419,6 +409,9 @@ func apiUpdateModelDefinition(store port.CredentialStore) gin.HandlerFunc {
 
 func apiDeleteModelDefinition(store port.CredentialStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if !requireAdmin(c) {
+			return
+		}
 		key := c.Param("key")
 		if key == "" {
 			c.JSON(400, gin.H{"error": "Key is required"})

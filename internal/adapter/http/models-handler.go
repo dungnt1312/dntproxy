@@ -12,19 +12,25 @@ import (
 
 // OpenAI-compatible model list response.
 type modelObject struct {
-	ID       string   `json:"id"`
-	Object   string   `json:"object"`
-	Created  int64    `json:"created"`
-	OwnedBy  string   `json:"owned_by"`
-	Capabilities []string `json:"capabilities,omitempty"`
+	ID                string                    `json:"id"`
+	Object            string                    `json:"object"`
+	Created           int64                     `json:"created"`
+	OwnedBy           string                    `json:"owned_by"`
+	Capabilities      []string                  `json:"capabilities,omitempty"`
+	ImageCapabilities *domain.ImageCapabilities `json:"image_capabilities,omitempty"`
 }
 
-func modelsHandler(modelAccess *service.ModelAccessService, store port.CredentialStore) gin.HandlerFunc {
+func modelsHandler(modelAccess *service.ModelAccessService, store port.CredentialStore, registries ...port.ImageProviderRegistry) gin.HandlerFunc {
+	var imageProviders port.ImageProviderRegistry
+	if len(registries) > 0 {
+		imageProviders = registries[0]
+	}
 	return func(c *gin.Context) {
 		policy := extractAPIKeyPolicy(c)
+		tenantID := GetTenantID(c)
 		modelType := strings.TrimSpace(c.Query("type")) // e.g. "image"
 
-		pool, err := modelAccess.BuildPool(policy)
+		pool, err := modelAccess.BuildPoolForTenant(policy, tenantID)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to build model pool"})
 			return
@@ -42,9 +48,18 @@ func modelsHandler(modelAccess *service.ModelAccessService, store port.Credentia
 		for _, m := range pool.Models {
 			// Find capabilities from registry
 			caps := lookupCapabilities(m.Provider, m.Model, registry)
+			var runtimeImageCaps *domain.ImageCapabilities
+			if imageProviders != nil {
+				if imageProvider := imageProviders.GetImageProvider(m.Provider); imageProvider != nil {
+					resolved := imageProvider.Capabilities(m.Model)
+					if resolved.Generate || resolved.Edit {
+						runtimeImageCaps = &resolved
+					}
+				}
+			}
 
 			// Filter by type if requested
-			if modelType == "image" && !hasCapability(caps, "image-generation") {
+			if modelType == "image" && !hasCapability(caps, "image-generation") && runtimeImageCaps == nil {
 				continue
 			}
 
@@ -52,21 +67,9 @@ func modelsHandler(modelAccess *service.ModelAccessService, store port.Credentia
 			if ownedBy == "" {
 				ownedBy = m.Provider
 			}
-			models = append(models, newModelObject(m.QualifiedID, ownedBy, caps))
-		}
-
-		// When filtering by type=image, also include registry models with image-generation
-		// capability that aren't yet in the pool (e.g. xAI/grok models without a connection).
-		if modelType == "image" && registry != nil {
-			seen := make(map[string]bool)
-			for _, m := range models {
-				seen[m.ID] = true
-			}
-			for key, def := range registry {
-				if hasCapability(def.Capabilities, "image-generation") && !seen[key] {
-					models = append(models, newModelObject(key, def.Provider, def.Capabilities))
-				}
-			}
+			entry := newModelObject(m.QualifiedID, ownedBy, caps)
+			entry.ImageCapabilities = runtimeImageCaps
+			models = append(models, entry)
 		}
 
 		// Combos and aliases are only included when no type filter is set

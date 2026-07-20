@@ -37,6 +37,8 @@ type openaiSession struct {
 	Code         string // filled when callback received
 	Done         bool
 	Error        string
+	TenantID     string
+	APIKeyID     string
 	CreatedAt    time.Time
 }
 
@@ -69,12 +71,20 @@ func authOpenAIStart() gin.HandlerFunc {
 		authURL := openaiAuthURL + "?" + strings.Join(queryParts, "&")
 
 		sessionID := uuid.New().String()
+		starterTenant, starterKey := authCallerIDs(c)
 		sess := &openaiSession{
 			CodeVerifier: codeVerifier,
 			State:        state,
+			TenantID:     starterTenant,
+			APIKeyID:     starterKey,
 			CreatedAt:    time.Now(),
 		}
 		openaiSessionsMu.Lock()
+		if len(openaiSessions) >= maxAuthSessions {
+			openaiSessionsMu.Unlock()
+			c.JSON(429, gin.H{"error": "too many pending auth sessions"})
+			return
+		}
 		openaiSessions[sessionID] = sess
 		openaiSessionsMu.Unlock()
 
@@ -90,6 +100,8 @@ func authOpenAIStart() gin.HandlerFunc {
 					if sess.Error == "" {
 						sess.Error = q.Get("error")
 					}
+				} else if st := q.Get("state"); st != "" && st != sess.State {
+					sess.Error = "Invalid OAuth state"
 				} else {
 					sess.Code = q.Get("code")
 				}
@@ -142,6 +154,11 @@ func authOpenAIExchange(store port.CredentialStore) gin.HandlerFunc {
 		openaiSessionsMu.Unlock()
 		if !ok {
 			c.JSON(404, gin.H{"error": "Session not found or expired"})
+			return
+		}
+
+		if !authSessionAllowed(c, sess.TenantID, sess.APIKeyID) {
+			c.JSON(403, gin.H{"error": "Access denied"})
 			return
 		}
 
@@ -260,6 +277,7 @@ func authOpenAIExchange(store port.CredentialStore) gin.HandlerFunc {
 			},
 			CreatedAt: now,
 			UpdatedAt: now,
+			TenantID:  GetTenantID(c),
 		}
 
 		cfg.ProviderConnections = append(cfg.ProviderConnections, conn)

@@ -10,8 +10,6 @@ export const PROVIDER_CONFIGS: Record<
     color: "text-blue-400",
   },
   anthropic: { name: "Anthropic", icon: "AN", color: "text-orange-400" },
-  deepseek: { name: "DeepSeek", icon: "DS", color: "text-cyan-400" },
-  google: { name: "Google", icon: "GO", color: "text-yellow-400" },
   other: { name: "Other", icon: "OT", color: "text-gray-400" },
 };
 

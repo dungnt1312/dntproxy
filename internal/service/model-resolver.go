@@ -98,9 +98,15 @@ type RoutingResult struct {
 // ResolveRouting resolves any model string (combo, alias, or "provider/model") into
 // a unified RoutingResult with a list of fully-qualified "provider/model" strings.
 func (r *ModelResolver) ResolveRouting(modelStr string) (*RoutingResult, error) {
+	return r.ResolveRoutingForTenant(modelStr, "")
+}
+
+// ResolveRoutingForTenant is the tenant-aware variant of ResolveRouting.
+// Combos and aliases that don't belong to the tenant are excluded.
+func (r *ModelResolver) ResolveRoutingForTenant(modelStr string, tenantID string) (*RoutingResult, error) {
 	// 1. Check if it's a combo (only if no "/" in the string)
 	if !strings.Contains(modelStr, "/") {
-		combo, err := r.store.GetComboByName(modelStr)
+		combo, err := r.lookupComboForTenant(modelStr, tenantID)
 		if err != nil {
 			return nil, fmt.Errorf("lookup combo: %w", err)
 		}
@@ -123,7 +129,7 @@ func (r *ModelResolver) ResolveRouting(modelStr string) (*RoutingResult, error) 
 		}
 
 		// 2. Check if it's a model alias
-		cfg, err := r.store.Load()
+		cfg, err := r.loadConfigForTenant(tenantID)
 		if err == nil && cfg != nil {
 			if resolved, ok := cfg.ModelAliases[modelStr]; ok && strings.Contains(resolved, "/") {
 				norm, err := r.normalizeModelStr(resolved)
@@ -147,6 +153,29 @@ func (r *ModelResolver) ResolveRouting(modelStr string) (*RoutingResult, error) 
 	return &RoutingResult{
 		Models: []string{norm},
 	}, nil
+}
+
+// lookupComboForTenant returns the combo if it belongs to the tenant.
+func (r *ModelResolver) lookupComboForTenant(name, tenantID string) (*domain.Combo, error) {
+	combo, err := r.store.GetComboByName(name)
+	if err != nil || combo == nil {
+		return nil, err
+	}
+	if domain.SameTenant(combo.TenantID, tenantID) {
+		return combo, nil
+	}
+	return nil, nil
+}
+
+// loadConfigForTenant returns a tenant-filtered config when supported.
+func (r *ModelResolver) loadConfigForTenant(tenantID string) (*domain.AppConfig, error) {
+	if tenantID == "" {
+		return r.store.Load()
+	}
+	if ext := port.AsTenantExt(r.store); ext != nil {
+		return ext.LoadForTenant(tenantID)
+	}
+	return r.store.Load()
 }
 
 // normalizeModelStr converts "alias/model@connectionId" to "provider/model@connectionId" using ProviderAliasToID.

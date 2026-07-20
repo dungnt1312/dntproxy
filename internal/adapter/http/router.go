@@ -7,9 +7,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/dungnt/dntproxy/internal/adapter/compressor"
 	"github.com/dungnt/dntproxy/internal/adapter/shared"
+	"github.com/dungnt/dntproxy/internal/domain"
 	"github.com/dungnt/dntproxy/internal/port"
 	"github.com/dungnt/dntproxy/internal/service"
 	"github.com/dungnt/dntproxy/internal/version"
@@ -23,6 +26,12 @@ const serverPortKey = "server_port"
 // telegramBotKey is the context key for the telegram bot instance
 const telegramBotKey = "telegram_bot"
 
+// tenantIDKey is the context key for the resolved tenant ID (multi-tenancy).
+const tenantIDKey = "tenant_id"
+
+// apiKeyObjKey is the context key for the resolved APIKey object (multi-tenancy).
+const apiKeyObjKey = "api_key_obj"
+
 // Package-level references for late-bound components
 var (
 	globalTelegramBot interface{}
@@ -30,7 +39,7 @@ var (
 )
 
 // NewRouter creates and configures the Gin router.
-func NewRouter(store port.CredentialStore, providers port.ProviderRegistry, tunnelMgr port.TunnelManager) *gin.Engine {
+func NewRouter(store port.CredentialStore, providers port.ProviderRegistry, imageProviders port.ImageProviderRegistry, tunnelMgr port.TunnelManager) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.Use(gin.Recovery())
@@ -65,21 +74,14 @@ func NewRouter(store port.CredentialStore, providers port.ProviderRegistry, tunn
 	{
 		v1.POST("/chat/completions", chatHandler(chatService, store, comp))
 		v1.POST("/messages", messagesHandler(chatService, store, comp))
-		v1.POST("/images/generations", imageGenerationsHandler(store, providers))
-		v1.POST("/images/edits", imageEditsHandler(store, providers))
-		v1.GET("/models", modelsHandler(modelAccess, store))
+		v1.POST("/images/generations", imageGenerationsHandler(store, imageProviders))
+		v1.POST("/images/edits", imageEditsHandler(store, imageProviders))
+		v1.GET("/models", modelsHandler(modelAccess, store, imageProviders))
 	}
 
-	// Dashboard API endpoints
-	RegisterAPIRoutes(r, store, providers, chatService.ClearComboRotation)
-
-	// Auth flow endpoints (Builder ID, IDC, Social Login, Fetch Models)
-	RegisterAuthRoutes(r, store)
-
-	// Tunnel endpoints
-	if tunnelMgr != nil {
-		RegisterTunnelRoutes(r, tunnelMgr, store)
-	}
+	// Dashboard API endpoints (tunnel, OAuth enrollment, fetch-models registered
+	// inside on the /api group under dashboardKeyMiddleware)
+	RegisterAPIRoutes(r, store, providers, imageProviders, chatService.ClearComboRotation, tunnelMgr)
 
 	// Health check
 	r.GET("/health", func(c *gin.Context) {
@@ -238,6 +240,7 @@ func corsMiddleware() gin.HandlerFunc {
 		}
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		c.Header("Access-Control-Allow-Headers", "*")
+		c.Header("Access-Control-Expose-Headers", "X-DNTProxy-Auth-Error")
 
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(http.StatusNoContent)
@@ -264,10 +267,14 @@ func dashboardKeyMiddleware(store port.CredentialStore) gin.HandlerFunc {
 
 func apiKeyMiddlewareWithDashboard(store port.CredentialStore, requireDashboard bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		settings, err := store.GetSettings()
-		if err != nil || !settings.RequireAPIKey {
-			c.Next()
-			return
+		// Dashboard routes (/api/*) always require auth.
+		// API routes (/v1/*) respect the RequireAPIKey setting for backward compatibility.
+		if !requireDashboard {
+			cfg, err := store.Load()
+			if err == nil && cfg != nil && !cfg.Settings.RequireAPIKey {
+				c.Next()
+				return
+			}
 		}
 
 		// Exempt endpoints needed for UI auth bootstrap
@@ -281,6 +288,10 @@ func apiKeyMiddlewareWithDashboard(store port.CredentialStore, requireDashboard 
 			c.Next()
 			return
 		}
+		if method == "GET" && path == "/api/auth/session" {
+			c.Next()
+			return
+		}
 
 		key := extractAPIKey(c.Request)
 		if key == "" {
@@ -288,6 +299,7 @@ func apiKeyMiddlewareWithDashboard(store port.CredentialStore, requireDashboard 
 			key = c.Query("key")
 		}
 		if key == "" {
+			c.Header("X-DNTProxy-Auth-Error", "true")
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
 				"error": gin.H{"message": "Missing API key"},
 			})
@@ -296,6 +308,7 @@ func apiKeyMiddlewareWithDashboard(store port.CredentialStore, requireDashboard 
 
 		apiKey, valid := store.GetAPIKeyByValue(key)
 		if !valid || apiKey == nil {
+			c.Header("X-DNTProxy-Auth-Error", "true")
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
 				"error": gin.H{"message": "Invalid API key"},
 			})
@@ -304,14 +317,29 @@ func apiKeyMiddlewareWithDashboard(store port.CredentialStore, requireDashboard 
 
 		// Dashboard routes require DashboardAccess flag
 		if requireDashboard && !apiKey.DashboardAccess {
+			c.Header("X-DNTProxy-Auth-Error", "true")
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
 				"error": gin.H{"message": "This API key does not have dashboard access"},
 			})
 			return
 		}
 
-		// Inject policy into context for downstream handlers
+		// Tenant-disable check: if the key belongs to a tenant that an admin
+		// has disabled, reject every request with that key. Admin/legacy keys
+		// (empty tenantID) always pass. Uses a short cache to avoid hitting the
+		// store on every request.
+		if isTenantDisabledCached(store, apiKey.TenantID) {
+			c.Header("X-DNTProxy-Auth-Error", "true")
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+				"error": gin.H{"message": "Tenant is disabled. Contact your administrator."},
+			})
+			return
+		}
+
+		// Inject API key identity, tenant, and policy into context for downstream handlers
 		c.Set("apiKeyID", apiKey.ID)
+		c.Set(tenantIDKey, apiKey.TenantID)
+		c.Set(apiKeyObjKey, apiKey)
 		if len(apiKey.AllowedConnectionIDs) > 0 {
 			c.Set("apiKeyAllowedConnectionIDs", apiKey.AllowedConnectionIDs)
 		}
@@ -321,6 +349,28 @@ func apiKeyMiddlewareWithDashboard(store port.CredentialStore, requireDashboard 
 
 		c.Next()
 	}
+}
+
+// GetTenantID returns the tenant ID resolved for the current request.
+// Returns "" in legacy single-tenant mode.
+func GetTenantID(c *gin.Context) string {
+	if v, ok := c.Get(tenantIDKey); ok {
+		if s, ok := v.(string); ok {
+			return s
+		}
+	}
+	return ""
+}
+
+// GetAPIKey returns the APIKey object resolved for the current request.
+// Returns nil if no API key was provided (e.g. RequireAPIKey=false).
+func GetAPIKey(c *gin.Context) *domain.APIKey {
+	if v, ok := c.Get(apiKeyObjKey); ok {
+		if k, ok := v.(*domain.APIKey); ok {
+			return k
+		}
+	}
+	return nil
 }
 
 func extractAPIKey(r *http.Request) string {
@@ -351,4 +401,58 @@ func extractAPIKeyPolicy(c *gin.Context) *port.APIKeyPolicy {
 		AllowedConnectionIDs: connIDs,
 		AllowedModels:        models,
 	}
+}
+
+// tenantDisableCache is a short-TTL cache of tenant disable status, keyed by
+// tenant slug. It avoids hitting the credential store on every authenticated
+// request. Entries expire after 5 seconds; the cache is also safe to use
+// concurrently.
+var tenantDisableCache = struct {
+	sync.RWMutex
+	m map[string]tenantDisableEntry
+}{
+	m: make(map[string]tenantDisableEntry),
+}
+
+type tenantDisableEntry struct {
+	disabled  bool
+	expiresAt time.Time
+}
+
+// isTenantDisabledCached reports whether the tenant identified by tenantID is
+// disabled, using a 5-second in-memory cache to amortize store lookups.
+// Admin/legacy keys (empty tenantID) always return false.
+func isTenantDisabledCached(store port.CredentialStore, tenantID string) bool {
+	if domain.IsLegacyTenant(tenantID) {
+		return false
+	}
+
+	// Fast path: read from cache.
+	tenantDisableCache.RLock()
+	if entry, ok := tenantDisableCache.m[tenantID]; ok && time.Now().Before(entry.expiresAt) {
+		tenantDisableCache.RUnlock()
+		return entry.disabled
+	}
+	tenantDisableCache.RUnlock()
+
+	// Slow path: ask the store.
+	tenants, err := store.GetTenants()
+	disabled := err == nil && domain.IsTenantDisabled(tenants, tenantID)
+
+	tenantDisableCache.Lock()
+	tenantDisableCache.m[tenantID] = tenantDisableEntry{
+		disabled:  disabled,
+		expiresAt: time.Now().Add(5 * time.Second),
+	}
+	tenantDisableCache.Unlock()
+	return disabled
+}
+
+// invalidateTenantDisableCache clears the cached disable status for a tenant.
+// Called after admin updates a tenant's status so that the change takes effect
+// immediately rather than after the 5-second TTL.
+func invalidateTenantDisableCache(tenantID string) {
+	tenantDisableCache.Lock()
+	delete(tenantDisableCache.m, tenantID)
+	tenantDisableCache.Unlock()
 }

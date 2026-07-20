@@ -70,6 +70,7 @@ export interface DailyUsageStat {
   outputTokens: number
   totalTokens: number
   costTotal: number
+  models?: Record<string, number>
 }
 
 export interface LogFilters {

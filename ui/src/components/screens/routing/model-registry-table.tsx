@@ -6,6 +6,7 @@ import { getProviderLabel } from "@/lib/provider-registry";
 import type { UiModel } from "./types";
 import { getModelDisplayName } from "./model-display";
 import { ModelTestButton, type ModelTestResult } from "./model-test-button";
+import { ModelRoutingBadges, getModelRoutingLabel } from "./model-routing-badges";
 
 interface ModelRegistryTableProps {
   models: UiModel[];
@@ -28,6 +29,7 @@ export function ModelRegistryTable({
             <TableHead className="w-[170px] px-4 text-xs uppercase tracking-wide text-muted-foreground">Provider</TableHead>
             <TableHead className="text-xs uppercase tracking-wide text-muted-foreground">Model</TableHead>
             <TableHead className="text-xs uppercase tracking-wide text-muted-foreground">Model ID</TableHead>
+            <TableHead className="text-xs uppercase tracking-wide text-muted-foreground">Routing</TableHead>
             <TableHead className="text-xs uppercase tracking-wide text-muted-foreground">Connections</TableHead>
             <TableHead className="w-[90px] text-xs uppercase tracking-wide text-muted-foreground">Status</TableHead>
             <TableHead className="w-[90px] text-right text-xs uppercase tracking-wide text-muted-foreground">Actions</TableHead>
@@ -51,6 +53,14 @@ export function ModelRegistryTable({
                 <code className="block max-w-[300px] truncate rounded border border-border/50 bg-muted/40 px-2 py-1 font-mono text-xs text-muted-foreground" title={model.id}>
                   {model.id}
                 </code>
+              </TableCell>
+              <TableCell className="py-4">
+                <div className="space-y-1" title={getModelRoutingLabel(model)}>
+                  <ModelRoutingBadges model={model} />
+                  <p className="max-w-[180px] truncate text-[11px] text-muted-foreground">
+                    {getModelRoutingLabel(model)}
+                  </p>
+                </div>
               </TableCell>
               <TableCell className="py-3">
                 <div className="flex max-w-[420px] flex-wrap gap-2">

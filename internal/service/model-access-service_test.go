@@ -52,6 +52,15 @@ func (s *testStore) GetConnectionIDsForCombo(name string) ([]string, error) {
 	}
 	return nil, nil
 }
+func (s *testStore) GetTenants() ([]domain.Tenant, error) {
+	if s.cfg.Tenants == nil {
+		return []domain.Tenant{}, nil
+	}
+	return s.cfg.Tenants, nil
+}
+func (s *testStore) GetTenantBySlug(slug string) (*domain.Tenant, error) {
+	return domain.FindTenantBySlug(s.cfg.Tenants, slug), nil
+}
 
 func newTestConfig() *domain.AppConfig {
 	return &domain.AppConfig{
@@ -415,12 +424,27 @@ func TestBuildPool_OpenAICompatibleAliasRespectsConnectionPolicy(t *testing.T) {
 	if found == nil {
 		t.Fatal("expected legacy-custom alias to be visible")
 	}
-	if found.Target != "other/RL-4m" {
-		t.Fatalf("expected alias to resolve to policy-allowed route prefix, got %q", found.Target)
+		if found.Target != "other/RL-4m" {
+			t.Fatalf("expected alias to resolve to policy-allowed route prefix, got %q", found.Target)
+		}
 	}
-}
 
-// --- helpers ---
+	func TestBuildPool_NoConnectionsEmptyPool(t *testing.T) {
+		cfg := domain.DefaultConfig()
+		cfg.ProviderConnections = nil
+		store := &testStore{cfg: &cfg}
+		svc := NewModelAccessService(store)
+
+		pool, err := svc.BuildPool(nil)
+		if err != nil {
+			t.Fatalf("BuildPool: %v", err)
+		}
+		if len(pool.Models) != 0 {
+			t.Fatalf("expected empty model pool without connections, got %d models", len(pool.Models))
+		}
+	}
+
+	// --- helpers ---
 
 func modelRefIDs(refs []ModelRef) []string {
 	ids := make([]string, len(refs))

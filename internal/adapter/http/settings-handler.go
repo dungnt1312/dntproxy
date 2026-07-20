@@ -23,12 +23,25 @@ func apiGetSettings(store port.CredentialStore) gin.HandlerFunc {
 			settings.Port = actualPort
 		}
 
+		// Strip secrets for non-admin callers. This endpoint is intentionally
+		// exempt from auth middleware (needed for UI bootstrap), so we resolve
+		// the key directly from the Authorization header instead of relying on
+		// GetTenantID (which is empty when middleware is skipped).
+		key := extractAPIKey(c.Request)
+		apiKey, ok := store.GetAPIKeyByValue(key)
+		if ok && apiKey != nil && !domain.IsLegacyTenant(apiKey.TenantID) {
+			settings.Telegram.BotToken = ""
+		}
+
 		c.JSON(200, settings)
 	}
 }
 
 func apiUpdateSettings(store port.CredentialStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if !requireAdmin(c) {
+			return
+		}
 		var req domain.Settings
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(400, gin.H{"error": "Invalid settings"})
@@ -53,6 +66,9 @@ func apiUpdateSettings(store port.CredentialStore) gin.HandlerFunc {
 			cfg.Settings.Compression = req.Compression
 			cfg.Settings.Compression.Normalize()
 			cfg.Settings.LogBodies = req.LogBodies
+			if req.DefaultModels != nil {
+				cfg.Settings.DefaultModels = req.DefaultModels
+			}
 
 			// Telegram settings
 			cfg.Settings.Telegram.Enabled = req.Telegram.Enabled

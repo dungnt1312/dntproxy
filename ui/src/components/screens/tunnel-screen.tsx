@@ -11,7 +11,6 @@ import {
   Zap,
   ZapOff,
   CircleAlert,
-  Terminal,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -280,29 +279,9 @@ export default function TunnelScreen() {
         <Alert>
           <AlertTriangle className="h-4 w-4" />
           <AlertDescription>
-            Enable <strong>Require API Key</strong> in Settings before starting a tunnel to prevent unauthorized access.
+            API key authentication is always required. Only share dashboard keys with trusted operators before enabling a public tunnel.
           </AlertDescription>
         </Alert>
-      </motion.div>
-
-      {/* CLI Usage */}
-      <motion.div variants={itemVariants}>
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Terminal className="w-4 h-4" />
-              CLI Usage
-            </CardTitle>
-            <CardDescription>Manage tunnels from the command line</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-1 text-sm font-mono bg-muted p-4 rounded-lg">
-              <p><span className="text-muted-foreground">#</span> dntproxy tunnel enable</p>
-              <p><span className="text-muted-foreground">#</span> dntproxy tunnel disable</p>
-              <p><span className="text-muted-foreground">#</span> dntproxy tunnel status</p>
-            </div>
-          </CardContent>
-        </Card>
       </motion.div>
     </motion.div>
   )

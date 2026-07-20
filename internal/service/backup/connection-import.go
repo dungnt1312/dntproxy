@@ -39,11 +39,15 @@ func ImportConnection(store port.CredentialStore, data *ConnectionExportData, mo
 		return nil, fmt.Errorf("invalid connection data: %w", err)
 	}
 
-	// If imported connection has no SupportedModels, fill with RecommendedModels for the provider
-	if len(data.Connection.SupportedModels) == 0 {
-		cfg := domain.GetProviderConfig(data.Connection.Provider)
-		if len(cfg.RecommendedModels) > 0 {
-			data.Connection.SupportedModels = cfg.RecommendedModels
+	// If imported connection has no SupportedModels, fill with default models for the provider
+	if len(data.Connection.SupportedModels) == 0 && store != nil {
+		cfg, _ := store.Load()
+		var settings *domain.Settings
+		if cfg != nil {
+			settings = &cfg.Settings
+		}
+		if models := domain.GetDefaultConnectionModels(settings, data.Connection.Provider); len(models) > 0 {
+			data.Connection.SupportedModels = models
 		}
 	}
 

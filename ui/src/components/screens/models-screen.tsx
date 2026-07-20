@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Layers, Link2, GitBranch } from "lucide-react";
+import { Layers, Link2 } from "lucide-react";
 import { toast } from "sonner";
 import { motion } from "framer-motion";
 import { goApi } from "@/lib/go-api";
@@ -8,8 +8,7 @@ import LogsViewerModal, { LogFilter } from "../connections/LogsViewerModal";
 
 import ModelsTab from "./routing/models-tab";
 import AliasesTab from "./routing/aliases-tab";
-import CombosTab from "./routing/combos-tab";
-import { UiModel, AliasMap, ComboData, ConnectionOption, RoutingLoadErrors } from "./routing/types";
+import { UiModel, AliasMap, ConnectionOption, RoutingLoadErrors } from "./routing/types";
 import { RoutingErrorState } from "./routing/routing-error-state";
 
 const containerVariants = {
@@ -25,7 +24,6 @@ const itemVariants = {
 export default function ModelsScreen() {
   const [models, setModels] = useState<UiModel[]>([]);
   const [aliases, setAliases] = useState<AliasMap>({});
-  const [combos, setCombos] = useState<ComboData[]>([]);
   const [connections, setConnections] = useState<ConnectionOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadErrors, setLoadErrors] = useState<RoutingLoadErrors>({});
@@ -38,10 +36,9 @@ export default function ModelsScreen() {
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
-    const [modelsResult, aliasesResult, combosResult, connectionsResult] = await Promise.allSettled([
+    const [modelsResult, aliasesResult, connectionsResult] = await Promise.allSettled([
       goApi.getModels(),
       goApi.getAliases(),
-      goApi.getCombos(),
       goApi.getConnections(),
     ]);
 
@@ -61,13 +58,6 @@ export default function ModelsScreen() {
       nextErrors.aliases = "Aliases unavailable.";
     }
 
-    if (combosResult.status === "fulfilled" && Array.isArray(combosResult.value)) {
-      setCombos(combosResult.value);
-    } else {
-      setCombos([]);
-      nextErrors.combos = "Combos unavailable.";
-    }
-
     if (connectionsResult.status === "fulfilled" && Array.isArray(connectionsResult.value)) {
       setConnections(connectionsResult.value);
     } else {
@@ -78,8 +68,8 @@ export default function ModelsScreen() {
     setLoadErrors(nextErrors);
     setLoading(false);
 
-    if (Object.keys(nextErrors).length === 4) {
-      toast.error("Failed to load routing data");
+    if (nextErrors.models && nextErrors.aliases) {
+      toast.error("Failed to load model routing data");
     }
   }, []);
 
@@ -95,16 +85,11 @@ export default function ModelsScreen() {
     setLogModal({ isOpen: true, title: `Logs: ${aliasName}`, filter: { aliasName } });
   };
 
-  const handleOpenLogModalForCombo = (comboName: string, allowedProviders: string[]) => {
-    setLogModal({ isOpen: true, title: `Logs: ${comboName}`, filter: { comboName, allowedProviders } });
-  };
-
   // Stats
   const registryCount = useMemo(() => 
     models.filter(m => m.provider !== 'alias' && m.provider !== 'combo').length
   , [models]);
   const aliasCount = Object.keys(aliases).length;
-  const comboCount = combos.length;
 
   return (
     <motion.div
@@ -121,10 +106,10 @@ export default function ModelsScreen() {
           </div>
           <div>
             <h1 className="text-2xl font-bold tracking-tight">
-              Routing & Models
+              Model Registry
             </h1>
             <p className="text-sm text-muted-foreground">
-              Manage your model registry, configure aliases, and define fallback combos.
+              Browse detected provider models and create friendly aliases for routing.
             </p>
           </div>
         </div>
@@ -153,15 +138,6 @@ export default function ModelsScreen() {
                 </span>
               )}
             </TabsTrigger>
-            <TabsTrigger value="combos" className="rounded-sm px-4 gap-1.5">
-              <GitBranch className="h-3.5 w-3.5" />
-              Combos
-              {comboCount > 0 && (
-                <span className="ml-1 rounded-full bg-violet-500/15 text-violet-600 dark:text-violet-400 px-2 py-0.5 text-[10px] font-medium">
-                  {comboCount}
-                </span>
-              )}
-            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="registry" className="space-y-4 outline-none">
@@ -182,18 +158,6 @@ export default function ModelsScreen() {
               hasLoadError={!!loadErrors.aliases}
               onRefresh={fetchAll}
               onOpenLogModal={handleOpenLogModalForAlias}
-            />
-          </TabsContent>
-
-          <TabsContent value="combos" className="outline-none">
-            <CombosTab 
-              combos={combos} 
-              connections={connections} 
-              models={models} 
-              loading={loading}
-              hasLoadError={!!loadErrors.combos}
-              onRefresh={fetchAll}
-              onOpenLogModal={handleOpenLogModalForCombo} 
             />
           </TabsContent>
         </Tabs>

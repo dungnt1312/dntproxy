@@ -23,6 +23,8 @@ export interface Connection {
   modelLocks?: Record<string, string>;
   // Computed from provider config by the backend
   supportsQuota?: boolean;
+  // Multi-tenancy: which tenant owns this connection (empty = admin/global)
+  tenantId?: string;
 }
 
 export interface QuotaBucket {
@@ -34,6 +36,14 @@ export interface QuotaBucket {
   pct: number;
   resetAt?: string;
   unlimited: boolean;
+}
+
+export interface BillingHistoryEntry {
+  year: number;
+  month: number;
+  includedUsed: number;
+  onDemandUsed: number;
+  totalUsed: number;
 }
 
 export interface UsageData {
@@ -50,6 +60,7 @@ export interface UsageData {
     charge?: number;
     rate?: number;
   };
+  history?: BillingHistoryEntry[];
   error?: string;
 }
 

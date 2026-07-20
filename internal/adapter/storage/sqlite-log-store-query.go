@@ -20,7 +20,8 @@ func (s *SQLiteLogStore) List(ctx context.Context, query domain.LogQuery) ([]dom
 		COALESCE(connection_id, ''), COALESCE(connection_name, ''), COALESCE(model, ''),
 		COALESCE(request_id, ''), COALESCE(message, ''), COALESCE(error, ''), body_size,
 		input_tokens, output_tokens, total_tokens, COALESCE(usage_source, ''),
-		cost_input, cost_output, cost_total, currency, COALESCE(metadata_json, '')
+		cost_input, cost_output, cost_total, currency, COALESCE(metadata_json, ''),
+		COALESCE(tenant_id, '')
 		FROM request_logs `+where+` ORDER BY timestamp_ms DESC LIMIT ?`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list logs: %w", err)
@@ -46,7 +47,7 @@ func (s *SQLiteLogStore) GetByID(ctx context.Context, id string) (*domain.LogEnt
 		COALESCE(request_id, ''), COALESCE(message, ''), COALESCE(error, ''), body_size,
 		input_tokens, output_tokens, total_tokens, COALESCE(usage_source, ''),
 		cost_input, cost_output, cost_total, currency, COALESCE(metadata_json, ''),
-		COALESCE(request_body, ''), COALESCE(response_body, '')
+		COALESCE(request_body, ''), COALESCE(response_body, ''), COALESCE(tenant_id, '')
 		FROM request_logs WHERE id = ?`, id)
 
 	entry, err := scanLogEntry(row)
@@ -116,9 +117,24 @@ func (s *SQLiteLogStore) ConnectionSummaries(ctx context.Context, query domain.L
 // DailyStats returns per-day aggregated usage for the requested range, with gaps filled as zero rows.
 func (s *SQLiteLogStore) DailyStats(ctx context.Context, query domain.LogQuery) ([]domain.DailyUsageStat, error) {
 	cutoffMs := rangeCutoffMs(query.Range)
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT
-			date(timestamp_ms/1000, 'unixepoch', 'localtime') as day,
+	isHourly := query.Range == "24h"
+
+	tenantClause := ""
+	args := []interface{}{cutoffMs}
+	if query.TenantID != "" && query.TenantID != "global" {
+		tenantClause = " AND tenant_id = ?"
+		args = append(args, query.TenantID)
+	}
+
+	// Bucket expression: hourly (HH:00) or daily (YYYY-MM-DD)
+	var bucketExpr string
+	if isHourly {
+		bucketExpr = "(strftime('%H', timestamp_ms/1000, 'unixepoch', 'localtime') || ':00')"
+	} else {
+		bucketExpr = "date(timestamp_ms/1000, 'unixepoch', 'localtime')"
+	}
+
+	rows, err := s.db.QueryContext(ctx, `SELECT `+bucketExpr+` as bucket,
 			COUNT(CASE WHEN direction = 'response' THEN 1 END),
 			COUNT(CASE WHEN level = 'ERROR' THEN 1 END),
 			COALESCE(SUM(input_tokens), 0),
@@ -126,35 +142,76 @@ func (s *SQLiteLogStore) DailyStats(ctx context.Context, query domain.LogQuery) 
 			COALESCE(SUM(total_tokens), 0),
 			COALESCE(SUM(cost_total), 0)
 		FROM request_logs
-		WHERE timestamp_ms >= ?
-		GROUP BY day
-		ORDER BY day ASC`, cutoffMs)
+		WHERE timestamp_ms >= ?`+tenantClause+`
+		GROUP BY bucket
+		ORDER BY bucket ASC`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("daily stats: %w", err)
 	}
 	defer rows.Close()
 
-	byDate := make(map[string]domain.DailyUsageStat)
+	bySlot := make(map[string]domain.DailyUsageStat)
 	for rows.Next() {
 		var stat domain.DailyUsageStat
 		if err := rows.Scan(&stat.Date, &stat.Requests, &stat.Errors,
 			&stat.InputTokens, &stat.OutputTokens, &stat.TotalTokens, &stat.CostTotal); err != nil {
 			return nil, err
 		}
-		byDate[stat.Date] = stat
+		bySlot[stat.Date] = stat
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 
-	days := rangeDayCount(query.Range)
-	result := make([]domain.DailyUsageStat, 0, days)
-	for i := days - 1; i >= 0; i-- {
-		d := time.Now().AddDate(0, 0, -i).Format("2006-01-02")
-		if s, ok := byDate[d]; ok {
-			result = append(result, s)
-		} else {
-			result = append(result, domain.DailyUsageStat{Date: d})
+	// Per-model breakdown
+	modelRows, err := s.db.QueryContext(ctx, `SELECT `+bucketExpr+` as bucket,
+			COALESCE(model, 'unknown'),
+			COALESCE(SUM(total_tokens), 0)
+		FROM request_logs
+		WHERE direction = 'response' AND timestamp_ms >= ? AND model != ''`+tenantClause+`
+		GROUP BY bucket, model
+		ORDER BY bucket, SUM(total_tokens) DESC`, args...)
+	if err == nil {
+		defer modelRows.Close()
+		for modelRows.Next() {
+			var bucket, model string
+			var tokens int
+			if err := modelRows.Scan(&bucket, &model, &tokens); err != nil {
+				continue
+			}
+			if s, ok := bySlot[bucket]; ok {
+				if s.Models == nil {
+					s.Models = make(map[string]int)
+				}
+				s.Models[model] = tokens
+				bySlot[bucket] = s
+			}
+		}
+	}
+
+	// Fill slots: 24 hours for hourly, N days for daily
+	var result []domain.DailyUsageStat
+	if isHourly {
+		now := time.Now().Truncate(time.Hour)
+		result = make([]domain.DailyUsageStat, 0, 24)
+		for i := 23; i >= 0; i-- {
+			label := now.Add(-time.Duration(i) * time.Hour).Format("15:04")
+			if s, ok := bySlot[label]; ok {
+				result = append(result, s)
+			} else {
+				result = append(result, domain.DailyUsageStat{Date: label})
+			}
+		}
+	} else {
+		days := rangeDayCount(query.Range)
+		result = make([]domain.DailyUsageStat, 0, days)
+		for i := days - 1; i >= 0; i-- {
+			d := time.Now().AddDate(0, 0, -i).Format("2006-01-02")
+			if s, ok := bySlot[d]; ok {
+				result = append(result, s)
+			} else {
+				result = append(result, domain.DailyUsageStat{Date: d})
+			}
 		}
 	}
 	return result, nil
@@ -162,6 +219,8 @@ func (s *SQLiteLogStore) DailyStats(ctx context.Context, query domain.LogQuery) 
 
 func rangeDayCount(r string) int {
 	switch r {
+	case "24h":
+		return 1
 	case "7d":
 		return 7
 	case "30d":
@@ -193,6 +252,12 @@ func buildLogWhere(query domain.LogQuery) (string, []interface{}) {
 		search := "%" + escaped + "%"
 		args = append(args, search, search, search, search, search)
 	}
+	// Tenant filter: only applied when a specific tenant is requested.
+	// Legacy single-tenant mode (TenantID == "") sees all logs.
+	if query.TenantID != "" && query.TenantID != "global" {
+		clauses = append(clauses, "tenant_id = ?")
+		args = append(args, query.TenantID)
+	}
 
 	return "WHERE " + strings.Join(clauses, " AND "), args
 }
@@ -202,6 +267,8 @@ func rangeCutoffMs(value string) int64 {
 	switch value {
 	case "1h":
 		return now.Add(-time.Hour).UnixMilli()
+	case "24h":
+		return now.Add(-24 * time.Hour).UnixMilli()
 	case "7d":
 		return now.AddDate(0, 0, -7).UnixMilli()
 	case "30d":
@@ -233,7 +300,7 @@ func scanLogEntry(row logScanner) (*domain.LogEntry, error) {
 		&entry.RequestID, &entry.Message, &entry.Error, &entry.BodySize, &entry.InputTokens,
 		&entry.OutputTokens, &entry.TotalTokens, &entry.UsageSource, &entry.CostInput,
 		&entry.CostOutput, &entry.CostTotal, &entry.Currency, &entry.MetadataJSON,
-		&entry.RequestBody, &entry.ResponseBody); err != nil {
+		&entry.RequestBody, &entry.ResponseBody, &entry.TenantID); err != nil {
 		return nil, err
 	}
 	return &entry, nil
@@ -246,7 +313,8 @@ func scanLogEntryLight(row logScanner) (*domain.LogEntry, error) {
 		&entry.DurationMs, &entry.ConnectionID, &entry.ConnectionName, &entry.Model,
 		&entry.RequestID, &entry.Message, &entry.Error, &entry.BodySize, &entry.InputTokens,
 		&entry.OutputTokens, &entry.TotalTokens, &entry.UsageSource, &entry.CostInput,
-		&entry.CostOutput, &entry.CostTotal, &entry.Currency, &entry.MetadataJSON); err != nil {
+		&entry.CostOutput, &entry.CostTotal, &entry.Currency, &entry.MetadataJSON,
+		&entry.TenantID); err != nil {
 		return nil, err
 	}
 	return &entry, nil

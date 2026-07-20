@@ -17,9 +17,10 @@ This roadmap captures the progress and next milestones for `dntproxy`.
 - [x] Manual token import.
 - [x] Auto-refresh access tokens.
 
-## Phase 3: CLI and UI (✅ Completed)
-- [x] CLI commands for `auth`, `combo`, `alias`, `key`.
+## Phase 3: Dashboard and Management API (✅ Completed)
 - [x] React UI for configuration and management.
+- [x] Management API under `/api/*` as the configuration control plane.
+- [x] CLI limited to ops: `serve`, `version`, `update` (management CRUD removed from CLI).
 
 ## Phase 4: Multi-Provider Expansion (✅ Completed)
 - [x] Provider config registry with 7 providers (Kiro, OpenAI, OpenAI-Compatible, GLM, MiniMax, Qwen, Anthropic).
@@ -33,7 +34,7 @@ This roadmap captures the progress and next milestones for `dntproxy`.
 - [x] Logs UI: timeline view with connection filters, usage/cost badges, response previews.
 - [x] Install scripts: Cross-platform release installers (`install.sh`, `install.ps1`).
 - [x] Metrics validation: Usage token capture and cost estimation from model price profiles.
-- [x] Cloudflare tunnel integration (auto-download, lifecycle management, CLI + API).
+- [x] Cloudflare tunnel integration (auto-download, lifecycle management, API + dashboard).
 - [x] Tunnel UI: enable/disable/status dashboard.
 
 ## Phase 6: Anthropic Integration (✅ Completed)
@@ -54,12 +55,15 @@ This roadmap captures the progress and next milestones for `dntproxy`.
 - [x] **API Key Permission UI**: Add dashboard create/edit controls for connection and model allowlists on proxy API keys.
 - [x] **Models Page Redesign**: Improve registry scanning, alias creation, combo editing, partial-load errors, and remove legacy Models page drift.
 - [x] **Connection Execution Strategies**: Add weighted random, primary-first priority fallback, and round-robin account selection for chat execution.
+- [x] **MiniMax Image Generation MVP**: Route `minimax/image-01` text-to-image requests from `POST /v1/images/generations` to MiniMax `POST /v1/image_generation`, with URL/Base64 responses, request validation, and business-error handling.
+- [x] **MiniMax Image Editing**: Route JSON `POST /v1/images/edits` requests to MiniMax character-reference generation with exactly one PNG/JPEG HTTP(S) URL or Base64 data URL. Reject masks, multiple references, and multipart edits; constrain Playground uploads to one PNG/JPEG file up to 7 MB.
 - [x] **Telegram Bot Integration**: Embedded two-way Telegram bot for real-time alerts (quota exhausted, token expired, connection down, rate limited, combo exhausted) and interactive commands (/status, /usage, /connections, /mute, /unmute). Single-owner auth, start/stop from UI, 30-min alert deduplication with auto-recovery notifications.
 - [ ] **Graceful Shutdown**: Listen for SIGTERM / SIGINT and handle open persistent SSE connections gracefully.
 - [ ] **Cross-Platform Delivery**: Enhance build configuration (Makefiles, CI, Goreleaser).
 - [ ] **Dockerization**: Provide an official `Dockerfile` and `docker-compose.yml` pattern.
 
 ## Future Considerations
+- [ ] Multi-account fallback for image generation requests
 - [ ] Request rate limiting and throttling
 - [ ] Team/multi-user mode with role-based access
 - [ ] Advanced analytics dashboard (usage trends, cost forecasting)

@@ -23,6 +23,7 @@ interface MobileMenuProps {
   groupedItems: Record<string, NavItem[]>;
   isActive: (path: string) => boolean;
   onNavigate: (path: string) => void;
+  onLogout?: () => void;
 }
 
 export function MobileMenu({
@@ -31,6 +32,7 @@ export function MobileMenu({
   groupedItems,
   isActive,
   onNavigate,
+  onLogout,
 }: MobileMenuProps) {
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -78,6 +80,20 @@ export function MobileMenu({
             </div>
           ))}
         </ScrollArea>
+        {onLogout && (
+          <div className="border-t border-border p-3">
+            <button
+              type="button"
+              className="w-full rounded-md px-3 py-2 text-left text-sm text-destructive hover:bg-muted"
+              onClick={() => {
+                onOpenChange(false);
+                onLogout();
+              }}
+            >
+              Log out
+            </button>
+          </div>
+        )}
       </SheetContent>
     </Sheet>
   );

@@ -123,31 +123,34 @@ func isModelEntitlementError(lower string) bool {
 }
 
 // IsAccountUnavailable checks if a cooldown timestamp is still active.
+// Corrupt timestamps are treated as unavailable (safe default) to prevent
+// infinite retry loops against broken connections.
 func IsAccountUnavailable(rateLimitedUntil string) bool {
 	if rateLimitedUntil == "" {
 		return false
 	}
 	t, err := time.Parse(time.RFC3339, rateLimitedUntil)
 	if err != nil {
-		return false
+		return true
 	}
 	return t.After(time.Now())
 }
 
 // IsModelLockActive checks if a model lock on a connection is still active.
+// Corrupt timestamps are treated as active (safe default).
 func IsModelLockActive(locks map[string]string, model string) bool {
 	if locks == nil {
 		return false
 	}
 	// Check specific model lock
 	if expiry, ok := locks[model]; ok {
-		if t, err := time.Parse(time.RFC3339, expiry); err == nil && t.After(time.Now()) {
+		if t, err := time.Parse(time.RFC3339, expiry); err != nil || t.After(time.Now()) {
 			return true
 		}
 	}
 	// Check global lock
 	if expiry, ok := locks["__all"]; ok {
-		if t, err := time.Parse(time.RFC3339, expiry); err == nil && t.After(time.Now()) {
+		if t, err := time.Parse(time.RFC3339, expiry); err != nil || t.After(time.Now()) {
 			return true
 		}
 	}

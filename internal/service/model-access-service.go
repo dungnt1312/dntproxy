@@ -26,7 +26,12 @@ func NewModelAccessService(store port.CredentialStore) *ModelAccessService {
 // BuildPool computes the effective pool from current config and API key policy.
 // policy may be nil (unrestricted access).
 func (s *ModelAccessService) BuildPool(policy *port.APIKeyPolicy) (*EffectiveModelPool, error) {
-	cfg, err := s.store.Load()
+	return s.BuildPoolForTenant(policy, "")
+}
+
+// BuildPoolForTenant is the tenant-aware variant of BuildPool.
+func (s *ModelAccessService) BuildPoolForTenant(policy *port.APIKeyPolicy, tenantID string) (*EffectiveModelPool, error) {
+	cfg, err := s.loadConfigForTenant(tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("load config: %w", err)
 	}
@@ -52,12 +57,18 @@ func (s *ModelAccessService) BuildPool(policy *port.APIKeyPolicy) (*EffectiveMod
 //
 // DeniedByPolicy is set when models exist but are blocked by API key restrictions.
 func (s *ModelAccessService) ResolveRoute(modelStr string, policy *port.APIKeyPolicy) (*RoutePlan, error) {
-	routing, err := s.resolver.ResolveRouting(modelStr)
+	return s.ResolveRouteForTenant(modelStr, policy, "")
+}
+
+// ResolveRouteForTenant is the tenant-aware variant of ResolveRoute.
+// When tenantID is empty ("legacy mode"), no filtering is applied.
+func (s *ModelAccessService) ResolveRouteForTenant(modelStr string, policy *port.APIKeyPolicy, tenantID string) (*RoutePlan, error) {
+	routing, err := s.resolver.ResolveRoutingForTenant(modelStr, tenantID)
 	if err != nil {
 		return nil, err
 	}
 
-	cfg, err := s.store.Load()
+	cfg, err := s.loadConfigForTenant(tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("load config: %w", err)
 	}
@@ -95,6 +106,18 @@ func (s *ModelAccessService) ResolveRoute(modelStr string, policy *port.APIKeyPo
 	}
 
 	return plan, nil
+}
+
+// loadConfigForTenant returns the config filtered by tenant when the store
+// supports tenant extensions; otherwise returns the global config.
+func (s *ModelAccessService) loadConfigForTenant(tenantID string) (*domain.AppConfig, error) {
+	if tenantID == "" {
+		return s.store.Load()
+	}
+	if ext := port.AsTenantExt(s.store); ext != nil {
+		return ext.LoadForTenant(tenantID)
+	}
+	return s.store.Load()
 }
 
 // buildEffectiveConnections returns active connections allowed by policy.
@@ -166,26 +189,6 @@ func (s *ModelAccessService) buildDirectModels(cfg *domain.AppConfig, conns []do
 					}
 					order = append(order, key)
 				}
-			}
-		}
-	}
-
-	// Fallback: if no connections exist, show registry models
-	if len(cfg.ProviderConnections) == 0 && cfg.ModelRegistry != nil {
-		for key, m := range cfg.ModelRegistry.Models {
-			if !m.IsActive {
-				continue
-			}
-			if !ModelAllowedByPolicy(key, policy) {
-				continue
-			}
-			if _, exists := seen[key]; !exists {
-				seen[key] = &ModelRef{
-					QualifiedID: key,
-					Provider:    m.Provider,
-					Model:       strings.TrimPrefix(key, m.Provider+"/"),
-				}
-				order = append(order, key)
 			}
 		}
 	}

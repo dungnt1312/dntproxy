@@ -16,10 +16,53 @@ export function setStoredApiKey(key: string) {
   }
 }
 
+export function clearStoredApiKey() {
+  localStorage.removeItem(AUTH_KEY);
+}
+
 let on401Callback: (() => void) | null = null;
 
 export function onUnauthorized(cb: () => void) {
   on401Callback = cb;
+}
+
+/** Clear stored key and notify the App auth gate (login screen). */
+export function notifyUnauthorized() {
+  clearStoredApiKey();
+  on401Callback?.();
+}
+
+/**
+ * True only for dntproxy auth/session failures — NOT upstream provider 403s
+ * (e.g. xAI spending-limit on /v1/images/generations).
+ */
+function isAuthSessionFailure(res: Response): boolean {
+  return (
+    (res.status === 401 || res.status === 403) &&
+    res.headers.get("X-DNTProxy-Auth-Error") === "true"
+  );
+}
+
+function extractErrorMessage(err: unknown, fallback: string): string {
+  if (!err || typeof err !== "object") return fallback;
+  const e = err as {
+    error?: string | { message?: string };
+    message?: string;
+  };
+  if (typeof e.error === "string" && e.error) return e.error;
+  if (e.error && typeof e.error === "object" && e.error.message) {
+    return e.error.message;
+  }
+  if (typeof e.message === "string" && e.message) return e.message;
+  return fallback;
+}
+
+/** If the response is a session auth failure, clear key + show login and throw. */
+async function rejectIfAuthFailure(res: Response): Promise<void> {
+  if (isAuthSessionFailure(res)) {
+    notifyUnauthorized();
+    throw new Error("Unauthorized");
+  }
 }
 
 async function goRequest<T = unknown>(
@@ -40,18 +83,11 @@ async function goRequest<T = unknown>(
     headers,
   });
 
-  if (res.status === 401 || res.status === 403) {
-    on401Callback?.();
-    throw new Error("Unauthorized");
-  }
+  await rejectIfAuthFailure(res);
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(
-      (err as { error?: string; message?: string }).error ||
-        (err as { message?: string }).message ||
-        res.statusText,
-    );
+    throw new Error(extractErrorMessage(err, res.statusText));
   }
 
   return res.json();
@@ -75,11 +111,7 @@ export async function goFetch(
     headers,
   });
 
-  if (res.status === 401 || res.status === 403) {
-    on401Callback?.();
-    throw new Error("Unauthorized");
-  }
-
+  await rejectIfAuthFailure(res);
   return res;
 }
 
@@ -104,11 +136,7 @@ export async function goStreamFetch(
     headers,
   });
 
-  if (res.status === 401 || res.status === 403) {
-    on401Callback?.();
-    throw new Error("Unauthorized");
-  }
-
+  await rejectIfAuthFailure(res);
   return res;
 }
 
@@ -231,6 +259,7 @@ function mapSettings(go: any) {
     telegramEnabled: Boolean(go?.telegram?.enabled),
     telegramBotToken: String(go?.telegram?.botToken || ""),
     telegramOwnerID: Number(go?.telegram?.ownerId || 0),
+    defaultModels: go.defaultModels || {},
   };
 }
 
@@ -369,13 +398,51 @@ export const goApi: any = {
 
   deleteKey: (id: string) => goRequest(`/keys/${id}`, { method: "DELETE" }),
 
+  // Tenants (admin-only; backend enforces requireAdmin)
+  getTenants: () =>
+    goRequest<any[]>("/tenants").then((tenants) =>
+      (Array.isArray(tenants) ? tenants : []).map((t) => ({
+        ...t,
+        status: t.status || "active",
+      })),
+    ),
+  createTenant: (payload: { slug: string; name?: string; notes?: string }) =>
+    goRequest("/tenants", { method: "POST", body: JSON.stringify(payload) }),
+  updateTenant: (
+    id: string,
+    payload: { name?: string; notes?: string; status?: "active" | "disabled" },
+  ) =>
+    goRequest(`/tenants/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
+  deleteTenant: (id: string, cascade = false) =>
+    goRequest(`/tenants/${id}?cascade=${cascade}`, { method: "DELETE" }),
+  generateTenantKey: (
+    id: string,
+    payload: {
+      name: string;
+      dashboardAccess?: boolean;
+      allowedConnectionIds?: string[];
+      allowedModels?: string[];
+    },
+  ) =>
+    goRequest<{ id: string; name: string; key: string; tenantId: string }>(
+      `/tenants/${id}/keys`,
+      { method: "POST", body: JSON.stringify(payload) },
+    ),
+
   // Settings
   getSettings: () => goRequest("/settings").then(mapSettings),
 
   updateSettings: (data: Record<string, unknown>) => {
     const payload: Record<string, unknown> = {
       port: data.serverPort ?? data.port ?? 20199,
-      requireApiKey: data.apiKeyAuthEnabled ?? data.requireApiKey ?? false,
+      // Auth is always enforced server-side; only include requireApiKey when
+      // the caller explicitly sets it (legacy callers). Do not default to false.
+      ...(data.apiKeyAuthEnabled !== undefined || data.requireApiKey !== undefined
+        ? {
+            requireApiKey:
+              data.apiKeyAuthEnabled ?? data.requireApiKey ?? true,
+          }
+        : {}),
       comboStrategy:
         data.defaultRoutingStrategy ?? data.comboStrategy ?? "fallback",
       connectionStrategy:
@@ -386,6 +453,7 @@ export const goApi: any = {
         logSavings: data.compressionLogSavings !== false,
       },
       logBodies: Boolean(data.logBodies ?? false),
+      defaultModels: data.defaultModels || {},
       telegram: {
         enabled: Boolean(data.telegramEnabled ?? false),
         botToken: String(data.telegramBotToken || ""),
@@ -557,10 +625,21 @@ export const goApi: any = {
 
   // Auth
   validateKey: (key: string) =>
-    goRequest<{ valid: boolean; dashboardAccess?: boolean }>("/auth/validate-key", {
+    goRequest<{ valid: boolean; dashboardAccess?: boolean; tenantId?: string; isAdmin?: boolean }>("/auth/validate-key", {
       method: "POST",
       body: JSON.stringify({ key }),
     }),
+
+  // Session info for currently-stored key (used on page reload)
+  getSession: () =>
+    goRequest<{
+      authenticated: boolean;
+      dashboardAccess?: boolean;
+      tenantId?: string;
+      isAdmin?: boolean;
+      keyId?: string;
+      keyName?: string;
+    }>("/auth/session"),
 
   // Tools
   getTools: () => goRequest<any[]>("/tools"),
@@ -581,29 +660,38 @@ export const goApi: any = {
 	testTelegram: () => goRequest("/telegram/test", { method: "POST" }),
 
   // Image generation
-  getImageModels: () => {
+  getImageModels: async () => {
     const apiKey = getStoredApiKey();
     const headers: Record<string, string> = {};
     if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
 
     const base = GO_API_BASE.replace(/\/api$/, "");
-    return fetch(`${base}/v1/models?type=image`, { headers })
-      .then((res) => {
-        if (res.status === 401 || res.status === 403) { on401Callback?.(); throw new Error("Unauthorized"); }
-        return res.json();
-      })
-      .then((payload) => {
-        const list = Array.isArray(payload?.data) ? payload.data : [];
-        return list.map((m: any) => ({
-          id: m.id || "",
-          displayName: m.id || "",
-          provider: m.owned_by || "unknown",
-          capabilities: m.capabilities || [],
-        }));
-      });
+    const res = await fetch(`${base}/v1/models?type=image`, { headers });
+    await rejectIfAuthFailure(res);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(extractErrorMessage(err, res.statusText));
+    }
+    const payload = await res.json();
+    const list = Array.isArray(payload?.data) ? payload.data : [];
+    return list.map((item: unknown) => {
+      const model = item as {
+        id?: string;
+        owned_by?: string;
+        capabilities?: string[];
+        image_capabilities?: Record<string, unknown>;
+      };
+      return {
+        id: model.id || "",
+        displayName: model.id || "",
+        provider: model.owned_by || "unknown",
+        capabilities: model.capabilities || [],
+        imageCapabilities: model.image_capabilities || null,
+      };
+    });
   },
 
-  generateImage: (params: {
+  generateImage: async (params: {
     model: string;
     prompt: string;
     n?: number;
@@ -616,25 +704,20 @@ export const goApi: any = {
     if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
 
     const base = GO_API_BASE.replace(/\/api$/, "");
-    return fetch(`${base}/v1/images/generations`, {
+    const res = await fetch(`${base}/v1/images/generations`, {
       method: "POST",
       headers,
       body: JSON.stringify(params),
-    }).then((res) => {
-      if (res.status === 401 || res.status === 403) {
-        on401Callback?.();
-        throw new Error("Unauthorized");
-      }
-      if (!res.ok) {
-        return res.json().then((err: any) => {
-          throw new Error(err?.error?.message || err?.message || res.statusText);
-        });
-      }
-      return res.json();
     });
+    await rejectIfAuthFailure(res);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(extractErrorMessage(err, res.statusText));
+    }
+    return res.json();
   },
 
-  editImage: (params: {
+  editImage: async (params: {
     model: string;
     prompt: string;
     image?: string;
@@ -649,21 +732,16 @@ export const goApi: any = {
     if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
 
     const base = GO_API_BASE.replace(/\/api$/, "");
-    return fetch(`${base}/v1/images/edits`, {
+    const res = await fetch(`${base}/v1/images/edits`, {
       method: "POST",
       headers,
       body: JSON.stringify(params),
-    }).then((res) => {
-      if (res.status === 401 || res.status === 403) {
-        on401Callback?.();
-        throw new Error("Unauthorized");
-      }
-      if (!res.ok) {
-        return res.json().then((err: any) => {
-          throw new Error(err?.error?.message || err?.message || res.statusText);
-        });
-      }
-      return res.json();
     });
+    await rejectIfAuthFailure(res);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(extractErrorMessage(err, res.statusText));
+    }
+    return res.json();
   },
 };

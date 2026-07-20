@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "ui-dev",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--prefix", "ui"],
+      "port": 5173
+    },
+    {
+      "name": "api-dev",
+      "runtimeExecutable": "go",
+      "runtimeArgs": ["run", "./cmd/dntproxy/"],
+      "port": 20199
+    }
+  ]
+}

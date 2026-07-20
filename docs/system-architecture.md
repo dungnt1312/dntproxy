@@ -5,12 +5,16 @@
 
 ### Layer Diagram
 ```
-cmd/                     [User Edge] Entrypoint / CLI parsing
+cmd/                     [User Edge] Entrypoint / thin ops CLI (serve, version, update)
  └── internal/
       ├── adapter/            [Infrastructure] External libraries, framework specific APIs (Gin, file IO)
       │    ├── http/          (Gin server / HTTP Listeners / Messages endpoint)
       │    ├── kiro/          (Kiro API Translator / AWS EventStream parser)
-      │    ├── openai/        (OpenAI executor + Codex translator)
+      │    ├── openai/        (OpenAI chat/image executor + Codex translator)
+      │    ├── xai/           (xAI chat/image executor)
+      │    ├── minimax/       (MiniMax chat/image executor)
+      │    ├── byteplus/      (ModelArk Seedream image adapter)
+      │    ├── gemini/        (Gemini native image adapter)
       │    ├── anthropic/     (Anthropic Messages API executor + bidirectional translation)
       │    ├── auth/          (OAuth flows: Builder ID, IDC, Social, Import)
       │    ├── tunnel/        (Cloudflared download, lifecycle, state)
@@ -38,7 +42,9 @@ cmd/                     [User Edge] Entrypoint / CLI parsing
 ```
 
 ## Supported Providers
-The system supports 7 providers with an extensible architecture:
+The provider catalog currently contains 11 providers. Chat and image support
+are registered independently, so an image-only provider does not need a fake
+chat executor.
 
 | Provider | ID | Auth | Protocol |
 |----------|-----|------|----------|
@@ -49,6 +55,13 @@ The system supports 7 providers with an extensible architecture:
 | MiniMax | `minimax` | API Key | openai-chat |
 | Qwen (Alibaba) | `qwen` | API Key, OAuth | openai-chat |
 | Anthropic | `anthropic` | API Key | anthropic-messages |
+| ClinePass | `cline` | API Key | openai-chat |
+| Google Gemini | `gemini` | API Key | openai-chat + native images |
+| BytePlus ModelArk | `byteplus` | API Key | image API |
+| xAI | `xai` | OAuth | responses + image API |
+
+OpenAI/OpenAI-compatible, xAI, MiniMax, BytePlus, and Gemini image operations
+are registered in the dedicated image registry.
 
 ## Request Flow
 The core lifecycle of an incoming chat completion request:
@@ -62,6 +75,60 @@ The core lifecycle of an incoming chat completion request:
    - **Other providers**: Standard SSE or streaming JSON.
 7. **Delivery**: Provider responses are parsed, mapped back into standard OpenAI SSE lines (`data: {...}`), and piped over the HTTP connection to the client via `Flush()`.
 8. **Logging**: Request metadata, usage tokens, and estimated cost are persisted to SQLite.
+
+### Image Provider Architecture
+
+`ImageProviderRegistry` is separate from the chat `ProviderRegistry`. The HTTP
+layer keeps authentication, tenant policy, `model@connection` pinning,
+credential selection, capability checks, logging, and the OpenAI response/error
+envelope. Provider adapters own request translation, upstream transport, and
+response parsing.
+
+```text
+POST /v1/images/generations or /v1/images/edits
+  -> authenticate and resolve provider/model@connection
+  -> select tenant-scoped credentials
+  -> ImageProviderRegistry.GetImageProvider(provider)
+  -> validate ImageCapabilities for the selected model
+  -> provider Generate/Edit
+  -> return OpenAI-compatible data[].url or data[].b64_json
+```
+
+Startup registers OpenAI/OpenAI-compatible, xAI, MiniMax, BytePlus, and Gemini.
+OpenAI/Codex streaming uses the optional `StreamingImageProvider` interface;
+Gin still owns SSE framing and keepalives. OpenAI multipart editing remains
+available only when the selected model and credentials support it. All other
+new edit integrations use JSON.
+
+`GET /v1/models?type=image` adds an `image_capabilities` object to each eligible
+model. Runtime adapter metadata is authoritative and includes generation/edit
+support, multipart/mask/streaming flags, reference limits, accepted input
+formats, byte limits, and response formats. The Image Playground consumes this
+metadata to enable or constrain edit controls rather than checking provider
+names.
+
+#### JSON edit contracts
+
+| Provider | Reference input | Implemented limits | Response format |
+|---|---|---|---|
+| OpenAI/Codex | JSON or multipart, model-dependent | Up to 16 references for supported `gpt-image` models; masks and streaming are capability-gated | `url`, `b64_json` |
+| xAI | JSON URL/data URL objects | Up to 10 PNG/JPEG/WebP references; masks supported; no multipart | `url`, `b64_json` |
+| MiniMax `image-01` | JSON `image` or `images[0].image_url` | Exactly one PNG/JPEG reference, maximum 7 MiB; no mask or multipart | `url`, `b64_json` |
+| BytePlus Seedream | JSON URL/data URL strings or objects | Seedream 5 Pro advertises 10 references; other integrated edit models advertise 14; no mask or multipart | `url`, `b64_json` |
+| Gemini image models | JSON URL/data URL strings or objects | Up to 14 references within a 7 MiB aggregate proxy envelope; PNG/JPEG/WebP; no mask or multipart | `b64_json` |
+
+Gemini edit references are converted to native `inline_data` before
+`models/{model}:generateContent`. Remote images are loaded only through the
+shared bounded loader: HTTP(S) only, no URL credentials, public IPs only,
+bounded redirects, a 15-second request timeout, a 10 MiB read limit, and
+MIME/content validation. MiniMax and BytePlus URL references are sent to their
+upstream APIs rather than fetched by dntproxy.
+
+The MiniMax translator additionally validates its prompt, image count,
+dimensions/aspect ratio, and business response. BytePlus uses ModelArk
+`/api/v3/images/generations` for both generation and reference editing. Gemini
+uses its native `generateContent` endpoint while the existing Gemini chat
+registration remains unchanged.
 
 ### Detailed Flow Diagram
 ```
@@ -274,7 +341,7 @@ The tunnel subsystem enables exposing the local proxy via a public URL:
 - **`adapter/tunnel/state.go`**: Persistent state (`~/.dntproxy/tunnel/state.json`), PID tracking
 - **`service/tunnel-service.go`**: Business logic (enable/disable/status, auto-restart on boot)
 - **`adapter/http/tunnel-handler.go`**: REST API endpoints (`/api/tunnel/enable`, `/api/tunnel/disable`, `/api/tunnel/status`)
-- **CLI**: `dntproxy tunnel enable|disable|status`
+- **Control plane**: dashboard UI + `/api/tunnel/*` (no management CLI)
 
 ### Cross-Platform Support
 - Auto-downloads appropriate binary for Windows, macOS, Linux (amd64/arm64)

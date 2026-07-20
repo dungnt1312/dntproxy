@@ -19,6 +19,7 @@ const PROVIDER_ORDER = [
     'glm',
     'minimax',
     'anthropic',
+    'cline',
     'gemini',
     'openai-compatible',
 ] as const;
@@ -30,6 +31,7 @@ const PROVIDER_META: Record<string, { label: string; color: string }> = {
     'xai': { label: 'Grok Build', color: '#111827' },
     'glm': { label: 'GLM (Zhipu AI)', color: '#0066FF' },
     'minimax': { label: 'MiniMax', color: '#FF6B35' },
+    'cline': { label: 'ClinePass', color: '#E11D48' },
     'anthropic': { label: 'Anthropic', color: '#D97706' },
     'gemini': { label: 'Gemini', color: '#4285F4' },
     'openai-compatible': { label: 'OpenAI Compatible', color: '#a855f7' },

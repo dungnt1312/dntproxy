@@ -26,6 +26,7 @@ const PROVIDER_OPTIONS = [
   { value: "KIRO", label: "Kiro" },
   { value: "OPENAI", label: "OpenAI" },
   { value: "ANTHROPIC", label: "Anthropic" },
+  { value: "CLINE", label: "ClinePass" },
   { value: "GEMINI", label: "Gemini" },
   { value: "OAI_COMPAT", label: "OAI Compatible" },
   { value: "GLM", label: "Zhipu GLM" },

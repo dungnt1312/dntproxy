@@ -42,4 +42,30 @@ type CredentialStore interface {
 
 	// GetConnectionIDsForCombo returns ConnectionIDs for a combo name (empty if combo not found or no restriction).
 	GetConnectionIDsForCombo(comboName string) ([]string, error)
+
+	// GetTenants returns all registered tenants (admin view).
+	GetTenants() ([]domain.Tenant, error)
+	// GetTenantBySlug returns a tenant by slug, or nil if not found.
+	GetTenantBySlug(slug string) (*domain.Tenant, error)
+}
+
+// CredentialStoreTenantExt extends CredentialStore with optional tenant-scoped
+// views. Implementations MAY satisfy this interface; callers SHOULD check via
+// type assertion and fall back to the global methods when not available
+// (legacy single-tenant behavior).
+type CredentialStoreTenantExt interface {
+	CredentialStore
+
+	// LoadForTenant returns the config filtered to only resources owned by the tenant.
+	// For legacy tenant (""), returns the full config unfiltered.
+	LoadForTenant(tenantID string) (*domain.AppConfig, error)
+}
+
+// AsTenantExt safely returns a tenant-aware view of the store, or nil if the
+// implementation does not support tenant filtering.
+func AsTenantExt(s CredentialStore) CredentialStoreTenantExt {
+	if ext, ok := s.(CredentialStoreTenantExt); ok {
+		return ext
+	}
+	return nil
 }

@@ -33,6 +33,7 @@ export default function AddConnectionModal({ onSuccess, onClose }: AddConnection
   const [minimaxForm, setMinimaxForm] = useState({ name: '', apiKey: '', baseUrl: '', supportedModels: '' })
   const [anthropicForm, setAnthropicForm] = useState({ name: '', apiKey: '', baseUrl: '', supportedModels: '' })
   const [geminiForm, setGeminiForm] = useState({ name: '', apiKey: '', baseUrl: '', supportedModels: '' })
+  const [clineForm, setClineForm] = useState({ name: '', apiKey: '', baseUrl: '', supportedModels: '' })
   const [qwenMode, setQwenMode] = useState<'oauth' | 'apikey'>('oauth')
   const [qwenForm, setQwenForm] = useState({ name: '', apiKey: '', baseUrl: '', supportedModels: '' })
   const [qwenDeviceCode, setQwenDeviceCode] = useState<DeviceCodeState | null>(null)
@@ -53,6 +54,7 @@ export default function AddConnectionModal({ onSuccess, onClose }: AddConnection
   const openaiPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const [xaiOAuthSession, setXaiOAuthSession] = useState<{ sessionId: string; authUrl: string; state?: string; redirectUri?: string } | null>(null)
   const [xaiManualCallback, setXaiManualCallback] = useState('')
+  const [xaiMode, setXaiMode] = useState<'oauth' | 'file'>('oauth')
 
   useEffect(() => {
     return () => {
@@ -69,6 +71,7 @@ export default function AddConnectionModal({ onSuccess, onClose }: AddConnection
     setGlmForm({ name: '', apiKey: '', baseUrl: '', supportedModels: '' })
     setMinimaxForm({ name: '', apiKey: '', baseUrl: '', supportedModels: '' })
     setAnthropicForm({ name: '', apiKey: '', baseUrl: '', supportedModels: '' })
+    setClineForm({ name: '', apiKey: '', baseUrl: '', supportedModels: '' })
     setGeminiForm({ name: '', apiKey: '', baseUrl: '', supportedModels: '' })
     setQwenForm({ name: '', apiKey: '', baseUrl: '', supportedModels: '' })
     setQwenDeviceCode(null); setQwenPolling(false)
@@ -77,7 +80,7 @@ export default function AddConnectionModal({ onSuccess, onClose }: AddConnection
     setDeviceCode(null); setPolling(false)
     setSocialLogin(null); setSocialCallbackUrl('')
     setOpenaiOAuthSession(null); setOpenaiManualCallback('')
-    setXaiOAuthSession(null); setXaiManualCallback('')
+    setXaiOAuthSession(null); setXaiManualCallback(''); setXaiMode('oauth')
     if (openaiPollRef.current) { clearInterval(openaiPollRef.current); openaiPollRef.current = null }
     setError('')
     if (pollTimerRef.current) { clearTimeout(pollTimerRef.current); pollTimerRef.current = null }
@@ -255,6 +258,15 @@ export default function AddConnectionModal({ onSuccess, onClose }: AddConnection
     } catch (e: any) { setError(e.message) } finally { setLoading(false) }
   }
 
+  const handleAddCline = async () => {
+    setLoading(true); setError('')
+    try {
+      const models = parseSupportedModels(clineForm.supportedModels)
+      await api.addClineConnection({ name: clineForm.name || undefined, apiKey: clineForm.apiKey, baseUrl: clineForm.baseUrl || undefined, supportedModels: models.length > 0 ? models : undefined })
+      done('ClinePass added!')
+    } catch (e: any) { setError(e.message) } finally { setLoading(false) }
+  }
+
   const handleStartXAIOAuth = async () => {
     setLoading(true); setError('')
     try {
@@ -272,6 +284,16 @@ export default function AddConnectionModal({ onSuccess, onClose }: AddConnection
     try {
       await api.exchangeXAIOAuth(xaiOAuthSession.sessionId, callback)
       done('Grok Build connected!')
+    } catch (e: any) { setError(e.message) } finally { setLoading(false) }
+  }
+
+  const handleXAIFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]; if (!file) return
+    setLoading(true); setError('')
+    try {
+      const data = JSON.parse(await file.text())
+      const res = await api.importXAIAuthFile(data)
+      done(`Grok imported! ${res.email ? `(${res.email})` : ''}` + (res.duplicate ? ' (duplicate detected)' : ''))
     } catch (e: any) { setError(e.message) } finally { setLoading(false) }
   }
 
@@ -302,6 +324,7 @@ export default function AddConnectionModal({ onSuccess, onClose }: AddConnection
     { id: 'glm', name: 'GLM', icon: <ProviderLogoIcon provider="glm" size={14} /> },
     { id: 'minimax', name: 'MiniMax', icon: <ProviderLogoIcon provider="minimax" size={14} /> },
     { id: 'anthropic', name: 'Anthropic', icon: <ProviderLogoIcon provider="anthropic" size={14} /> },
+    { id: 'cline', name: 'ClinePass', icon: <ProviderLogoIcon provider="cline" size={14} /> },
     { id: 'gemini', name: 'Gemini', icon: <ProviderLogoIcon provider="gemini" size={14} /> },
     { id: 'openai-compatible', name: 'Custom', icon: <ProviderLogoIcon provider="openai-compatible" size={14} /> },
   ]
@@ -608,37 +631,61 @@ export default function AddConnectionModal({ onSuccess, onClose }: AddConnection
             {provider === 'xai' && (
               <div className="space-y-4 max-w-md mx-auto">
                 <div className="text-center space-y-1">
-                  <p className="text-xs text-muted-foreground">Connect your Grok Build account with xAI OAuth. dntproxy stores the refresh token locally and routes models as <code className="bg-muted px-1 rounded">grok/&lt;model&gt;</code>.</p>
+                  <p className="text-xs text-muted-foreground">Connect your Grok Build account. dntproxy stores the refresh token locally and routes models as <code className="bg-muted px-1 rounded">grok/&lt;model&gt;</code>.</p>
                 </div>
 
-                {!xaiOAuthSession ? (
-                  <Button onClick={handleStartXAIOAuth} disabled={loading} size="sm" className="w-full gap-2 bg-slate-900 hover:bg-slate-800 text-white">
-                    {loading ? <Loader2 size={13} className="animate-spin" /> : <ExternalLink size={13} />}
-                    {loading ? 'Starting…' : 'Connect Grok Build'}
-                  </Button>
-                ) : (
-                  <div className="space-y-3">
-                    <div className="rounded-lg border bg-muted/40 p-4 text-sm space-y-2">
-                      <p className="font-medium">Finish Grok authorization</p>
-                      <ol className="list-decimal list-inside text-xs text-muted-foreground space-y-1">
-                        <li>Complete login in the browser.</li>
-                        <li>Copy the final callback URL from the browser.</li>
-                        <li>Paste it below to save the connection.</li>
-                      </ol>
-                      {xaiOAuthSession.redirectUri && (
-                        <p className="text-[10px] text-muted-foreground break-all">Expected redirect: <code className="bg-muted px-1 rounded">{xaiOAuthSession.redirectUri}</code></p>
-                      )}
-                    </div>
-                    <Input value={xaiManualCallback} onChange={e => setXaiManualCallback(e.target.value)} placeholder="http://127.0.0.1:56121/callback?code=...&state=..." className="text-xs font-mono" />
-                    <div className="flex gap-2">
-                      <Button onClick={handleExchangeXAIOAuth} disabled={loading || !xaiManualCallback.trim()} size="sm" className="flex-1 bg-slate-900 hover:bg-slate-800 text-white">
-                        {loading ? <><Loader2 size={13} className="animate-spin mr-2" />Saving…</> : 'Save Connection'}
+                {/* Mode selector */}
+                <div className="flex gap-1 p-0.5 bg-muted rounded-lg">
+                  {(['oauth', 'file'] as const).map(mode => (
+                    <button key={mode} onClick={() => { setXaiMode(mode); setXaiOAuthSession(null); setXaiManualCallback(''); setError('') }} className={cn('flex-1 text-xs py-1.5 rounded-md transition-all font-medium', xaiMode === mode ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}>
+                      {mode === 'oauth' ? '🔓 OAuth Flow' : '📄 Import File'}
+                    </button>
+                  ))}
+                </div>
+
+                {xaiMode === 'oauth' && (
+                  <>
+                    {!xaiOAuthSession ? (
+                      <Button onClick={handleStartXAIOAuth} disabled={loading} size="sm" className="w-full gap-2 bg-slate-900 hover:bg-slate-800 text-white">
+                        {loading ? <Loader2 size={13} className="animate-spin" /> : <ExternalLink size={13} />}
+                        {loading ? 'Starting…' : 'Connect Grok Build'}
                       </Button>
-                      <Button asChild variant="outline" size="sm">
-                        <a href={xaiOAuthSession.authUrl} target="_blank" rel="noopener noreferrer"><ExternalLink size={13} /></a>
-                      </Button>
-                      <Button variant="outline" size="sm" onClick={() => { setXaiOAuthSession(null); setXaiManualCallback(''); setError('') }}>Cancel</Button>
-                    </div>
+                    ) : (
+                      <div className="space-y-3">
+                        <div className="rounded-lg border bg-muted/40 p-4 text-sm space-y-2">
+                          <p className="font-medium">Finish Grok authorization</p>
+                          <ol className="list-decimal list-inside text-xs text-muted-foreground space-y-1">
+                            <li>Complete login in the browser.</li>
+                            <li>Copy the final callback URL from the browser.</li>
+                            <li>Paste it below to save the connection.</li>
+                          </ol>
+                          {xaiOAuthSession.redirectUri && (
+                            <p className="text-[10px] text-muted-foreground break-all">Expected redirect: <code className="bg-muted px-1 rounded">{xaiOAuthSession.redirectUri}</code></p>
+                          )}
+                        </div>
+                        <Input value={xaiManualCallback} onChange={e => setXaiManualCallback(e.target.value)} placeholder="http://127.0.0.1:56121/callback?code=...&state=..." className="text-xs font-mono" />
+                        <div className="flex gap-2">
+                          <Button onClick={handleExchangeXAIOAuth} disabled={loading || !xaiManualCallback.trim()} size="sm" className="flex-1 bg-slate-900 hover:bg-slate-800 text-white">
+                            {loading ? <><Loader2 size={13} className="animate-spin mr-2" />Saving…</> : 'Save Connection'}
+                          </Button>
+                          <Button asChild variant="outline" size="sm">
+                            <a href={xaiOAuthSession.authUrl} target="_blank" rel="noopener noreferrer"><ExternalLink size={13} /></a>
+                          </Button>
+                          <Button variant="outline" size="sm" onClick={() => { setXaiOAuthSession(null); setXaiManualCallback(''); setError('') }}>Cancel</Button>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {xaiMode === 'file' && (
+                  <div className="text-center space-y-3">
+                    <p className="text-xs text-muted-foreground">Upload a Grok auth JSON file exported from another CLI tool. Expected fields: <code className="bg-muted px-1 rounded">access_token</code>, <code className="bg-muted px-1 rounded">refresh_token</code>, <code className="bg-muted px-1 rounded">email</code>, etc.</p>
+                    <label className="flex flex-col items-center justify-center gap-2 p-6 rounded-lg border border-dashed cursor-pointer hover:border-primary hover:bg-muted/40 transition-colors">
+                      <Upload size={20} className="text-muted-foreground" />
+                      <span className="text-xs font-medium">{loading ? 'Importing…' : 'Select JSON file'}</span>
+                      <input type="file" accept=".json" onChange={handleXAIFileUpload} className="hidden" disabled={loading} />
+                    </label>
                   </div>
                 )}
               </div>
@@ -707,6 +754,23 @@ export default function AddConnectionModal({ onSuccess, onClose }: AddConnection
                 </Button>
               </div>
             )}
+
+            {/* ClinePass */}
+            {provider === 'cline' && (
+              <div className="space-y-3 max-w-md mx-auto">
+                <p className="text-xs text-muted-foreground text-center">Connect ClinePass subscription models with an API key from <a href="https://docs.cline.bot/getting-started/clinepass" target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">ClinePass Docs</a>.</p>
+                <Input type="password" value={clineForm.apiKey} onChange={e => setClineForm({ ...clineForm, apiKey: e.target.value })} placeholder="API Key *" className="text-xs font-mono" />
+                <div className="grid grid-cols-2 gap-3">
+                  <Input value={clineForm.name} onChange={e => setClineForm({ ...clineForm, name: e.target.value })} placeholder="Display Name (optional)" className="text-xs" />
+                  <Input value={clineForm.baseUrl} onChange={e => setClineForm({ ...clineForm, baseUrl: e.target.value })} placeholder="Base URL (optional)" className="text-xs font-mono" />
+                </div>
+                <Textarea value={clineForm.supportedModels} onChange={e => setClineForm({ ...clineForm, supportedModels: e.target.value })} placeholder="Supported Models (one per line, auto-populated if empty)" rows={3} className="text-xs font-mono" />
+                <Button onClick={handleAddCline} disabled={loading || !clineForm.apiKey} size="sm" className="w-full bg-rose-600 hover:bg-rose-700">
+                  {loading ? 'Adding…' : 'Add ClinePass Connection'}
+                </Button>
+              </div>
+            )}
+
 
             {/* Qwen */}
             {provider === 'qwen' && (

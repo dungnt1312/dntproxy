@@ -84,10 +84,13 @@ func NewAccountSelector(store port.CredentialStore) *AccountSelector {
 // SelectCredentialsForModel selects account based on model string (with optional @connectionId).
 // If model string contains @connectionId, it will pin to that specific connection.
 // Otherwise, it uses the existing weighted random selection logic.
+//
+// tenantID filters connections to those owned by the tenant (empty = legacy).
 func (s *AccountSelector) SelectCredentialsForModel(
 	modelStr string,
 	excludeIDs map[string]bool,
 	allowedConnectionIDs []string,
+	tenantID string,
 ) (*domain.Credentials, error) {
 	parsed, err := ParseModelString(modelStr)
 	if err != nil {
@@ -97,11 +100,11 @@ func (s *AccountSelector) SelectCredentialsForModel(
 	// If pinned to specific connection
 	if parsed.ConnectionID != "" {
 		// Pass only the model name (without @connectionId) to selectPinnedConnection
-		return s.selectPinnedConnection(parsed.Provider, parsed.Model, parsed.ConnectionID, excludeIDs)
+		return s.selectPinnedConnection(parsed.Provider, parsed.Model, parsed.ConnectionID, excludeIDs, tenantID)
 	}
 
 	// Otherwise use existing weighted random logic
-	return s.SelectCredentials(parsed.Provider, excludeIDs, parsed.Model, allowedConnectionIDs)
+	return s.SelectCredentials(parsed.Provider, excludeIDs, parsed.Model, allowedConnectionIDs, tenantID)
 }
 
 // selectPinnedConnection returns a specific connection by ID.
@@ -111,6 +114,7 @@ func (s *AccountSelector) selectPinnedConnection(
 	model string,
 	connectionID string,
 	excludeIDs map[string]bool,
+	tenantID string,
 ) (*domain.Credentials, error) {
 	// Skip if already excluded (failed in this request)
 	if excludeIDs != nil && excludeIDs[connectionID] {
@@ -121,7 +125,7 @@ func (s *AccountSelector) selectPinnedConnection(
 		}
 	}
 
-	connections, err := s.store.GetActiveConnections(provider)
+	connections, err := s.getActiveConnectionsForTenant(provider, tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("get connections: %w", err)
 	}
@@ -160,15 +164,12 @@ func (s *AccountSelector) selectPinnedConnection(
 			}
 		}
 
-		// Auto-refresh token if needed
-		if s.tokenRefresh.NeedsRefresh(&conn) {
-			refreshed, err := s.tokenRefresh.CheckAndRefresh(&conn)
-			if err == nil {
-				conn = *refreshed
-			}
+		fresh, err := s.ensureFreshOAuth(&conn)
+		if err != nil {
+			return nil, err
 		}
 
-		return shared.ConnectionToCredentials(&conn), nil
+		return shared.ConnectionToCredentials(fresh), nil
 	}
 
 	return nil, &AccountSelectionError{
@@ -180,13 +181,16 @@ func (s *AccountSelector) selectPinnedConnection(
 
 // SelectCredentials returns a weighted-random available connection for a provider+model,
 // filtered by excludeIDs and optional allowedConnectionIDs restriction.
+//
+// tenantID filters connections to those owned by the tenant (empty = legacy).
 func (s *AccountSelector) SelectCredentials(
 	provider string,
 	excludeIDs map[string]bool,
 	model string,
 	allowedConnectionIDs []string,
+	tenantID string,
 ) (*domain.Credentials, error) {
-	connections, err := s.store.GetActiveConnections(provider)
+	connections, err := s.getActiveConnectionsForTenant(provider, tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("get connections: %w", err)
 	}
@@ -299,17 +303,11 @@ func (s *AccountSelector) SelectCredentials(
 
 	selected := s.selectConnection(available, provider, model, allowedConnectionIDs)
 
-	// Auto-refresh token if expiring soon
-	if s.tokenRefresh.NeedsRefresh(selected) {
-		log.Printf("[AUTH] Token expiring soon for %s, refreshing...", selected.Name)
-		refreshed, err := s.tokenRefresh.CheckAndRefresh(selected)
-		if err != nil {
-			log.Printf("[AUTH] Token refresh failed for %s: %s", selected.Name, err)
-			// Still try with current token
-		} else {
-			selected = refreshed
-		}
+	updated, err := s.ensureFreshOAuth(selected)
+	if err != nil {
+		return nil, err
 	}
+	selected = updated
 
 	return shared.ConnectionToCredentials(selected), nil
 }
@@ -493,13 +491,69 @@ func (s *AccountSelector) ClearError(connectionID string, model string) error {
 		if model != "" && conn.ModelLocks != nil {
 			delete(conn.ModelLocks, model)
 
-			// Clean up any expired model locks while we're here
+			// Clean up expired model locks (including corrupt timestamps)
 			now := time.Now()
 			for k, expiry := range conn.ModelLocks {
-				if t, err := time.Parse(time.RFC3339, expiry); err == nil && t.Before(now) {
+				t, err := time.Parse(time.RFC3339, expiry)
+				if err != nil || t.Before(now) {
 					delete(conn.ModelLocks, k)
 				}
 			}
 		}
 	})
 }
+
+// getActiveConnectionsForTenant returns active connections for a provider,
+// filtered to those owned by tenantID. When tenantID is empty (legacy mode),
+// returns all active connections for the provider.
+func (s *AccountSelector) getActiveConnectionsForTenant(provider, tenantID string) ([]domain.ProviderConnection, error) {
+	conns, err := s.store.GetActiveConnections(provider)
+	if err != nil {
+		return nil, err
+	}
+	return domain.FilterConnectionsByTenant(conns, tenantID), nil
+}
+
+func (s *AccountSelector) RefreshCredentialsForOAuth(connectionID string) (*domain.Credentials, error) {
+	conn, err := s.store.GetConnectionByID(connectionID)
+	if err != nil {
+		return nil, err
+	}
+	if conn == nil {
+		return nil, fmt.Errorf("connection not found: %s", connectionID)
+	}
+	updated, err := s.ensureFreshOAuth(conn)
+	if err != nil {
+		return nil, err
+	}
+	return shared.ConnectionToCredentials(updated), nil
+}
+
+func (s *AccountSelector) ensureFreshOAuth(conn *domain.ProviderConnection) (*domain.ProviderConnection, error) {
+	if conn == nil {
+		return nil, fmt.Errorf("connection is nil")
+	}
+	if conn.AuthType != "oauth" || strings.TrimSpace(conn.RefreshToken) == "" {
+		return conn, nil
+	}
+	if s.tokenRefresh.ShouldProactivelyRefresh(conn) {
+		log.Printf("[AUTH] Token expiring soon for %s, refreshing...", conn.Name)
+		refreshed, err := s.tokenRefresh.CheckAndRefresh(conn)
+		if err != nil {
+			log.Printf("[AUTH] Proactive token refresh failed for %s: %s (using current token)", conn.Name, err)
+			return conn, nil
+		}
+		log.Printf("[AUTH] Token refreshed successfully for %s", conn.Name)
+		return refreshed, nil
+	}
+	if auth.IsAccessTokenExpired(conn.ExpiresAt) {
+		log.Printf("[AUTH] Access token expired for %s, forcing refresh...", conn.Name)
+		refreshed, err := s.tokenRefresh.ForceRefresh(conn)
+		if err != nil {
+			return nil, fmt.Errorf("token refresh failed for %s: %w", conn.Name, err)
+		}
+		return refreshed, nil
+	}
+	return conn, nil
+}
+

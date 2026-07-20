@@ -140,6 +140,21 @@ func (s *testCredentialStore) GetConnectionIDsForCombo(comboName string) ([]stri
 	return combo.ConnectionIDs, nil
 }
 
+func (s *testCredentialStore) GetTenants() ([]domain.Tenant, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cfg.Tenants == nil {
+		return []domain.Tenant{}, nil
+	}
+	return s.cfg.Tenants, nil
+}
+
+func (s *testCredentialStore) GetTenantBySlug(slug string) (*domain.Tenant, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return domain.FindTenantBySlug(s.cfg.Tenants, slug), nil
+}
+
 // === Test ProviderRegistry ===
 
 type testProviderRegistry struct {

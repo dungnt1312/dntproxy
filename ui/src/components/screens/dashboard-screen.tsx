@@ -9,7 +9,6 @@ import { goApi } from '@/lib/go-api'
 import { StatCard } from './dashboard/stat-card'
 import { DailyUsageChart } from './dashboard/daily-usage-chart'
 import { ErrorsHint, type RecentError } from './dashboard/errors-hint'
-import { LiveFeed } from './dashboard/live-feed'
 import {
   formatTokens,
   formatCost,
@@ -209,9 +208,6 @@ export default function DashboardScreen() {
           <ErrorsHint errors={recentErrors} onViewAll={() => navigate('/logs?level=ERROR')} />
         )}
       </div>
-
-      {/* ── Live Feed ── */}
-      <LiveFeed />
     </div>
   )
 }

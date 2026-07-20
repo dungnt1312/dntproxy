@@ -41,6 +41,9 @@ func apiListProfiles(svc *service.ProfileService) gin.HandlerFunc {
 
 func apiCreateProfile(svc *service.ProfileService) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if !requireAdmin(c) {
+			return
+		}
 		var req struct {
 			Name        string          `json:"name"`
 			Description string          `json:"description"`
@@ -78,6 +81,9 @@ func apiGetProfile(svc *service.ProfileService) gin.HandlerFunc {
 
 func apiUpdateProfile(svc *service.ProfileService) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if !requireAdmin(c) {
+			return
+		}
 		name := c.Param("name")
 		var req struct {
 			AddAliases    domain.AliasMap `json:"addAliases"`
@@ -98,6 +104,9 @@ func apiUpdateProfile(svc *service.ProfileService) gin.HandlerFunc {
 
 func apiDeleteProfile(svc *service.ProfileService) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if !requireAdmin(c) {
+			return
+		}
 		name := c.Param("name")
 		if err := svc.DeleteProfile(name); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -109,6 +118,9 @@ func apiDeleteProfile(svc *service.ProfileService) gin.HandlerFunc {
 
 func apiActivateProfile(svc *service.ProfileService) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if !requireAdmin(c) {
+			return
+		}
 		name := c.Param("name")
 		if err := svc.ActivateProfile(name); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -120,6 +132,9 @@ func apiActivateProfile(svc *service.ProfileService) gin.HandlerFunc {
 
 func apiDeactivateProfile(svc *service.ProfileService) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if !requireAdmin(c) {
+			return
+		}
 		if err := svc.DeactivateProfile(); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -175,6 +190,9 @@ func apiListPresets() gin.HandlerFunc {
 
 func apiCreateFromPreset(svc *service.ProfileService) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if !requireAdmin(c) {
+			return
+		}
 		var req struct {
 			Preset string `json:"preset"`
 		}

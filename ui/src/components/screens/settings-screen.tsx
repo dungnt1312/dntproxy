@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { motion } from "framer-motion";
-import { Settings, ShieldAlert, RotateCcw, Save, Loader2, Sparkles, FileText, Send } from "lucide-react";
+import { Settings, ShieldAlert, RotateCcw, Save, Loader2, Sparkles, FileText, Send, Boxes } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -37,6 +37,7 @@ interface SettingsData {
   telegramEnabled: boolean;
   telegramBotToken: string;
   telegramOwnerID: number;
+  defaultModels: Record<string, string[]>;
 }
 
 const DEFAULT_SETTINGS: SettingsData = {
@@ -52,6 +53,7 @@ const DEFAULT_SETTINGS: SettingsData = {
   telegramEnabled: false,
   telegramBotToken: "",
   telegramOwnerID: 0,
+  defaultModels: {},
 };
 
 const containerVariants = {
@@ -107,15 +109,16 @@ export default function SettingsScreen() {
   const handleSave = async () => {
     try {
       setSaving(true);
+      // Omit requireApiKey / apiKeyAuthEnabled — auth is always enforced by BE.
       const json = await goApi.updateSettings({
         serverPort: settings.serverPort,
-        apiKeyAuthEnabled: settings.apiKeyAuthEnabled,
         defaultRoutingStrategy: settings.defaultRoutingStrategy,
         connectionStrategy: settings.connectionStrategy,
         compressionEnabled: settings.compressionEnabled,
         compressionMinLength: settings.compressionMinLength,
         compressionLogSavings: settings.compressionLogSavings,
         logBodies: settings.logBodies,
+        defaultModels: settings.defaultModels,
         telegramEnabled: settings.telegramEnabled,
         telegramBotToken: settings.telegramBotToken,
         telegramOwnerID: settings.telegramOwnerID,
@@ -358,52 +361,21 @@ export default function SettingsScreen() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4 p-6 pt-0">
-            {/* API Key Auth */}
-            <div className="flex items-center justify-between gap-4">
-              <div className="space-y-0.5">
-                <Label htmlFor="apiKeyAuth">API Key Authentication</Label>
-                <p className="text-xs text-muted-foreground">
-                  Require an API key for all incoming requests
-                </p>
-              </div>
-              <Switch
-                id="apiKeyAuth"
-                checked={settings.apiKeyAuthEnabled}
-                onCheckedChange={(checked) =>
-                  updateField("apiKeyAuthEnabled", checked)
-                }
-              />
+            <div className="space-y-1">
+              <Label>API Key Authentication</Label>
+              <p className="text-xs text-muted-foreground">
+                Always enabled. Dashboard and /v1 API requests require a valid
+                API key. Create keys under API Keys; enable Dashboard Access for
+                UI login.
+              </p>
             </div>
-
-            {/* Warning when disabling */}
-            {initialSettings.apiKeyAuthEnabled &&
-              !settings.apiKeyAuthEnabled && (
-                <Alert
-                  variant="destructive"
-                  className="border-red-200 dark:border-red-800"
-                >
-                  <ShieldAlert className="size-4" />
-                  <AlertDescription>
-                    <strong>Warning:</strong> Disabling API key authentication
-                    will allow anyone to use your proxy server without
-                    credentials. This may expose your API keys and quota to
-                    unauthorized access. Only disable this in trusted network
-                    environments.
-                  </AlertDescription>
-                </Alert>
-              )}
-
-            {!initialSettings.apiKeyAuthEnabled &&
-              settings.apiKeyAuthEnabled && (
-                <Alert className="border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/20">
-                  <AlertDescription className="text-emerald-700 dark:text-emerald-400">
-                    <strong>Good choice!</strong> API key authentication will be
-                    enabled, protecting your server from unauthorized access.
-                  </AlertDescription>
-                </Alert>
-              )}
           </CardContent>
         </Card>
+      </motion.div>
+
+      {/* Default Models */}
+      <motion.div variants={itemVariants}>
+        <DefaultModelsCard settings={settings} updateField={updateField} />
       </motion.div>
 
       {/* Actions */}
@@ -599,6 +571,74 @@ function TelegramCard({
             )}
           </Button>
         </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// === Default Models Card ===
+
+const PROVIDERS_WITH_MODELS = [
+  { id: 'xai', label: 'Grok Build (xAI)' },
+  { id: 'kiro', label: 'Kiro (AWS CodeWhisperer)' },
+  { id: 'openai', label: 'OpenAI' },
+  { id: 'qwen', label: 'Qwen (Alibaba)' },
+  { id: 'glm', label: 'GLM (Zhipu AI)' },
+  { id: 'minimax', label: 'MiniMax' },
+  { id: 'anthropic', label: 'Anthropic (Claude API)' },
+  { id: 'cline', label: 'ClinePass' },
+  { id: 'gemini', label: 'Google Gemini' },
+];
+
+function DefaultModelsCard({
+  settings,
+  updateField,
+}: {
+  settings: SettingsData;
+  updateField: <K extends keyof SettingsData>(key: K, value: SettingsData[K]) => void;
+}) {
+  const models = settings.defaultModels || {};
+
+  const handleModelsChange = (providerId: string, value: string) => {
+    const models = value
+      .split(/[\n,]+/)
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+    const next = { ...settings.defaultModels, [providerId]: models };
+    if (models.length === 0) {
+      delete next[providerId];
+    }
+    updateField('defaultModels', next);
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <Boxes className="size-5 text-orange-600" />
+          <CardTitle className="text-base">Default Connection Models</CardTitle>
+        </div>
+        <CardDescription>
+          Override which models are pre-selected when creating a new connection.
+          Enter one model per line or comma-separated. Leave blank to use the
+          built-in defaults.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4 p-6 pt-0">
+        {PROVIDERS_WITH_MODELS.map((p) => (
+          <div key={p.id} className="space-y-1.5">
+            <Label className="text-xs font-medium text-muted-foreground">
+              {p.label}
+            </Label>
+            <textarea
+              className="glass-input w-full text-xs font-mono min-h-[36px]"
+              rows={2}
+              placeholder="(use built-in defaults)"
+              value={(models[p.id] || []).join('\n')}
+              onChange={(e) => handleModelsChange(p.id, e.target.value)}
+            />
+          </div>
+        ))}
       </CardContent>
     </Card>
   );

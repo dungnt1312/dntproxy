@@ -16,6 +16,7 @@ type Combo struct {
 	ConnectionIDs []string `json:"connectionIds,omitempty"` // optional: restrict to specific connections
 	CreatedAt     string   `json:"createdAt,omitempty"`
 	UpdatedAt     string   `json:"updatedAt,omitempty"`
+	TenantID      string   `json:"tenantId,omitempty"` // multi-tenancy. Empty = legacy single-tenant.
 }
 
 // AliasMap is model alias → "provider/model" string.
@@ -39,6 +40,7 @@ var ProviderAliasToID = map[string]string{
 	"oc":   "opencode",
 	"ds":   "deepseek",
 	"nb":   "nanobanana",
+	"bp":   "byteplus",
 	"ch":   "chutes",
 	"vx":   "vertex",
 	"vxp":  "vertex-partner",
@@ -52,6 +54,7 @@ var ProviderAliasToID = map[string]string{
 	"glm":        "glm",
 	"kimi":       "kimi",
 	"minimax":    "minimax",
+	"byteplus":   "byteplus",
 	"deepseek":   "deepseek",
 	"grok":       "xai",
 	"groq":       "groq",

@@ -15,12 +15,17 @@ func apiListAliases(store port.CredentialStore) gin.HandlerFunc {
 			c.JSON(500, gin.H{"error": err.Error()})
 			return
 		}
+		// Aliases are currently global (shared namespace). Acceptable for admin routing,
+		// but still require dashboard auth via middleware.
 		c.JSON(200, cfg.ModelAliases)
 	}
 }
 
 func apiSetAlias(store port.CredentialStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if !requireAdmin(c) {
+			return
+		}
 		var req struct {
 			Alias string `json:"alias"`
 			Model string `json:"model"`
@@ -30,18 +35,12 @@ func apiSetAlias(store port.CredentialStore) gin.HandlerFunc {
 			return
 		}
 
-		cfg, err := store.Load()
-		if err != nil {
-			c.JSON(500, gin.H{"error": err.Error()})
-			return
-		}
-
-		if cfg.ModelAliases == nil {
-			cfg.ModelAliases = make(domain.AliasMap)
-		}
-		cfg.ModelAliases[req.Alias] = req.Model
-
-		if err := store.Save(cfg); err != nil {
+		if err := store.Update(func(cfg *domain.AppConfig) {
+			if cfg.ModelAliases == nil {
+				cfg.ModelAliases = make(domain.AliasMap)
+			}
+			cfg.ModelAliases[req.Alias] = req.Model
+		}); err != nil {
 			c.JSON(500, gin.H{"error": err.Error()})
 			return
 		}
@@ -51,21 +50,23 @@ func apiSetAlias(store port.CredentialStore) gin.HandlerFunc {
 
 func apiDeleteAlias(store port.CredentialStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if !requireAdmin(c) {
+			return
+		}
 		name := c.Param("name")
-		cfg, err := store.Load()
-		if err != nil {
+		found := false
+		if err := store.Update(func(cfg *domain.AppConfig) {
+			if _, ok := cfg.ModelAliases[name]; !ok {
+				return
+			}
+			delete(cfg.ModelAliases, name)
+			found = true
+		}); err != nil {
 			c.JSON(500, gin.H{"error": err.Error()})
 			return
 		}
-
-		if _, ok := cfg.ModelAliases[name]; !ok {
+		if !found {
 			c.JSON(404, gin.H{"error": "Alias not found"})
-			return
-		}
-		delete(cfg.ModelAliases, name)
-
-		if err := store.Save(cfg); err != nil {
-			c.JSON(500, gin.H{"error": err.Error()})
 			return
 		}
 		c.JSON(200, gin.H{"ok": true})

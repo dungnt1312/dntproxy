@@ -24,12 +24,18 @@ import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { getProviderMeta } from '@/lib/provider-registry';
+import { useProviderCatalog } from '@/lib/use-provider-catalog';
+import { ApiKeyConnectionForm } from '../connections/ApiKeyConnectionForm';
+import type { CreateConnectionPayload } from '@/types/provider-metadata';
 
 export default function AddConnectionPage() {
     const navigate = useNavigate();
+    const { providers: providerCatalog } = useProviderCatalog();
     const [provider, setProvider] = useState('kiro');
     const [providerSearch, setProviderSearch] = useState('');
     const [importMode, setImportMode] = useState<ImportMode>('detect');
+
+    // Kiro OAuth state
     const [form, setForm] = useState({
         refreshToken: '',
         clientId: '',
@@ -37,55 +43,18 @@ export default function AddConnectionPage() {
         region: '',
         authMethod: 'builder-id',
     });
-    const [openaiForm, setOpenaiForm] = useState({
-        name: '',
-        apiKey: '',
-        supportedModels: '',
-    });
-    const [customForm, setCustomForm] = useState({
-        name: '',
-        apiKey: '',
-        baseUrl: '',
-        routePrefix: '',
-        modelPrefix: '',
-        supportedModels: '',
-    });
-    const [glmForm, setGlmForm] = useState({
-        name: '',
-        apiKey: '',
-        baseUrl: '',
-        supportedModels: '',
-    });
-    const [minimaxForm, setMinimaxForm] = useState({
-        name: '',
-        apiKey: '',
-        baseUrl: '',
-        supportedModels: '',
-    });
+
+    // Qwen OAuth state
     const [qwenMode, setQwenMode] = useState<'oauth' | 'apikey'>('oauth');
-    const [qwenForm, setQwenForm] = useState({
-        name: '',
-        apiKey: '',
-        baseUrl: '',
-        supportedModels: '',
-    });
-    const [anthropicForm, setAnthropicForm] = useState({
-        name: '',
-        apiKey: '',
-        baseUrl: '',
-        supportedModels: '',
-    });
-    const [geminiForm, setGeminiForm] = useState({
-        name: '',
-        apiKey: '',
-        baseUrl: '',
-        supportedModels: '',
-    });
     const [qwenDeviceCode, setQwenDeviceCode] = useState<DeviceCodeState | null>(null);
     const [qwenPolling, setQwenPolling] = useState(false);
     const qwenPollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    // Common state
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
+
+    // Kiro device code state
     const [deviceCode, setDeviceCode] = useState<DeviceCodeState | null>(null);
     const [polling, setPolling] = useState(false);
     const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -93,6 +62,8 @@ export default function AddConnectionPage() {
     const [socialLogin, setSocialLogin] = useState<SocialLoginState | null>(null);
     const [socialCallbackUrl, setSocialCallbackUrl] = useState('');
     const [socialProvider, setSocialProvider] = useState<'google' | 'github'>('google');
+
+    // OpenAI OAuth state
     const [openaiMode, setOpenaiMode] = useState<'oauth' | 'apikey'>('oauth');
     const [openaiOAuthSession, setOpenaiOAuthSession] = useState<{
         sessionId: string;
@@ -100,6 +71,9 @@ export default function AddConnectionPage() {
     } | null>(null);
     const [openaiManualCallback, setOpenaiManualCallback] = useState('');
     const openaiPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+    // xAI OAuth state
+    const [xaiMode, setXaiMode] = useState<'oauth' | 'file'>('oauth');
     const [xaiOAuthSession, setXaiOAuthSession] = useState<{
         sessionId: string;
         authUrl: string;
@@ -136,6 +110,7 @@ export default function AddConnectionPage() {
     const clearXAIAuth = useCallback(() => {
         setXaiOAuthSession(null);
         setXaiManualCallback('');
+        setXaiMode('oauth');
     }, []);
 
     const clearQwenPolling = useCallback(() => {
@@ -155,13 +130,6 @@ export default function AddConnectionPage() {
             region: '',
             authMethod: 'builder-id',
         });
-        setOpenaiForm({ name: '', apiKey: '', supportedModels: '' });
-        setCustomForm({ name: '', apiKey: '', baseUrl: '', routePrefix: '', modelPrefix: '', supportedModels: '' });
-        setGlmForm({ name: '', apiKey: '', baseUrl: '', supportedModels: '' });
-        setMinimaxForm({ name: '', apiKey: '', baseUrl: '', supportedModels: '' });
-        setQwenForm({ name: '', apiKey: '', baseUrl: '', supportedModels: '' });
-        setAnthropicForm({ name: '', apiKey: '', baseUrl: '', supportedModels: '' });
-        setGeminiForm({ name: '', apiKey: '', baseUrl: '', supportedModels: '' });
         clearQwenPolling();
         setIdcForm({ startUrl: '', region: '' });
         clearKiroPolling();
@@ -183,6 +151,21 @@ export default function AddConnectionPage() {
         toast.success(msg);
         navigate('/connections');
     };
+
+    const handleCreateConnection = async (payload: CreateConnectionPayload) => {
+        setLoading(true);
+        setError('');
+        try {
+            await api.createConnection(payload);
+            handleSuccess(`${getProviderMeta(payload.provider).label} connected!`);
+        } catch (e: unknown) {
+            setError(e instanceof Error ? e.message : 'Failed to add connection');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const selectedProviderMeta = providerCatalog.find((p) => p.id === provider);
 
     const handleStartBuilderID = async () => {
         setLoading(true);
@@ -340,23 +323,7 @@ export default function AddConnectionPage() {
         }
     };
 
-    const handleAddOpenAI = async () => {
-        setLoading(true);
-        setError('');
-        try {
-            const models = parseSupportedModels(openaiForm.supportedModels);
-            await api.addOpenAIConnection({
-                name: openaiForm.name || undefined,
-                apiKey: openaiForm.apiKey,
-                supportedModels: models.length > 0 ? models : undefined,
-            });
-            handleSuccess('OpenAI added!');
-        } catch (e: any) {
-            setError(e.message);
-        } finally {
-            setLoading(false);
-        }
-    };
+    const handleAddOpenAI = () => { void handleCreateConnection; }; // handled by ApiKeyConnectionForm
 
     const handleStartXAIOAuth = async () => {
         setLoading(true);
@@ -390,63 +357,53 @@ export default function AddConnectionPage() {
         }
     };
 
+    const handleXAIFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const input = e.currentTarget;
+        const files = input.files;
+        if (!files || files.length === 0) return;
+        await processXAIFiles(Array.from(files));
+        input.value = '';
+    };
+
+    const processXAIFile = async (file: File): Promise<{ email: string; duplicate: boolean; error?: string }> => {
+        const data = JSON.parse(await file.text());
+        const res = await api.importXAIAuthFile(data);
+        return { email: res.email || '', duplicate: !!res.duplicate };
+    };
+
+    const processXAIFiles = async (files: File[]) => {
+        setLoading(true);
+        setError('');
+        let imported = 0;
+        let skipped = 0;
+        const errors: string[] = [];
+        for (const file of files) {
+            try {
+                const result = await processXAIFile(file);
+                if (result.duplicate) {
+                    skipped++;
+                } else {
+                    imported++;
+                }
+            } catch (e: any) {
+                errors.push(`${file.name}: ${e.message}`);
+            }
+        }
+        setLoading(false);
+        if (imported > 0 || skipped > 0) {
+            const parts: string[] = [];
+            if (imported > 0) parts.push(`${imported} imported`);
+            if (skipped > 0) parts.push(`${skipped} skipped (duplicate)`);
+            if (errors.length > 0) parts.push(`${errors.length} failed`);
+            handleSuccess(`Grok batch import: ${parts.join(', ')}`);
+        } else if (errors.length > 0) {
+            setError(errors.join('\n'));
+        }
+    };
+
     const handleAddCustom = async () => {
-        setLoading(true);
-        setError('');
-        try {
-            const models = parseSupportedModels(customForm.supportedModels);
-            await api.addCustomConnection({
-                name: customForm.name || undefined,
-                apiKey: customForm.apiKey || undefined,
-                baseUrl: customForm.baseUrl,
-                routePrefix: customForm.routePrefix || undefined,
-                modelPrefix: customForm.modelPrefix || undefined,
-                supportedModels: models.length > 0 ? models : undefined,
-            });
-            handleSuccess('Custom added!');
-        } catch (e: any) {
-            setError(e.message);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const handleAddGLM = async () => {
-        setLoading(true);
-        setError('');
-        try {
-            const models = parseSupportedModels(glmForm.supportedModels);
-            await api.addGLMConnection({
-                name: glmForm.name || undefined,
-                apiKey: glmForm.apiKey,
-                baseUrl: glmForm.baseUrl || undefined,
-                supportedModels: models.length > 0 ? models : undefined,
-            });
-            handleSuccess('GLM connected!');
-        } catch (e: any) {
-            setError(e.message);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const handleAddMiniMax = async () => {
-        setLoading(true);
-        setError('');
-        try {
-            const models = parseSupportedModels(minimaxForm.supportedModels);
-            await api.addMiniMaxConnection({
-                name: minimaxForm.name || undefined,
-                apiKey: minimaxForm.apiKey,
-                baseUrl: minimaxForm.baseUrl || undefined,
-                supportedModels: models.length > 0 ? models : undefined,
-            });
-            handleSuccess('MiniMax connected!');
-        } catch (e: any) {
-            setError(e.message);
-        } finally {
-            setLoading(false);
-        }
+        // handled by ApiKeyConnectionForm now, kept for unused reference check
+        void handleCreateConnection;
     };
 
     const handleStartQwenOAuth = async () => {
@@ -490,62 +447,8 @@ export default function AddConnectionPage() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
-    const handleAddQwenAPIKey = async () => {
-        setLoading(true);
-        setError('');
-        try {
-            const models = parseSupportedModels(qwenForm.supportedModels);
-            await api.addQwenConnection({
-                name: qwenForm.name || undefined,
-                apiKey: qwenForm.apiKey,
-                baseUrl: qwenForm.baseUrl || undefined,
-                supportedModels: models.length > 0 ? models : undefined,
-            });
-            handleSuccess('Qwen connected!');
-        } catch (e: any) {
-            setError(e.message);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const handleAddAnthropic = async () => {
-        setLoading(true);
-        setError('');
-        try {
-            const models = parseSupportedModels(anthropicForm.supportedModels);
-            await api.addAnthropicConnection({
-                name: anthropicForm.name || undefined,
-                apiKey: anthropicForm.apiKey,
-                baseUrl: anthropicForm.baseUrl || undefined,
-                supportedModels: models.length > 0 ? models : undefined,
-            });
-            handleSuccess('Anthropic connected!');
-        } catch (e: any) {
-            setError(e.message);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const handleAddGemini = async () => {
-        setLoading(true);
-        setError('');
-        try {
-            const models = parseSupportedModels(geminiForm.supportedModels);
-            await api.addGeminiConnection({
-                name: geminiForm.name || undefined,
-                apiKey: geminiForm.apiKey,
-                baseUrl: geminiForm.baseUrl || undefined,
-                supportedModels: models.length > 0 ? models : undefined,
-            });
-            handleSuccess('Gemini connected!');
-        } catch (e: any) {
-            setError(e.message);
-        } finally {
-            setLoading(false);
-        }
-    };
+    // Removed: handleAddQwenAPIKey, handleAddAnthropic, handleAddGemini, handleAddCline
+    // These providers now use ApiKeyConnectionForm + handleCreateConnection
 
     const DeviceCodePanel = () =>
         deviceCode ? (
@@ -574,73 +477,14 @@ export default function AddConnectionPage() {
             </div>
         ) : null;
 
-    const providerTabs = [
-        {
-            id: 'kiro',
-            name: 'AWS / Kiro',
-            icon: <ProviderLogoIcon provider="kiro" size={24} />,
-            description: 'Amazon CodeWhisperer / Kiro',
-            auth: 'OAuth, import',
-            recommended: true,
-        },
-        {
-            id: 'openai',
-            name: 'OpenAI',
-            icon: <ProviderLogoIcon provider="openai" size={24} />,
-            description: 'ChatGPT, GPT-4, o-series',
-            auth: 'OAuth, API key',
-            recommended: true,
-        },
-        {
-            id: 'qwen',
-            name: 'Qwen',
-            icon: <ProviderLogoIcon provider="qwen" size={24} />,
-            description: 'Alibaba Qwen models',
-            auth: 'OAuth, API key',
-        },
-        {
-            id: 'xai',
-            name: 'Grok',
-            icon: <ProviderLogoIcon provider="xai" size={24} />,
-            description: 'Grok Build / xAI',
-            auth: 'OAuth',
-        },
-        {
-            id: 'glm',
-            name: 'GLM',
-            icon: <ProviderLogoIcon provider="glm" size={24} />,
-            description: 'Zhipu AI / GLM',
-            auth: 'API key',
-        },
-        {
-            id: 'minimax',
-            name: 'MiniMax',
-            icon: <ProviderLogoIcon provider="minimax" size={24} />,
-            description: 'MiniMax M2 series',
-            auth: 'API key',
-        },
-        {
-            id: 'anthropic',
-            name: 'Anthropic',
-            icon: <ProviderLogoIcon provider="anthropic" size={24} />,
-            description: 'Claude via Anthropic API',
-            auth: 'API key',
-        },
-        {
-            id: 'gemini',
-            name: 'Gemini',
-            icon: <ProviderLogoIcon provider="gemini" size={24} />,
-            description: 'Google Gemini models',
-            auth: 'API key',
-        },
-        {
-            id: 'openai-compatible',
-            name: 'Custom',
-            icon: <ProviderLogoIcon provider="openai-compatible" size={24} />,
-            description: 'OpenAI-compatible API',
-            auth: 'Base URL, API key',
-        },
-    ];
+    const providerTabs = providerCatalog.map((p) => ({
+        id: p.id,
+        name: p.name,
+        icon: <ProviderLogoIcon provider={p.id} size={24} />,
+        description: p.ui.description,
+        auth: p.ui.authFlows.join(', '),
+        recommended: p.id === 'kiro' || p.id === 'openai',
+    }));
 
     const kiroModes = [
         {
@@ -707,7 +551,7 @@ export default function AddConnectionPage() {
         docsUrl,
         docsLabel,
     }: {
-        providerId: 'anthropic' | 'gemini';
+        providerId: 'anthropic' | 'gemini' | 'cline';
         title: string;
         description: string;
         form: { name: string; apiKey: string; baseUrl: string; supportedModels: string };
@@ -1420,130 +1264,17 @@ export default function AddConnectionPage() {
                                 </div>
                             )}
 
-                            {openaiMode === 'apikey' && (
-                                <div className="space-y-4">
-                                    <div className="text-center">
-                                        <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-500/10 mx-auto">
-                                            <Shield size={20} className="text-emerald-500" />
-                                        </div>
-                                        <p className="font-medium text-sm mt-3 mb-1">API Key</p>
-                                        <p className="text-xs text-muted-foreground">
-                                            Use your OpenAI API key directly.
-                                        </p>
-                                    </div>
-                                    <div className="space-y-3">
-                                        <Input
-                                            type="password"
-                                            value={openaiForm.apiKey}
-                                            onChange={(e) => setOpenaiForm({ ...openaiForm, apiKey: e.target.value })}
-                                            placeholder="API Key (sk-proj-…) *"
-                                            className="text-xs font-mono"
-                                        />
-                                        <Input
-                                            value={openaiForm.name}
-                                            onChange={(e) => setOpenaiForm({ ...openaiForm, name: e.target.value })}
-                                            placeholder="Display Name (optional)"
-                                            className="text-xs"
-                                        />
-                                        <Textarea
-                                            value={openaiForm.supportedModels}
-                                            onChange={(e) =>
-                                                setOpenaiForm({
-                                                    ...openaiForm,
-                                                    supportedModels: e.target.value,
-                                                })
-                                            }
-                                            placeholder="Supported Models (one per line, optional)"
-                                            rows={3}
-                                            className="text-xs font-mono"
-                                        />
-                                        <Button
-                                            onClick={handleAddOpenAI}
-                                            disabled={loading || !openaiForm.apiKey}
-                                            size="sm"
-                                            className="w-full bg-emerald-600 hover:bg-emerald-700"
-                                        >
-                                            {loading ? 'Adding…' : 'Add Connection'}
-                                        </Button>
-                                    </div>
-                                </div>
+                            {openaiMode === 'apikey' && selectedProviderMeta && (
+                                <ApiKeyConnectionForm
+                                    key="openai-apikey"
+                                    provider={selectedProviderMeta}
+                                    loading={loading}
+                                    onSubmit={handleCreateConnection}
+                                />
                             )}
                         </div>
                     )}
 
-                    {/* Custom API */}
-                    {provider === 'openai-compatible' && (
-                        <div className="max-w-lg mx-auto space-y-5">
-                            <div className="text-center">
-                                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-purple-500/10 mx-auto">
-                                    <ProviderLogoIcon provider="openai-compatible" size={20} />
-                                </div>
-                                <p className="font-medium text-sm mt-3 mb-1">OpenAI-Compatible API</p>
-                                <p className="text-xs text-muted-foreground">
-                                    Connect to any OpenAI-compatible endpoint (e.g. Together, Anyscale, local LLMs).
-                                </p>
-                            </div>
-                            <div className="space-y-3">
-                                <Input
-                                    value={customForm.baseUrl}
-                                    onChange={(e) => setCustomForm({ ...customForm, baseUrl: e.target.value })}
-                                    placeholder="Base URL (e.g. https://api.together.xyz/v1) *"
-                                    className="text-xs font-mono"
-                                />
-                                <div className="grid grid-cols-2 gap-3">
-                                    <Input
-                                        type="password"
-                                        value={customForm.apiKey}
-                                        onChange={(e) => setCustomForm({ ...customForm, apiKey: e.target.value })}
-                                        placeholder="API Key (optional)"
-                                        className="text-xs font-mono"
-                                    />
-                                    <Input
-                                        value={customForm.name}
-                                        onChange={(e) => setCustomForm({ ...customForm, name: e.target.value })}
-                                        placeholder="Display Name"
-                                        className="text-xs"
-                                    />
-                                </div>
-                                <div className="grid grid-cols-2 gap-3">
-                                    <Input
-                                        value={customForm.routePrefix}
-                                        onChange={(e) => setCustomForm({ ...customForm, routePrefix: e.target.value })}
-                                        placeholder="Route prefix (e.g. windsurf)"
-                                        className="text-xs font-mono"
-                                    />
-                                    <Input
-                                        value={customForm.modelPrefix}
-                                        onChange={(e) => setCustomForm({ ...customForm, modelPrefix: e.target.value })}
-                                        placeholder="Model prefix to strip (optional)"
-                                        className="text-xs font-mono"
-                                    />
-                                </div>
-                                <Textarea
-                                    value={customForm.supportedModels}
-                                    onChange={(e) =>
-                                        setCustomForm({
-                                            ...customForm,
-                                            supportedModels: e.target.value,
-                                        })
-                                    }
-                                    placeholder="Supported Models (one per line, optional)"
-                                    rows={3}
-                                    className="text-xs font-mono"
-                                />
-                                <Button
-                                    onClick={handleAddCustom}
-                                    disabled={loading || !customForm.baseUrl}
-                                    size="sm"
-                                    className="w-full bg-purple-600 hover:bg-purple-700"
-                                >
-                                    {loading ? 'Adding…' : 'Add Custom Connection'}
-                                </Button>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* GLM (Zhipu AI) */}
                     {provider === 'xai' && (
                         <div className="max-w-lg mx-auto space-y-5">
                             <div className="text-center">
@@ -1552,201 +1283,130 @@ export default function AddConnectionPage() {
                                 </div>
                                 <p className="font-medium text-sm mt-3 mb-1">Grok Build</p>
                                 <p className="text-xs text-muted-foreground">
-                                    Connect your Grok Build account with xAI OAuth. Models route as{' '}
+                                    Connect your Grok Build account. Models route as{' '}
                                     <code className="bg-muted px-1.5 py-0.5 rounded text-[11px]">grok/&lt;model&gt;</code>.
                                 </p>
                             </div>
 
-                            {!xaiOAuthSession ? (
-                                <div className="space-y-4 text-center">
-                                    <Button
-                                        onClick={handleStartXAIOAuth}
-                                        disabled={loading}
-                                        size="sm"
-                                        className="gap-2 bg-slate-900 hover:bg-slate-800 text-white"
+                            {/* Mode selector */}
+                            <div className="flex gap-1 p-1 bg-muted rounded-lg w-fit mx-auto">
+                                {([['oauth', 'OAuth Flow'], ['file', 'Import File']] as const).map(([mode, label]) => (
+                                    <button
+                                        key={mode}
+                                        onClick={() => { clearXAIAuth(); setXaiMode(mode); setError(''); }}
+                                        className={cn(
+                                            'flex items-center gap-1.5 px-4 py-2 rounded-md text-xs font-medium cursor-pointer transition-all',
+                                            xaiMode === mode
+                                                ? 'bg-background text-foreground shadow-sm'
+                                                : 'text-muted-foreground hover:text-foreground',
+                                        )}
                                     >
-                                        {loading ? (
-                                            <Loader2 size={13} className="animate-spin" />
-                                        ) : (
-                                            <ExternalLink size={13} />
-                                        )}
-                                        {loading ? 'Starting…' : 'Connect Grok Build'}
-                                    </Button>
-                                    <p className="text-[10px] text-muted-foreground">
-                                        Browser opens to xAI OAuth. Paste the callback URL here after authorization.
-                                    </p>
-                                </div>
-                            ) : (
-                                <div className="space-y-4 rounded-lg border bg-muted/40 p-5">
-                                    <div className="text-center space-y-1">
-                                        <p className="text-sm font-medium">Finish Grok authorization</p>
-                                        {xaiOAuthSession.redirectUri && (
-                                            <p className="text-[10px] text-muted-foreground break-all">
-                                                Expected redirect:{' '}
-                                                <code className="bg-muted px-1 rounded">{xaiOAuthSession.redirectUri}</code>
+                                        {mode === 'oauth' ? <ExternalLink size={13} /> : <Upload size={13} />}
+                                        {label}
+                                    </button>
+                                ))}
+                            </div>
+
+                            {xaiMode === 'oauth' && (
+                                <>
+                                    {!xaiOAuthSession ? (
+                                        <div className="space-y-4 text-center">
+                                            <Button
+                                                onClick={handleStartXAIOAuth}
+                                                disabled={loading}
+                                                size="sm"
+                                                className="gap-2 bg-slate-900 hover:bg-slate-800 text-white"
+                                            >
+                                                {loading ? (
+                                                    <Loader2 size={13} className="animate-spin" />
+                                                ) : (
+                                                    <ExternalLink size={13} />
+                                                )}
+                                                {loading ? 'Starting…' : 'Connect Grok Build'}
+                                            </Button>
+                                            <p className="text-[10px] text-muted-foreground">
+                                                Browser opens to xAI OAuth. Paste the callback URL here after authorization.
                                             </p>
-                                        )}
-                                    </div>
-                                    <Input
-                                        value={xaiManualCallback}
-                                        onChange={(e) => setXaiManualCallback(e.target.value)}
-                                        placeholder="http://127.0.0.1:56121/callback?code=...&state=..."
-                                        className="text-xs font-mono"
-                                    />
-                                    <div className="flex gap-2">
-                                        <Button
-                                            onClick={handleExchangeXAIOAuth}
-                                            disabled={loading || !xaiManualCallback.trim()}
-                                            size="sm"
-                                            className="flex-1 bg-slate-900 hover:bg-slate-800 text-white"
-                                        >
-                                            {loading ? 'Processing…' : 'Submit Callback'}
-                                        </Button>
-                                        <Button asChild variant="outline" size="sm">
-                                            <a href={xaiOAuthSession.authUrl} target="_blank" rel="noopener noreferrer">
-                                                <ExternalLink size={13} />
-                                            </a>
-                                        </Button>
-                                        <Button type="button" variant="outline" size="sm" onClick={clearXAIAuth}>
-                                            Cancel
-                                        </Button>
-                                    </div>
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-4 rounded-lg border bg-muted/40 p-5">
+                                            <div className="text-center space-y-1">
+                                                <p className="text-sm font-medium">Finish Grok authorization</p>
+                                                {xaiOAuthSession.redirectUri && (
+                                                    <p className="text-[10px] text-muted-foreground break-all">
+                                                        Expected redirect:{' '}
+                                                        <code className="bg-muted px-1 rounded">{xaiOAuthSession.redirectUri}</code>
+                                                    </p>
+                                                )}
+                                            </div>
+                                            <Input
+                                                value={xaiManualCallback}
+                                                onChange={(e) => setXaiManualCallback(e.target.value)}
+                                                placeholder="http://127.0.0.1:56121/callback?code=...&state=..."
+                                                className="text-xs font-mono"
+                                            />
+                                            <div className="flex gap-2">
+                                                <Button
+                                                    onClick={handleExchangeXAIOAuth}
+                                                    disabled={loading || !xaiManualCallback.trim()}
+                                                    size="sm"
+                                                    className="flex-1 bg-slate-900 hover:bg-slate-800 text-white"
+                                                >
+                                                    {loading ? 'Processing…' : 'Submit Callback'}
+                                                </Button>
+                                                <Button asChild variant="outline" size="sm">
+                                                    <a href={xaiOAuthSession.authUrl} target="_blank" rel="noopener noreferrer">
+                                                        <ExternalLink size={13} />
+                                                    </a>
+                                                </Button>
+                                                <Button type="button" variant="outline" size="sm" onClick={clearXAIAuth}>
+                                                    Cancel
+                                                </Button>
+                                            </div>
+                                        </div>
+                                    )}
+                                </>
+                            )}
+
+                            {xaiMode === 'file' && (
+                                <div className="text-center space-y-4">
+                                    <p className="text-xs text-muted-foreground">
+                                        Upload a Grok auth JSON file (e.g. exported from another CLI tool). Expected fields:{' '}
+                                        <code className="bg-muted px-1 rounded text-[11px]">access_token</code>,{' '}
+                                        <code className="bg-muted px-1 rounded text-[11px]">refresh_token</code>,{' '}
+                                        <code className="bg-muted px-1 rounded text-[11px]">email</code>.
+                                    </p>
+                                    <label
+                                        className="flex flex-col items-center justify-center gap-3 p-8 rounded-xl border-2 border-dashed cursor-pointer hover:border-primary hover:bg-muted/40 transition-all"
+                                        onDragOver={(e) => { e.preventDefault(); e.currentTarget.classList.add('border-primary', 'bg-muted/40'); }}
+                                        onDragLeave={(e) => { e.currentTarget.classList.remove('border-primary', 'bg-muted/40'); }}
+                                        onDrop={(e) => {
+                                            e.preventDefault();
+                                            e.currentTarget.classList.remove('border-primary', 'bg-muted/40');
+                                            const files = e.dataTransfer.files;
+                                            if (files && files.length > 0) processXAIFiles(Array.from(files));
+                                        }}
+                                    >
+                                        <Upload size={24} className="text-muted-foreground" />
+                                        <div className="text-center">
+                                            <p className="text-sm font-medium">
+                                                {loading ? 'Importing…' : 'Drop file here or click to select'}
+                                            </p>
+                                            <p className="text-xs text-muted-foreground mt-0.5">
+                                                Grok auth JSON format
+                                            </p>
+                                        </div>
+                                        <input
+                                            type="file"
+                                            accept=".json"
+                                            multiple
+                                            onChange={handleXAIFileUpload}
+                                            className="hidden"
+                                            disabled={loading}
+                                        />
+                                    </label>
                                 </div>
                             )}
-                        </div>
-                    )}
-
-                    {/* GLM (Zhipu AI) */}
-                    {provider === 'glm' && (
-                        <div className="max-w-lg mx-auto space-y-5">
-                            <div className="text-center">
-                                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-[#0066FF]/10 mx-auto">
-                                    <ProviderLogoIcon provider="glm" size={20} />
-                                </div>
-                                <p className="font-medium text-sm mt-3 mb-1">Zhipu AI (GLM)</p>
-                                <p className="text-xs text-muted-foreground">
-                                    Connect to{' '}
-                                    <a
-                                        href="https://open.bigmodel.cn"
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="text-[#0066FF] hover:underline"
-                                    >
-                                        bigmodel.cn
-                                    </a>{' '}
-                                    — GLM-4, GLM-4-Flash, and more.
-                                </p>
-                            </div>
-                            <div className="space-y-3">
-                                <Input
-                                    type="password"
-                                    value={glmForm.apiKey}
-                                    onChange={(e) => setGlmForm({ ...glmForm, apiKey: e.target.value })}
-                                    placeholder="API Key *"
-                                    className="text-xs font-mono"
-                                />
-                                <div className="grid grid-cols-2 gap-3">
-                                    <Input
-                                        value={glmForm.name}
-                                        onChange={(e) => setGlmForm({ ...glmForm, name: e.target.value })}
-                                        placeholder="Display Name (optional)"
-                                        className="text-xs"
-                                    />
-                                    <Input
-                                        value={glmForm.baseUrl}
-                                        onChange={(e) => setGlmForm({ ...glmForm, baseUrl: e.target.value })}
-                                        placeholder="Base URL (default: bigmodel.cn)"
-                                        className="text-xs font-mono"
-                                    />
-                                </div>
-                                <Textarea
-                                    value={glmForm.supportedModels}
-                                    onChange={(e) => setGlmForm({ ...glmForm, supportedModels: e.target.value })}
-                                    placeholder="Supported Models (one per line, auto-populated if empty)"
-                                    rows={3}
-                                    className="text-xs font-mono"
-                                />
-                                <Button
-                                    onClick={handleAddGLM}
-                                    disabled={loading || !glmForm.apiKey}
-                                    size="sm"
-                                    className="w-full bg-[#0066FF] hover:bg-[#0055DD]"
-                                >
-                                    {loading ? 'Adding…' : 'Add GLM Connection'}
-                                </Button>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* MiniMax */}
-                    {provider === 'minimax' && (
-                        <div className="max-w-lg mx-auto space-y-5">
-                            <div className="text-center">
-                                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-[#FF6B35]/10 mx-auto">
-                                    <ProviderLogoIcon provider="minimax" size={20} />
-                                </div>
-                                <p className="font-medium text-sm mt-3 mb-1">MiniMax</p>
-                                <p className="text-xs text-muted-foreground">
-                                    Connect to{' '}
-                                    <a
-                                        href="https://platform.minimax.io"
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="text-[#FF6B35] hover:underline"
-                                    >
-                                        MiniMax
-                                    </a>{' '}
-                                    — M2 series models.
-                                </p>
-                            </div>
-                            <div className="space-y-3">
-                                <Input
-                                    type="password"
-                                    value={minimaxForm.apiKey}
-                                    onChange={(e) => setMinimaxForm({ ...minimaxForm, apiKey: e.target.value })}
-                                    placeholder="API Key *"
-                                    className="text-xs font-mono"
-                                />
-                                <div className="grid grid-cols-2 gap-3">
-                                    <Input
-                                        value={minimaxForm.name}
-                                        onChange={(e) => setMinimaxForm({ ...minimaxForm, name: e.target.value })}
-                                        placeholder="Display Name (optional)"
-                                        className="text-xs"
-                                    />
-                                    <Input
-                                        value={minimaxForm.baseUrl}
-                                        onChange={(e) =>
-                                            setMinimaxForm({
-                                                ...minimaxForm,
-                                                baseUrl: e.target.value,
-                                            })
-                                        }
-                                        placeholder="Base URL (default: api.minimax.io)"
-                                        className="text-xs font-mono"
-                                    />
-                                </div>
-                                <Textarea
-                                    value={minimaxForm.supportedModels}
-                                    onChange={(e) =>
-                                        setMinimaxForm({
-                                            ...minimaxForm,
-                                            supportedModels: e.target.value,
-                                        })
-                                    }
-                                    placeholder="Supported Models (one per line, auto-populated if empty)"
-                                    rows={3}
-                                    className="text-xs font-mono"
-                                />
-                                <Button
-                                    onClick={handleAddMiniMax}
-                                    disabled={loading || !minimaxForm.apiKey}
-                                    size="sm"
-                                    className="w-full bg-[#FF6B35] hover:bg-[#E85A25]"
-                                >
-                                    {loading ? 'Adding…' : 'Add MiniMax Connection'}
-                                </Button>
-                            </div>
                         </div>
                     )}
 
@@ -1867,91 +1527,36 @@ export default function AddConnectionPage() {
                                 </div>
                             )}
 
-                            {qwenMode === 'apikey' && (
-                                <div className="space-y-4">
-                                    <p className="text-[10px] text-muted-foreground text-center">
-                                        Get API key from{' '}
-                                        <a
-                                            href="https://dashscope.aliyun.com"
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="text-[#6366F1] hover:underline"
-                                        >
-                                            DashScope Console
-                                        </a>
-                                        .
-                                    </p>
-                                    <div className="space-y-3">
-                                        <Input
-                                            type="password"
-                                            value={qwenForm.apiKey}
-                                            onChange={(e) => setQwenForm({ ...qwenForm, apiKey: e.target.value })}
-                                            placeholder="API Key *"
-                                            className="text-xs font-mono"
-                                        />
-                                        <div className="grid grid-cols-2 gap-3">
-                                            <Input
-                                                value={qwenForm.name}
-                                                onChange={(e) => setQwenForm({ ...qwenForm, name: e.target.value })}
-                                                placeholder="Display Name (optional)"
-                                                className="text-xs"
-                                            />
-                                            <Input
-                                                value={qwenForm.baseUrl}
-                                                onChange={(e) => setQwenForm({ ...qwenForm, baseUrl: e.target.value })}
-                                                placeholder="Base URL (default: DashScope)"
-                                                className="text-xs font-mono"
-                                            />
-                                        </div>
-                                        <Textarea
-                                            value={qwenForm.supportedModels}
-                                            onChange={(e) =>
-                                                setQwenForm({
-                                                    ...qwenForm,
-                                                    supportedModels: e.target.value,
-                                                })
-                                            }
-                                            placeholder="Supported Models (one per line, auto-populated if empty)"
-                                            rows={3}
-                                            className="text-xs font-mono"
-                                        />
-                                        <Button
-                                            onClick={handleAddQwenAPIKey}
-                                            disabled={loading || !qwenForm.apiKey}
-                                            size="sm"
-                                            className="w-full bg-[#6366F1] hover:bg-[#5558E6]"
-                                        >
-                                            {loading ? 'Adding…' : 'Add Qwen Connection'}
-                                        </Button>
-                                    </div>
-                                </div>
+                            {qwenMode === 'apikey' && selectedProviderMeta && (
+                                <ApiKeyConnectionForm
+                                    key="qwen-apikey"
+                                    provider={selectedProviderMeta}
+                                    loading={loading}
+                                    onSubmit={handleCreateConnection}
+                                />
                             )}
                         </div>
                     )}
 
-                    {provider === 'anthropic' &&
-                        renderApiKeyProviderForm({
-                            providerId: 'anthropic',
-                            title: 'Anthropic',
-                            description: 'Connect Claude models with an Anthropic API key from',
-                            form: anthropicForm,
-                            setForm: setAnthropicForm,
-                            onSubmit: handleAddAnthropic,
-                            docsUrl: 'https://console.anthropic.com/settings/keys',
-                            docsLabel: 'Anthropic Console',
-                        })}
+                    {selectedProviderMeta &&
+                        ['glm', 'minimax', 'anthropic', 'gemini', 'cline', 'openai-compatible'].includes(provider) && (
+                            <div className="space-y-4">
+                                <div className="text-center max-w-lg mx-auto">
+                                    <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-muted mx-auto">
+                                        <ProviderLogoIcon provider={provider} size={20} />
+                                    </div>
+                                    <p className="font-medium text-sm mt-3 mb-1">{selectedProviderMeta.name}</p>
+                                    <p className="text-xs text-muted-foreground">{selectedProviderMeta.ui.description}</p>
+                                </div>
+                                <ApiKeyConnectionForm
+                                    key={provider}
+                                    provider={selectedProviderMeta}
+                                    loading={loading}
+                                    onSubmit={handleCreateConnection}
+                                />
+                            </div>
+                        )}
 
-                    {provider === 'gemini' &&
-                        renderApiKeyProviderForm({
-                            providerId: 'gemini',
-                            title: 'Gemini',
-                            description: 'Connect Google Gemini models with an API key from',
-                            form: geminiForm,
-                            setForm: setGeminiForm,
-                            onSubmit: handleAddGemini,
-                            docsUrl: 'https://aistudio.google.com/app/apikey',
-                            docsLabel: 'Google AI Studio',
-                        })}
                 </div>
 
                 {/* Error banner */}

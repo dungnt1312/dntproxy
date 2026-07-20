@@ -12,7 +12,7 @@ import (
 // ListPrices returns configured model price profiles.
 func (s *SQLiteLogStore) ListPrices(ctx context.Context) ([]domain.ModelPrice, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT id, provider, model_pattern, input_per_1m,
-		output_per_1m, currency, source_note, updated_at_ms FROM model_prices
+		output_per_1m, currency, source_note, updated_at_ms, COALESCE(is_user_edited,0) FROM model_prices
 		ORDER BY provider, model_pattern`)
 	if err != nil {
 		return nil, fmt.Errorf("list model prices: %w", err)
@@ -23,7 +23,7 @@ func (s *SQLiteLogStore) ListPrices(ctx context.Context) ([]domain.ModelPrice, e
 	for rows.Next() {
 		var price domain.ModelPrice
 		if err := rows.Scan(&price.ID, &price.Provider, &price.ModelPattern, &price.InputPer1M,
-			&price.OutputPer1M, &price.Currency, &price.SourceNote, &price.UpdatedAtMs); err != nil {
+			&price.OutputPer1M, &price.Currency, &price.SourceNote, &price.UpdatedAtMs, &price.IsUserEdited); err != nil {
 			return nil, err
 		}
 		prices = append(prices, price)
@@ -37,7 +37,7 @@ func (s *SQLiteLogStore) PriceFor(ctx context.Context, provider, model string) (
 		return nil, nil
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT id, provider, model_pattern, input_per_1m,
-		output_per_1m, currency, source_note, updated_at_ms FROM model_prices
+		output_per_1m, currency, source_note, updated_at_ms, COALESCE(is_user_edited,0) FROM model_prices
 		WHERE (lower(provider) = lower(?) OR provider = '*') AND lower(?) LIKE lower(model_pattern)
 		ORDER BY lower(provider) = lower(?) DESC, length(model_pattern) DESC LIMIT 1`, provider, model, provider)
 	if err != nil {
@@ -50,21 +50,22 @@ func (s *SQLiteLogStore) PriceFor(ctx context.Context, provider, model string) (
 	}
 	var price domain.ModelPrice
 	if err := rows.Scan(&price.ID, &price.Provider, &price.ModelPattern, &price.InputPer1M,
-		&price.OutputPer1M, &price.Currency, &price.SourceNote, &price.UpdatedAtMs); err != nil {
+		&price.OutputPer1M, &price.Currency, &price.SourceNote, &price.UpdatedAtMs, &price.IsUserEdited); err != nil {
 		return nil, err
 	}
 	return &price, rows.Err()
 }
 
-// InsertPrice adds a new model price profile.
+// InsertPrice adds a new model price profile. Marks it as user-edited.
 func (s *SQLiteLogStore) InsertPrice(ctx context.Context, price *domain.ModelPrice) error {
 	if price.ID == "" {
 		price.ID = uuid.New().String()
 	}
 	price.UpdatedAtMs = time.Now().UnixMilli()
+	price.IsUserEdited = true
 	_, err := s.db.ExecContext(ctx, `INSERT INTO model_prices
-		(id, provider, model_pattern, input_per_1m, output_per_1m, currency, source_note, updated_at_ms)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		(id, provider, model_pattern, input_per_1m, output_per_1m, currency, source_note, updated_at_ms, is_user_edited)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)`,
 		price.ID, price.Provider, price.ModelPattern, price.InputPer1M, price.OutputPer1M,
 		price.Currency, price.SourceNote, price.UpdatedAtMs)
 	if err != nil {
@@ -73,12 +74,12 @@ func (s *SQLiteLogStore) InsertPrice(ctx context.Context, price *domain.ModelPri
 	return nil
 }
 
-// UpdatePrice modifies an existing model price profile.
+// UpdatePrice modifies an existing model price profile. Marks it as user-edited.
 func (s *SQLiteLogStore) UpdatePrice(ctx context.Context, price *domain.ModelPrice) error {
 	price.UpdatedAtMs = time.Now().UnixMilli()
 	res, err := s.db.ExecContext(ctx, `UPDATE model_prices SET
 		provider = ?, model_pattern = ?, input_per_1m = ?, output_per_1m = ?,
-		currency = ?, source_note = ?, updated_at_ms = ?
+		currency = ?, source_note = ?, updated_at_ms = ?, is_user_edited = 1
 		WHERE id = ?`,
 		price.Provider, price.ModelPattern, price.InputPer1M, price.OutputPer1M,
 		price.Currency, price.SourceNote, price.UpdatedAtMs, price.ID)

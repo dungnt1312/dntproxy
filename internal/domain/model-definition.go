@@ -555,38 +555,243 @@ func DefaultModelRegistry() *ModelRegistry {
 				IsActive:        true,
 			},
 			"openai/gpt-image-1.5": {
-					ID:              "gpt-image-1.5",
-					Name:            "GPT Image 1.5",
-					Provider:        "openai",
-					ContextWindow:   1,
-					MaxOutputTokens: 1,
-					InputPrice:      0.0,
-					OutputPrice:     0.0,
-					Capabilities:    []string{"image-generation"},
-					IsActive:        true,
+				ID:              "gpt-image-1.5",
+				Name:            "GPT Image 1.5",
+				Provider:        "openai",
+				ContextWindow:   1,
+				MaxOutputTokens: 1,
+				InputPrice:      0.0,
+				OutputPrice:     0.0,
+				Capabilities:    []string{"image-generation"},
+				IsActive:        true,
+			},
+			"xai/grok-imagine-image": {
+				ID:              "grok-imagine-image",
+				Name:            "Grok Imagine Image",
+				Provider:        "xai",
+				ContextWindow:   1,
+				MaxOutputTokens: 1,
+				InputPrice:      0.0,
+				OutputPrice:     0.0,
+				Capabilities:    []string{"image-generation"},
+				IsActive:        true,
+			},
+			"xai/grok-imagine-image-quality": {
+				ID:              "grok-imagine-image-quality",
+				Name:            "Grok Imagine Image Quality",
+				Provider:        "xai",
+				ContextWindow:   1,
+				MaxOutputTokens: 1,
+				InputPrice:      0.0,
+				OutputPrice:     0.0,
+				Capabilities:    []string{"image-generation"},
+				IsActive:        true,
+			},
+			"minimax/image-01": {
+				ID:              "image-01",
+				Name:            "MiniMax Image 01",
+				Provider:        "minimax",
+				ContextWindow:   1,
+				MaxOutputTokens: 1,
+				InputPrice:      0.0,
+				OutputPrice:     0.0,
+				Capabilities:    []string{"image-generation"},
+				IsActive:        true,
+				Metadata: map[string]interface{}{
+					"pricePerImage":  0.0035,
+					"maxImages":      9,
+					"maxPromptChars": 1500,
 				},
-				"xai/grok-imagine-image": {
-					ID:              "grok-imagine-image",
-					Name:            "Grok Imagine Image",
-					Provider:        "xai",
-					ContextWindow:   1,
-					MaxOutputTokens: 1,
-					InputPrice:      0.0,
-					OutputPrice:     0.0,
-					Capabilities:    []string{"image-generation"},
-					IsActive:        true,
+			},
+			"byteplus/dola-seedream-5-0-pro-260628": {
+				ID:              "dola-seedream-5-0-pro-260628",
+				Name:            "BytePlus Seedream 5.0 Pro",
+				Provider:        "byteplus",
+				ContextWindow:   1,
+				MaxOutputTokens: 1,
+				InputPrice:      0.0,
+				OutputPrice:     0.0,
+				Capabilities:    []string{"image-generation", "image-edit"},
+				IsActive:        true,
+				Metadata: map[string]interface{}{
+					"pricePerImage": 0.045,
+					"maxReferences": 10,
 				},
-				"xai/grok-imagine-image-quality": {
-					ID:              "grok-imagine-image-quality",
-					Name:            "Grok Imagine Image Quality",
-					Provider:        "xai",
-					ContextWindow:   1,
-					MaxOutputTokens: 1,
-					InputPrice:      0.0,
-					OutputPrice:     0.0,
-					Capabilities:    []string{"image-generation"},
-					IsActive:        true,
+			},
+			"byteplus/seedream-5-0-lite-260128": {
+				ID:              "seedream-5-0-lite-260128",
+				Name:            "BytePlus Seedream 5.0 Lite",
+				Provider:        "byteplus",
+				ContextWindow:   1,
+				MaxOutputTokens: 1,
+				InputPrice:      0.0,
+				OutputPrice:     0.0,
+				Capabilities:    []string{"image-generation", "image-edit"},
+				IsActive:        true,
+				Metadata: map[string]interface{}{
+					"pricePerImage": 0.035,
+					"maxReferences": 14,
 				},
+			},
+			"byteplus/seedream-4-5-251128": {
+				ID:              "seedream-4-5-251128",
+				Name:            "BytePlus Seedream 4.5",
+				Provider:        "byteplus",
+				ContextWindow:   1,
+				MaxOutputTokens: 1,
+				InputPrice:      0.0,
+				OutputPrice:     0.0,
+				Capabilities:    []string{"image-generation", "image-edit"},
+				IsActive:        true,
+				Metadata: map[string]interface{}{
+					"pricePerImage": 0.04,
+					"maxReferences": 14,
+				},
+			},
+			"gemini/gemini-3.1-flash-image": {
+				ID:              "gemini-3.1-flash-image",
+				Name:            "Gemini 3.1 Flash Image",
+				Provider:        "gemini",
+				ContextWindow:   1,
+				MaxOutputTokens: 1,
+				InputPrice:      0.0,
+				OutputPrice:     0.0,
+				Capabilities:    []string{"image-generation", "image-edit"},
+				IsActive:        true,
+			},
+			"gemini/gemini-3.1-flash-lite-image": {
+				ID:              "gemini-3.1-flash-lite-image",
+				Name:            "Gemini 3.1 Flash Lite Image",
+				Provider:        "gemini",
+				ContextWindow:   1,
+				MaxOutputTokens: 1,
+				InputPrice:      0.0,
+				OutputPrice:     0.0,
+				Capabilities:    []string{"image-generation", "image-edit"},
+				IsActive:        true,
+			},
+			"gemini/gemini-3-pro-image": {
+				ID:              "gemini-3-pro-image",
+				Name:            "Gemini 3 Pro Image",
+				Provider:        "gemini",
+				ContextWindow:   1,
+				MaxOutputTokens: 1,
+				InputPrice:      0.0,
+				OutputPrice:     0.0,
+				Capabilities:    []string{"image-generation", "image-edit"},
+				IsActive:        true,
+			},
+			// ClinePass models (subscription, price=0)
+			"cline/cline-pass/glm-5.2": {
+				ID:              "cline-pass/glm-5.2",
+				Name:            "ClinePass GLM 5.2",
+				Provider:        "cline",
+				ContextWindow:   128000,
+				MaxOutputTokens: 16384,
+				InputPrice:      0.0,
+				OutputPrice:     0.0,
+				Capabilities:    []string{"tools", "streaming"},
+				IsActive:        true,
+			},
+			"cline/cline-pass/kimi-k2.7-code": {
+				ID:              "cline-pass/kimi-k2.7-code",
+				Name:            "ClinePass Kimi K2.7 Code",
+				Provider:        "cline",
+				ContextWindow:   128000,
+				MaxOutputTokens: 16384,
+				InputPrice:      0.0,
+				OutputPrice:     0.0,
+				Capabilities:    []string{"tools", "streaming"},
+				IsActive:        true,
+			},
+			"cline/cline-pass/kimi-k2.6": {
+				ID:              "cline-pass/kimi-k2.6",
+				Name:            "ClinePass Kimi K2.6",
+				Provider:        "cline",
+				ContextWindow:   128000,
+				MaxOutputTokens: 16384,
+				InputPrice:      0.0,
+				OutputPrice:     0.0,
+				Capabilities:    []string{"tools", "streaming"},
+				IsActive:        true,
+			},
+			"cline/cline-pass/deepseek-v4-pro": {
+				ID:              "cline-pass/deepseek-v4-pro",
+				Name:            "ClinePass DeepSeek V4 Pro",
+				Provider:        "cline",
+				ContextWindow:   128000,
+				MaxOutputTokens: 16384,
+				InputPrice:      0.0,
+				OutputPrice:     0.0,
+				Capabilities:    []string{"tools", "streaming"},
+				IsActive:        true,
+			},
+			"cline/cline-pass/deepseek-v4-flash": {
+				ID:              "cline-pass/deepseek-v4-flash",
+				Name:            "ClinePass DeepSeek V4 Flash",
+				Provider:        "cline",
+				ContextWindow:   128000,
+				MaxOutputTokens: 16384,
+				InputPrice:      0.0,
+				OutputPrice:     0.0,
+				Capabilities:    []string{"tools", "streaming"},
+				IsActive:        true,
+			},
+			"cline/cline-pass/mimo-v2.5": {
+				ID:              "cline-pass/mimo-v2.5",
+				Name:            "ClinePass MiMo V2.5",
+				Provider:        "cline",
+				ContextWindow:   128000,
+				MaxOutputTokens: 16384,
+				InputPrice:      0.0,
+				OutputPrice:     0.0,
+				Capabilities:    []string{"tools", "streaming"},
+				IsActive:        true,
+			},
+			"cline/cline-pass/mimo-v2.5-pro": {
+				ID:              "cline-pass/mimo-v2.5-pro",
+				Name:            "ClinePass MiMo V2.5 Pro",
+				Provider:        "cline",
+				ContextWindow:   128000,
+				MaxOutputTokens: 16384,
+				InputPrice:      0.0,
+				OutputPrice:     0.0,
+				Capabilities:    []string{"tools", "streaming"},
+				IsActive:        true,
+			},
+			"cline/cline-pass/minimax-m3": {
+				ID:              "cline-pass/minimax-m3",
+				Name:            "ClinePass MiniMax M3",
+				Provider:        "cline",
+				ContextWindow:   128000,
+				MaxOutputTokens: 16384,
+				InputPrice:      0.0,
+				OutputPrice:     0.0,
+				Capabilities:    []string{"tools", "streaming"},
+				IsActive:        true,
+			},
+			"cline/cline-pass/qwen3.7-max": {
+				ID:              "cline-pass/qwen3.7-max",
+				Name:            "ClinePass Qwen3.7 Max",
+				Provider:        "cline",
+				ContextWindow:   128000,
+				MaxOutputTokens: 16384,
+				InputPrice:      0.0,
+				OutputPrice:     0.0,
+				Capabilities:    []string{"tools", "streaming"},
+				IsActive:        true,
+			},
+			"cline/cline-pass/qwen3.7-plus": {
+				ID:              "cline-pass/qwen3.7-plus",
+				Name:            "ClinePass Qwen3.7 Plus",
+				Provider:        "cline",
+				ContextWindow:   128000,
+				MaxOutputTokens: 16384,
+				InputPrice:      0.0,
+				OutputPrice:     0.0,
+				Capabilities:    []string{"tools", "streaming"},
+				IsActive:        true,
+			},
 		},
 	}
 }
@@ -645,75 +850,48 @@ func (r *ModelRegistry) RemoveModel(key string) {
 	}
 }
 
-// GetRecommendedModelsForProvider returns a curated, sensible list of models for a provider.
-// This replaces the old filter-everything approach and is used by GetProviderConfig().
+// GetRecommendedModelsForProvider returns the curated recommended model list for a provider.
+// ProviderConfigs[providerID].RecommendedModels is the single source of truth for registered
+// providers. This function exists for callers that don't have access to the config map directly,
+// and as a fallback registry scan for unknown/dynamic providers.
 func GetRecommendedModelsForProvider(providerID string) []string {
-	switch providerID {
-	case "kiro":
-		return []string{
-			"claude-sonnet-4.6",
-			"claude-sonnet-4.5",
-			"claude-opus-4.6",
-			"claude-haiku-4.5",
-			"deepseek-3.2",
-			"qwen3-coder-next",
-		}
-	case "openai":
-		return []string{
-			"gpt-4.1-mini",
-			"gpt-4o-mini",
-			"o4-mini",
-			"gpt-4o",
-			"o3-mini",
-		}
-	case "glm":
-		return []string{
-			"glm-5.1",
-			"glm-5",
-			"glm-4.7-flash",
-		}
-	case "minimax":
-		return []string{
-			"MiniMax-M2.7",
-			"MiniMax-M2.7-highspeed",
-			"MiniMax-M2.5",
-		}
-	case "qwen":
-		return []string{
-			"qwen3-coder-plus",
-			"qwen3-coder",
-			"qwen-turbo",
-		}
-	case "anthropic":
-		return []string{
-			"claude-sonnet",
-			"claude-opus",
-			"claude-haiku",
-		}
-	case "gemini":
-		return []string{
-			"gemini-2.5-flash",
-		}
-	case "xai":
-		return []string{
-			"grok-4.20-0309-reasoning",
-			"grok-4.3",
-			"grok-4.20-0309-non-reasoning",
-		}
-	default:
-		// Fallback: return all active models from registry (old behavior)
-		registry := DefaultModelRegistry()
-		var models []string
-		for key, m := range registry.Models {
-			if m.Provider == providerID && m.IsActive {
-				parts := strings.Split(key, "/")
-				if len(parts) == 2 {
-					models = append(models, parts[1])
-				}
+	// For all registered providers, delegate to ProviderConfigs — single source of truth.
+	if cfg, ok := ProviderConfigs[providerID]; ok && len(cfg.RecommendedModels) > 0 {
+		return cfg.RecommendedModels
+	}
+	// Fallback for unknown/dynamic providers: scan registry for active models.
+	registry := DefaultModelRegistry()
+	var models []string
+	for key, m := range registry.Models {
+		if m.Provider == providerID && m.IsActive {
+			parts := strings.Split(key, "/")
+			if len(parts) >= 2 {
+				models = append(models, strings.Join(parts[1:], "/"))
 			}
 		}
-		sort.Strings(models)
-		return models
+	}
+	sort.Strings(models)
+	return models
+}
+
+// GetModelContextWindow returns the context window size for a model.
+// Falls back to provider-level defaults when the model is not in the registry.
+func GetModelContextWindow(model, provider string) int {
+	registry := DefaultModelRegistry()
+	key := provider + "/" + model
+	if def := registry.GetModel(key); def != nil {
+		return def.ContextWindow
+	}
+	// Provider-level fallbacks
+	switch provider {
+	case "kiro":
+		return 200000
+	case "openai":
+		return 128000
+	case "anthropic":
+		return 200000
+	default:
+		return 128000
 	}
 }
 

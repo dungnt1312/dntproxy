@@ -40,6 +40,10 @@ function getProviderColor(provider: string): string {
       return "text-purple-400";
     case "QWEN":
       return "text-pink-400";
+    case "GEMINI":
+      return "text-sky-400";
+    case "CLINE":
+      return "text-rose-400";
     default:
       return "text-gray-500";
   }

@@ -10,7 +10,7 @@ OpenAI-compatible proxy that routes requests to multiple AI providers (Kiro, Ope
 
 - **Language:** Go 1.25+
 - **HTTP:** Gin
-- **CLI:** Cobra
+- **CLI:** Cobra (ops only: serve / version / update)
 - **Storage:** JSON file (`~/.dntproxy/db.json`) + SQLite logs (`~/.dntproxy/logs.db`)
 - **File locking:** gofrs/flock
 - **Tunneling:** cloudflared (auto-downloaded)
@@ -20,7 +20,7 @@ OpenAI-compatible proxy that routes requests to multiple AI providers (Kiro, Ope
 Clean architecture with 4 layers + interface-driven provider system:
 
 ```
-cmd/dntproxy/main.go           → Entry point, CLI, provider registration
+cmd/dntproxy/main.go           → Entry point, thin ops CLI, provider registration
 internal/domain/                → Core types, no external deps
 internal/port/                  → Interfaces (contracts between layers)
   ├── provider-registry.go      → ProviderRegistry (dynamic provider lookup)
@@ -205,8 +205,7 @@ OpenAI request → model resolve → combo expand → account select →
 - Auto-downloads cloudflared binary (v2026.3.0) on first use
 - Cross-platform: Windows, macOS, Linux (amd64/arm64)
 - Persistent state: `~/.dntproxy/tunnel/state.json`
-- Auto-restart on server boot if previously enabled
-- CLI: `dntproxy tunnel enable|disable|status`
+- Controlled via dashboard UI and `/api/tunnel/*` (no management CLI)
 
 ### Logging
 - Structured request logs to SQLite (`~/.dntproxy/logs.db`)
@@ -216,6 +215,13 @@ OpenAI request → model resolve → combo expand → account select →
 - Model pricing profiles for cost estimation
 - Raw body logging via `DNTPROXY_LOG_RAW_BODIES` env var
 - Connection-level filtering
+
+### Auth
+- Dashboard (`/api/*`) and proxy (`/v1/*`) always require API keys (middleware ignores `settings.requireApiKey`)
+- OAuth connection enrollment (`/api/auth/*`) and `fetch-models` require a dashboard-capable API key
+- New connections inherit the creating key's `TenantID`
+- UI login uses `localStorage` key + `POST /api/auth/validate-key` / `GET /api/auth/session`
+- Keys with `dashboardAccess=false` can call `/v1/*` but cannot open the dashboard
 
 ## Code Conventions
 
@@ -236,7 +242,7 @@ OpenAI request → model resolve → combo expand → account select →
   "apiKeys": [],
   "settings": {
     "comboStrategy": "fallback",
-    "requireApiKey": false,
+    "requireApiKey": true,
     "port": 20199,
     "tunnelEnabled": false,
     "tunnelURL": "",
@@ -263,13 +269,10 @@ OpenAI request → model resolve → combo expand → account select →
 - Import token (manual refresh token with auto-register)
 - On-demand token refresh (integrated into account selector, no background scheduler)
 
-### Phase 3: CLI Commands — DONE
-- `dntproxy auth add` (interactive, all 4 methods)
-- `dntproxy auth list/remove/test`
-- `dntproxy combo add/list/remove`
-- `dntproxy alias set/list/remove`
-- `dntproxy key generate/list/remove`
-- `dntproxy tunnel enable/disable/status`
+### Phase 3: Dashboard / Management API — DONE
+- React dashboard for connections, combos, aliases, keys, profiles, tools, tunnel, backup
+- Management API under `/api/*` is the configuration control plane
+- CLI slimmed to ops only: `dntproxy` / `serve`, `version`, `update`
 
 ### Phase 4: Architecture Refactoring — DONE
 - Port interfaces: ProviderRegistry, ChatService, ModelResolver, AccountSelector, ModelFetcher, QuotaChecker

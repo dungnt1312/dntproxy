@@ -3,9 +3,9 @@ package service
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/dungnt/dntproxy/internal/logger"
@@ -58,8 +58,14 @@ func NewChatServiceWithDeps(
 
 // HandleChat processes a chat completion request.
 // Unified flow: resolve → policy check → combo/single → weighted random connection → execute.
+//
+// The optional *port.RequestContext (trailing variadic) carries the tenant ID
+// used for multi-tenancy isolation. When absent or nil, legacy single-tenant
+// behavior is used (no filtering).
 func (s *ChatService) HandleChat(body []byte, modelStr string, requestID string, policy *port.APIKeyPolicy, metadata ...port.RequestMetadata) *port.ChatResult {
-	plan, err := s.modelAccess.ResolveRoute(modelStr, policy)
+	tenantID := extractTenantID(metadata)
+
+	plan, err := s.modelAccess.ResolveRouteForTenant(modelStr, policy, tenantID)
 	if err != nil {
 		return &port.ChatResult{StatusCode: http.StatusBadRequest, Error: fmt.Sprintf("resolve model: %s", err)}
 	}
@@ -105,7 +111,7 @@ func (s *ChatService) HandleChat(body []byte, modelStr string, requestID string,
 	// Unified: every request goes through comboHandler.
 	// For single models, this is just a loop of 1.
 	result, err := s.comboHandler.HandleCombo(models, comboName, strategy, func(qualifiedModel string) (*ComboResult, error) {
-		return s.executeOnProvider(body, qualifiedModel, requestID, attemptConnIDs[qualifiedModel], metadata...)
+		return s.executeOnProvider(body, qualifiedModel, requestID, attemptConnIDs[qualifiedModel], tenantID, metadata...)
 	})
 
 	if err != nil && logger.IsDevMode() {
@@ -137,8 +143,8 @@ func (s *ChatService) HandleChat(body []byte, modelStr string, requestID string,
 
 // executeOnProvider handles a single "provider/model@connectionId" string:
 // parse → get executor → select connection (pinned or weighted random) → execute → retry on fail.
-func (s *ChatService) executeOnProvider(body []byte, qualifiedModel string, requestID string, allowedConnectionIDs []string, metadata ...port.RequestMetadata) (*ComboResult, error) {
-	reqlog := logger.NewRequestLog(requestID)
+func (s *ChatService) executeOnProvider(body []byte, qualifiedModel string, requestID string, allowedConnectionIDs []string, tenantID string, metadata ...port.RequestMetadata) (*ComboResult, error) {
+	reqlog := logger.NewRequestLogForTenant(requestID, tenantID)
 	reqlog.Begin("POST", "/v1/chat/completions", qualifiedModel, len(body))
 	if len(metadata) > 0 {
 		reqlog.AttachCompression(metadata[0].Compression)
@@ -179,17 +185,13 @@ func (s *ChatService) executeOnProvider(body []byte, qualifiedModel string, requ
 		return &ComboResult{OK: false, StatusCode: http.StatusBadRequest, Error: msg}, nil
 	}
 
-	// Inject model into body (strip provider prefix if present)
+	// Inject the resolved provider-local model into the body.
 	var rawMap map[string]json.RawMessage
 	if err := json.Unmarshal(body, &rawMap); err != nil {
 		reqlog.End(http.StatusBadRequest, "Invalid JSON body")
 		return &ComboResult{OK: false, StatusCode: http.StatusBadRequest, Error: "Invalid JSON body"}, nil
 	}
-	cleanModel := model
-	if idx := strings.LastIndex(model, "/"); idx >= 0 {
-		cleanModel = model[idx+1:]
-	}
-	modelJSON, _ := json.Marshal(cleanModel)
+	modelJSON, _ := json.Marshal(model)
 	rawMap["model"] = modelJSON
 	updatedBody, err := json.Marshal(rawMap)
 	if err != nil {
@@ -203,7 +205,7 @@ func (s *ChatService) executeOnProvider(body []byte, qualifiedModel string, requ
 
 	for {
 		// Use new method that handles @connectionId pinning
-		creds, err := s.accountSelector.SelectCredentialsForModel(qualifiedModel, excludeIDs, allowedConnectionIDs)
+		creds, err := s.accountSelector.SelectCredentialsForModel(qualifiedModel, excludeIDs, allowedConnectionIDs, tenantID)
 		if err != nil {
 			// Map selection errors to appropriate combo results
 			if mapped := mapSelectionErrorToComboResult(err); mapped != nil {
@@ -220,6 +222,15 @@ func (s *ChatService) executeOnProvider(body []byte, qualifiedModel string, requ
 		start := time.Now()
 		stream, status, execErr := executor.Execute(model, updatedBody, creds, reqlog)
 		duration := time.Since(start)
+
+		if status == http.StatusUnauthorized && strings.TrimSpace(creds.RefreshToken) != "" {
+			if refreshedCreds, refErr := s.accountSelector.RefreshCredentialsForOAuth(creds.ConnectionID); refErr == nil && refreshedCreds != nil {
+				creds = refreshedCreds
+				start = time.Now()
+				stream, status, execErr = executor.Execute(model, updatedBody, creds, reqlog)
+				duration = time.Since(start)
+			}
+		}
 
 		if execErr == nil && status == http.StatusOK {
 			reqlog.Upstream("", "", status, duration, nil)
@@ -286,4 +297,14 @@ func mapSelectionErrorToComboResult(err error) *ComboResult {
 // ClearComboRotation clears the rotation state for a deleted combo.
 func (s *ChatService) ClearComboRotation(comboName string) {
 	s.comboHandler.ClearRotation(comboName)
+}
+
+// extractTenantID pulls the tenant ID from variadic metadata (if any).
+func extractTenantID(metadata []port.RequestMetadata) string {
+	for _, m := range metadata {
+		if m.TenantID != "" {
+			return m.TenantID
+		}
+	}
+	return ""
 }

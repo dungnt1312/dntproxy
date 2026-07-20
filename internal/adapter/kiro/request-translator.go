@@ -398,13 +398,17 @@ func convertMessages(messages []OpenAIMessage, tools []KiroTool, model string) (
 		}
 	}
 
-	// Inject tools into currentMessage if they were in first history item
-	if len(firstHistoryTools) > 0 && currentMessage != nil && currentMessage.UserInputMessage != nil {
+	// Inject tools into currentMessage
+	effectiveTools := firstHistoryTools
+	if len(effectiveTools) == 0 {
+		effectiveTools = tools
+	}
+	if len(effectiveTools) > 0 && currentMessage != nil && currentMessage.UserInputMessage != nil {
 		if currentMessage.UserInputMessage.UserInputMessageContext == nil {
 			currentMessage.UserInputMessage.UserInputMessageContext = &KiroUserMessageContext{}
 		}
 		if len(currentMessage.UserInputMessage.UserInputMessageContext.Tools) == 0 {
-			currentMessage.UserInputMessage.UserInputMessageContext.Tools = firstHistoryTools
+			currentMessage.UserInputMessage.UserInputMessageContext.Tools = effectiveTools
 		}
 	}
 

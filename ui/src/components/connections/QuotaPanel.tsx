@@ -1,6 +1,5 @@
 import { RefreshCw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 export interface QuotaBucket {
@@ -12,6 +11,14 @@ export interface QuotaBucket {
   pct: number;
   resetAt?: string;
   unlimited: boolean;
+}
+
+export interface BillingHistoryEntry {
+  year: number;
+  month: number;
+  includedUsed: number;
+  onDemandUsed: number;
+  totalUsed: number;
 }
 
 export interface UsageData {
@@ -28,6 +35,7 @@ export interface UsageData {
     charge?: number;
     rate?: number;
   };
+  history?: BillingHistoryEntry[];
   error?: string;
 }
 
@@ -40,6 +48,13 @@ function timeUntil(dateStr: string): string {
   if (days > 0) return `in ${days}d ${hours % 24}h`;
   if (hours > 0) return `in ${hours}h ${mins % 60}m`;
   return `in ${mins}m`;
+}
+
+function monthLabel(year: number, month: number): string {
+  if (!year || !month) return "—";
+  // month from API is 1-12
+  const d = new Date(Date.UTC(year, month - 1, 1));
+  return d.toLocaleString(undefined, { month: "short", year: "numeric", timeZone: "UTC" });
 }
 
 interface QuotaPanelProps {
@@ -86,7 +101,7 @@ export default function QuotaPanel({
   }
 
   const quotas = data.quotas ?? [];
-  if (data.message && quotas.length === 0) {
+  if (data.message && quotas.length === 0 && !data.overages && !(data.history?.length)) {
     return (
       <div className="flex items-center justify-between gap-2">
         <p className="text-[11px] text-muted-foreground italic flex-1 leading-tight">
@@ -107,7 +122,7 @@ export default function QuotaPanel({
     );
   }
 
-  if (quotas.length === 0) {
+  if (quotas.length === 0 && !data.overages && !(data.history?.length)) {
     return (
       <div className="flex items-center justify-between gap-2">
         <p className="text-[11px] text-muted-foreground italic flex-1">
@@ -128,22 +143,25 @@ export default function QuotaPanel({
     );
   }
 
-  const remainingRiskColor = (usedPct: number) =>
+  // pct is percent USED (0-100)
+  const usedRiskColor = (usedPct: number) =>
     usedPct >= 90 ? "bg-red-500" : usedPct >= 70 ? "bg-amber-500" : "bg-emerald-500";
+
+  const history = data.history ?? [];
 
   return (
     <div className="space-y-1.5 w-full">
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 min-w-0">
           {data.plan && (
-            <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-widest">
+            <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-widest truncate">
               {data.plan}
             </span>
           )}
           {data.limitReached && (
             <Badge
               variant="outline"
-              className="text-destructive border-destructive/30 bg-destructive/10 text-[9px] px-1 py-0 h-4"
+              className="text-destructive border-destructive/30 bg-destructive/10 text-[9px] px-1 py-0 h-4 shrink-0"
             >
               Limit Reached
             </Badge>
@@ -165,17 +183,24 @@ export default function QuotaPanel({
       <div className="space-y-2">
         {quotas.map((b) => (
           <div key={b.key} className="space-y-1.5">
-            <div className="flex items-end justify-between text-xs leading-none">
+            <div className="flex items-end justify-between text-xs leading-none gap-2">
               <span className="text-muted-foreground/80 font-medium capitalize text-[11px]">
                 {b.label}
               </span>
-              <div className="flex items-center gap-1.5">
-                <span className="font-mono text-[11px] text-foreground/80 font-medium">
-                  {b.remaining}{" "}
-                  <span className="text-muted-foreground/50 text-[10px]">
-                    / {b.total}
+              <div className="flex items-center gap-1.5 shrink-0">
+                {b.unlimited ? (
+                  <span className="font-mono text-[11px] text-foreground/80 font-medium">
+                    Unlimited
                   </span>
-                </span>
+                ) : (
+                  <span
+                    className="font-mono text-[11px] text-foreground/80 font-medium"
+                    title={`${b.used} / ${b.total} (${b.pct}%) · remaining ${b.remaining}`}
+                  >
+                    {b.used}
+                    <span className="text-muted-foreground/50 text-[10px]"> / {b.total}</span>
+                  </span>
+                )}
                 {b.resetAt && (
                   <span className="text-[10px] text-muted-foreground/50">
                     · {timeUntil(b.resetAt)}
@@ -183,49 +208,96 @@ export default function QuotaPanel({
                 )}
               </div>
             </div>
-            <div className="relative h-1.5 rounded-full bg-muted/60 overflow-hidden w-full">
-              <div
-                className={`absolute inset-y-0 left-0 rounded-full transition-all duration-500 ${remainingRiskColor(b.pct)}`}
-                style={{ width: `${Math.max(0, 100 - b.pct)}%` }}
-              />
-            </div>
+            {!b.unlimited && (
+              <div className="relative h-1.5 rounded-full bg-muted/60 overflow-hidden w-full">
+                <div
+                  className={`absolute inset-y-0 left-0 rounded-full transition-all duration-500 ${usedRiskColor(b.pct)}`}
+                  style={{ width: `${Math.min(100, Math.max(0, b.pct))}%` }}
+                />
+              </div>
+            )}
           </div>
         ))}
 
-        {data.overages && data.overages.used > 0 && (
+        {data.overages && (
           <div className="space-y-1.5 pt-1 border-t border-muted-foreground/10">
-            <div className="flex items-end justify-between text-xs leading-none">
+            <div className="flex items-end justify-between text-xs leading-none gap-2">
               <div className="flex items-center gap-1.5">
-                <span className="text-muted-foreground/80 font-medium text-[11px]">Overages</span>
+                <span className="text-muted-foreground/80 font-medium text-[11px]">
+                  On-demand
+                </span>
                 <Badge
                   variant="outline"
-                  className="border-amber-500/30 bg-amber-500/10 text-amber-500 text-[9px] px-1 py-0 h-4"
+                  className={cn(
+                    "text-[9px] px-1 py-0 h-4",
+                    data.overages.cap > 0
+                      ? "border-amber-500/30 bg-amber-500/10 text-amber-500"
+                      : "border-muted-foreground/20 bg-muted/40 text-muted-foreground",
+                  )}
                 >
-                  {data.overages.status || 'ENABLED'}
+                  {data.overages.status || (data.overages.cap > 0 ? "ENABLED" : "DISABLED")}
                 </Badge>
               </div>
               <div className="flex items-center gap-1.5">
-                <span className="font-mono text-[11px] text-amber-500 font-medium">
-                  {data.overages.used.toFixed(2)} <span className="text-muted-foreground/50 text-[10px]">/ {data.overages.cap.toFixed(0)}</span>
-                </span>
-                {data.overages.charge && data.overages.charge > 0 && (
+                {data.overages.cap > 0 ? (
+                  <span className="font-mono text-[11px] text-amber-500 font-medium">
+                    {data.overages.used.toFixed(0)}
+                    <span className="text-muted-foreground/50 text-[10px]">
+                      {" "}
+                      / {data.overages.cap.toFixed(0)}
+                    </span>
+                  </span>
+                ) : (
+                  <span className="text-[10px] text-muted-foreground/60">cap 0</span>
+                )}
+                {data.overages.charge != null && data.overages.charge > 0 && (
                   <span className="text-[10px] text-amber-500/70">
                     ${data.overages.charge.toFixed(4)}
                   </span>
                 )}
               </div>
             </div>
-            <div className="relative h-1.5 rounded-full bg-muted/60 overflow-hidden w-full">
-              <div
-                className="absolute inset-y-0 left-0 rounded-full transition-all duration-500 bg-amber-500"
-                style={{ width: `${Math.min(100, (data.overages.used / data.overages.cap) * 100)}%` }}
-              />
-            </div>
-            {data.overages.rate && data.overages.rate > 0 && (
-              <div className="text-[10px] text-muted-foreground/50">
-                Rate: ${data.overages.rate.toFixed(4)}/unit · Remaining: {data.overages.remaining.toFixed(2)}
+            {data.overages.cap > 0 && (
+              <div className="relative h-1.5 rounded-full bg-muted/60 overflow-hidden w-full">
+                <div
+                  className="absolute inset-y-0 left-0 rounded-full transition-all duration-500 bg-amber-500"
+                  style={{
+                    width: `${Math.min(100, (data.overages.used / data.overages.cap) * 100)}%`,
+                  }}
+                />
               </div>
             )}
+            {data.overages.rate != null && data.overages.rate > 0 && (
+              <div className="text-[10px] text-muted-foreground/50">
+                Rate: ${data.overages.rate.toFixed(4)}/unit · Remaining:{" "}
+                {data.overages.remaining.toFixed(2)}
+              </div>
+            )}
+          </div>
+        )}
+
+        {history.length > 0 && (
+          <div className="pt-1 border-t border-muted-foreground/10 space-y-1">
+            <span className="text-[10px] text-muted-foreground/70 font-medium uppercase tracking-wider">
+              History
+            </span>
+            <div className="space-y-0.5">
+              {history.slice(0, 6).map((h) => (
+                <div
+                  key={`${h.year}-${h.month}`}
+                  className="flex items-center justify-between text-[10px] text-muted-foreground/80 font-mono"
+                >
+                  <span>{monthLabel(h.year, h.month)}</span>
+                  <span title={`included ${h.includedUsed} · on-demand ${h.onDemandUsed}`}>
+                    {h.totalUsed}
+                    <span className="text-muted-foreground/40"> total</span>
+                    {h.onDemandUsed > 0 && (
+                      <span className="text-amber-500/80"> · od {h.onDemandUsed}</span>
+                    )}
+                  </span>
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </div>

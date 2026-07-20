@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -11,64 +11,13 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Card, CardContent } from "@/components/ui/card";
-import { RefreshCw, ChevronLeft, ChevronRight, Activity } from "lucide-react";
-import UsageChart from "./usage-chart";
+import { RefreshCw, ChevronLeft, ChevronRight } from "lucide-react";
+import { DailyUsageChart } from "./dashboard/daily-usage-chart";
 import UsageStats, { type UsageStatsData } from "./usage-stats";
 import { goApi } from "@/lib/go-api";
 import { Skeleton } from "@/components/ui/skeleton";
-
-function LiveRequestCard() {
-  const [recentCount, setRecentCount] = useState(0);
-  const [lastModel, setLastModel] = useState<string>("");
-  const tsRef = useRef<number[]>([]);
-
-  useEffect(() => {
-    const es = new EventSource("/api/logs/stream");
-    es.onmessage = (e) => {
-      try {
-        const msg = JSON.parse(e.data);
-        if (msg.type === "delta" && msg.log?.direction === "response") {
-          const now = Date.now();
-          tsRef.current.push(now);
-          tsRef.current = tsRef.current.filter((t) => now - t < 60_000);
-          setRecentCount(tsRef.current.length);
-          if (msg.log.model) setLastModel(msg.log.model);
-        }
-      } catch {}
-    };
-    const interval = setInterval(() => {
-      const now = Date.now();
-      tsRef.current = tsRef.current.filter((t) => now - t < 60_000);
-      setRecentCount(tsRef.current.length);
-    }, 5_000);
-    return () => {
-      es.close();
-      clearInterval(interval);
-    };
-  }, []);
-
-  return (
-    <Card>
-      <CardContent className="p-4 flex items-center gap-3">
-        <div className="flex items-center justify-center w-9 h-9 rounded-full bg-emerald-500/10 shrink-0">
-          <Activity className="w-4 h-4 text-emerald-500" />
-        </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-xs text-muted-foreground">Live (last 60s)</p>
-          <p className="text-2xl font-bold tabular-nums">
-            {recentCount}
-            <span className="text-sm font-normal text-muted-foreground ml-1">req</span>
-          </p>
-        </div>
-        {lastModel && (
-          <p className="text-xs text-muted-foreground font-mono truncate max-w-[160px]" title={lastModel}>
-            {lastModel}
-          </p>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
+import { formatTokens, formatCost, type KpiRange } from "./dashboard/helpers";
+import type { DailyUsageStat } from "@/types/logs";
 
 const PERIODS = [
   { value: "24h", label: "24h" },
@@ -76,6 +25,11 @@ const PERIODS = [
   { value: "30d", label: "30d" },
   { value: "60d", label: "60d" },
 ];
+
+function periodToChartRange(p: string): KpiRange {
+  if (p === "24h" || p === "7d" || p === "30d") return p;
+  return "30d";
+}
 
 interface RequestDetail {
   timestamp: string;
@@ -95,16 +49,6 @@ interface Pagination {
   pageSize: number;
   totalItems: number;
   totalPages: number;
-}
-
-function fmtNum(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return String(n || 0);
-}
-
-function fmtCost(n: number): string {
-  return `$${(n || 0).toFixed(4)}`;
 }
 
 function fmtTs(ts: string): string {
@@ -129,6 +73,24 @@ export default function UsageScreen() {
   });
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [dailyStats, setDailyStats] = useState<DailyUsageStat[]>([]);
+  const [chartLoading, setChartLoading] = useState(true);
+  const [chartError, setChartError] = useState<string | null>(null);
+
+  const chartRange = periodToChartRange(period);
+
+  const fetchChart = useCallback(async (range: KpiRange) => {
+    setChartLoading(true);
+    setChartError(null);
+    try {
+      const stats = await goApi.getLogDaily(range);
+      setDailyStats(Array.isArray(stats) ? stats : []);
+    } catch {
+      setChartError("Failed to load chart data");
+    } finally {
+      setChartLoading(false);
+    }
+  }, []);
 
   const fetchStats = useCallback(async () => {
     setStatsLoading(true);
@@ -163,7 +125,8 @@ export default function UsageScreen() {
 
   useEffect(() => {
     fetchStats();
-  }, [fetchStats]);
+    fetchChart(chartRange);
+  }, [fetchStats, fetchChart, chartRange]);
 
   useEffect(() => {
     if (tab === "requests") fetchDetails(1);
@@ -212,8 +175,13 @@ export default function UsageScreen() {
         </TabsList>
 
         <TabsContent value="overview" className="flex flex-col gap-4 mt-4">
-          <LiveRequestCard />
-          <UsageChart period={period} refreshKey={refreshKey} />
+          <DailyUsageChart
+            data={dailyStats}
+            loading={chartLoading}
+            error={chartError}
+            range={chartRange}
+            onRetry={() => fetchChart(chartRange)}
+          />
           <UsageStats data={stats} loading={statsLoading} />
         </TabsContent>
 
@@ -266,13 +234,13 @@ export default function UsageScreen() {
                           {d.connectionName || d.provider || "—"}
                         </TableCell>
                         <TableCell className="text-right text-xs">
-                          {fmtNum(d.promptTokens)}
+                          {formatTokens(d.promptTokens)}
                         </TableCell>
                         <TableCell className="text-right text-xs">
-                          {fmtNum(d.completionTokens)}
+                          {formatTokens(d.completionTokens)}
                         </TableCell>
                         <TableCell className="text-right text-xs text-amber-500">
-                          {fmtCost(d.cost)}
+                          {formatCost(d.cost)}
                         </TableCell>
                         <TableCell className="text-right">
                           <Badge

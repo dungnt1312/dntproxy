@@ -62,6 +62,9 @@ func apiToolsStatus(svc *service.ToolsService) gin.HandlerFunc {
 
 func apiConfigureTool(svc *service.ToolsService) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if !requireAdmin(c) {
+			return
+		}
 		id := domain.ToolID(c.Param("id"))
 		def := domain.GetToolDefinition(id)
 		if def == nil {
@@ -84,6 +87,9 @@ func apiConfigureTool(svc *service.ToolsService) gin.HandlerFunc {
 
 func apiResetTool(svc *service.ToolsService) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if !requireAdmin(c) {
+			return
+		}
 		id := domain.ToolID(c.Param("id"))
 		def := domain.GetToolDefinition(id)
 		if def == nil {
@@ -106,6 +112,9 @@ func apiResetTool(svc *service.ToolsService) gin.HandlerFunc {
 
 func apiConfigureAllTools(svc *service.ToolsService) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if !requireAdmin(c) {
+			return
+		}
 		statuses, err := svc.ListTools()
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -131,6 +140,9 @@ func apiConfigureAllTools(svc *service.ToolsService) gin.HandlerFunc {
 
 func apiResetAllTools(svc *service.ToolsService) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if !requireAdmin(c) {
+			return
+		}
 		statuses, err := svc.ListTools()
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

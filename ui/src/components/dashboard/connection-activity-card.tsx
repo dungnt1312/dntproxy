@@ -3,6 +3,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Activity, CheckCircle2, Clock, Coins, Zap, AlertTriangle } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { formatTokens } from '@/components/screens/dashboard/helpers'
 import type { LogConnectionSummary } from '@/types/logs'
 
 export type ConnectionStatus = 'active' | 'recent' | 'idle' | 'error' | 'rate_limited'
@@ -49,12 +50,6 @@ const STATUS_CONFIG: Record<ConnectionStatus, { dotClass: string; label: string;
     badgeClass: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400 border-orange-200 dark:border-orange-800',
     pulse: false,
   },
-}
-
-function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
-  return String(n)
 }
 
 function formatRelativeTimestamp(ms: number): string {

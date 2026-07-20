@@ -8,20 +8,25 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// RegisterTunnelRoutes registers tunnel API endpoints.
-func RegisterTunnelRoutes(r *gin.Engine, tunnelMgr port.TunnelManager, store port.CredentialStore) {
-	r.POST("/api/tunnel/enable", func(c *gin.Context) {
+// RegisterTunnelRoutes registers tunnel API endpoints on the dashboard API
+// group so they inherit dashboardKeyMiddleware + auth. Tunnel control is
+// admin-only (requireAdmin inside each handler).
+func RegisterTunnelRoutes(api *gin.RouterGroup, tunnelMgr port.TunnelManager, store port.CredentialStore) {
+	api.POST("/tunnel/enable", func(c *gin.Context) {
 		enableTunnel(c, tunnelMgr, store)
 	})
-	r.POST("/api/tunnel/disable", func(c *gin.Context) {
+	api.POST("/tunnel/disable", func(c *gin.Context) {
 		disableTunnel(c, tunnelMgr)
 	})
-	r.GET("/api/tunnel/status", func(c *gin.Context) {
+	api.GET("/tunnel/status", func(c *gin.Context) {
 		getTunnelStatus(c, tunnelMgr)
 	})
 }
 
 func enableTunnel(c *gin.Context, tunnelMgr port.TunnelManager, store port.CredentialStore) {
+	if !requireAdmin(c) {
+		return
+	}
 	// Check if already running
 	status := tunnelMgr.Status()
 	if status.Running {
@@ -50,6 +55,9 @@ func enableTunnel(c *gin.Context, tunnelMgr port.TunnelManager, store port.Crede
 }
 
 func disableTunnel(c *gin.Context, tunnelMgr port.TunnelManager) {
+	if !requireAdmin(c) {
+		return
+	}
 	if err := tunnelMgr.Disable(); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": fmt.Sprintf("Failed to stop tunnel: %v", err),
@@ -64,6 +72,9 @@ func disableTunnel(c *gin.Context, tunnelMgr port.TunnelManager) {
 }
 
 func getTunnelStatus(c *gin.Context, tunnelMgr port.TunnelManager) {
+	if !requireAdmin(c) {
+		return
+	}
 	status := tunnelMgr.Status()
 	c.JSON(http.StatusOK, gin.H{
 		"enabled":   status.Enabled,

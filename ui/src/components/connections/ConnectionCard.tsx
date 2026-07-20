@@ -10,6 +10,8 @@ import {
   Lock,
   TerminalSquare,
   Edit3,
+  ExternalLink,
+  Building2,
 } from "lucide-react";
 import { api } from "../../api";
 import InlineName from "./InlineName";
@@ -35,6 +37,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { useAppStore } from "@/stores/app-store";
 import type { Connection, TestConnectionResult, UsageData } from "@/types/connections";
 
 interface ConnectionCardProps {
@@ -44,6 +47,7 @@ interface ConnectionCardProps {
   onDelete: (id: string, name: string) => void;
   onEditModels: (conn: Connection) => void;
   onEditConnection?: (conn: Connection) => void;
+  onViewDetails?: (conn: Connection) => void;
 }
 
 export default function ConnectionCard({
@@ -53,6 +57,7 @@ export default function ConnectionCard({
   onDelete,
   onEditModels,
   onEditConnection,
+  onViewDetails,
 }: ConnectionCardProps) {
   const [testResult, setTestResult] = useState<TestConnectionResult | null>(null);
   const [quotaResult, setQuotaResult] = useState<UsageData | null>(
@@ -61,6 +66,9 @@ export default function ConnectionCard({
   const [quotaLoading, setQuotaLoading] = useState(false);
   const [isLogOpen, setIsLogOpen] = useState(false);
   const [toggleLoading, setToggleLoading] = useState(false);
+
+  const session = useAppStore((s) => s.session);
+  const showTenantBadge = session?.isAdmin && !!c.tenantId;
 
   useEffect(() => {
     if (initialQuotaResult !== undefined) {
@@ -212,6 +220,12 @@ export default function ConnectionCard({
                   "API Key"}
               </span>
               <StatusRow conn={c} />
+              {showTenantBadge && (
+                <span className="mt-1 inline-flex items-center gap-1 text-[10px] text-violet-600 dark:text-violet-400">
+                  <Building2 className="h-3 w-3 shrink-0" />
+                  {c.tenantId}
+                </span>
+              )}
             </div>
           </div>
           <div className="shrink-0">{renderBadgeStatus()}</div>
@@ -325,6 +339,14 @@ export default function ConnectionCard({
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-48 shadow-lg">
+                {onViewDetails && (
+                  <DropdownMenuItem
+                    onClick={() => onViewDetails(c)}
+                    className="gap-2 cursor-pointer text-xs py-2"
+                  >
+                    <ExternalLink size={15} /> View Details
+                  </DropdownMenuItem>
+                )}
                 {(c.authType === "apikey" || c.apiKey) &&
                   onEditConnection && (
                     <DropdownMenuItem

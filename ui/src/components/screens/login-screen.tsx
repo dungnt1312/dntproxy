@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { goApi } from "@/lib/go-api";
 import { setStoredApiKey } from "@/lib/go-api";
+import { useAppStore } from "@/stores/app-store";
 
 interface LoginScreenProps {
   onSuccess: () => void;
@@ -13,6 +14,7 @@ export default function LoginScreen({ onSuccess }: LoginScreenProps) {
   const [key, setKey] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const setSession = useAppStore((s) => s.setSession);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -25,6 +27,12 @@ export default function LoginScreen({ onSuccess }: LoginScreenProps) {
       const res = await goApi.validateKey(key.trim());
       if (res.valid && res.dashboardAccess) {
         setStoredApiKey(key.trim());
+        // Capture tenant/admin context from the validated key.
+        setSession({
+          tenantId: res.tenantId ?? "",
+          isAdmin: Boolean(res.isAdmin),
+          dashboardAccess: true,
+        });
         onSuccess();
       } else if (res.valid && !res.dashboardAccess) {
         setError("This key does not have dashboard access");
@@ -47,7 +55,7 @@ export default function LoginScreen({ onSuccess }: LoginScreenProps) {
           </div>
           <h1 className="text-xl font-semibold tracking-tight">Dntproxy</h1>
           <p className="text-sm text-muted-foreground text-center">
-            API key authentication is enabled. Enter your key to continue.
+            Enter a dashboard API key to continue.
           </p>
         </div>
 

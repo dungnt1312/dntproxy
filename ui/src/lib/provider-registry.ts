@@ -17,6 +17,7 @@ export const PROVIDER_ORDER = [
   'glm',
   'minimax',
   'anthropic',
+  'cline',
   'gemini',
   'openai-compatible',
 ] as const;
@@ -82,13 +83,21 @@ export const PROVIDER_META: Record<string, ProviderMeta> = {
     accentClass: 'bg-amber-600 hover:bg-amber-700',
     canAdd: true,
   },
+  cline: {
+    id: 'cline',
+    label: 'ClinePass',
+    description: 'ClinePass subscription models',
+    colorClass: 'bg-rose-500/10 border-rose-500/20 text-rose-600',
+    accentClass: 'bg-rose-600 hover:bg-rose-700',
+    canAdd: true,
+  },
   gemini: {
     id: 'gemini',
     label: 'Gemini',
     description: 'Google Gemini models',
     colorClass: 'bg-blue-400/10 border-blue-400/20 text-blue-500',
     accentClass: 'bg-blue-500 hover:bg-blue-600',
-    modelProviderId: 'google',
+    modelProviderId: 'gemini',
     canAdd: true,
   },
   'openai-compatible': {

@@ -1,8 +1,11 @@
 package storage
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -11,6 +14,7 @@ import (
 
 	"github.com/dungnt/dntproxy/internal/domain"
 	"github.com/gofrs/flock"
+	"github.com/google/uuid"
 )
 
 // JsonDB implements port.CredentialStore using a JSON file with file locking.
@@ -156,8 +160,42 @@ func (db *JsonDB) readFromDisk() (*domain.AppConfig, error) {
 			}
 		}
 
+		// Bootstrap: if this is a fresh install (no API keys, no tenants, not
+		// yet bootstrapped), auto-create a default admin key so the operator
+		// can log in. The key is printed to stdout once and never again.
+		if !cfg.Settings.AdminKeyBootstrapped && len(cfg.APIKeys) == 0 && len(cfg.Tenants) == 0 {
+			key := bootstrapAdminKey()
+			cfg.APIKeys = append(cfg.APIKeys, domain.APIKey{
+				ID:              uuid.NewString(),
+				Name:            "Default Admin Key",
+				Key:             key,
+				IsActive:        true,
+				DashboardAccess: true,
+				CreatedAt:       time.Now().UTC().Format(time.RFC3339),
+			})
+			cfg.Settings.AdminKeyBootstrapped = true
+			// Best-effort persist so the key survives even if the first request
+			// never triggers a Save.
+			_ = db.writeToDisk(&cfg)
+			log.Printf("[dntproxy] ============================================================")
+			log.Printf("[dntproxy]  Created default admin key (SAVE THIS NOW, shown only once):")
+			log.Printf("[dntproxy]    %s", key)
+			log.Printf("[dntproxy]  Use it to log into the dashboard at /dashboard")
+			log.Printf("[dntproxy] ============================================================")
+		}
+
 	db.cache = &cfg
 	return &cfg, nil
+}
+
+// bootstrapAdminKey generates a random admin API key (no tenant prefix).
+func bootstrapAdminKey() string {
+	b := make([]byte, 24)
+	if _, err := rand.Read(b); err != nil {
+		// Extremely unlikely; fall back to a UUID-derived key.
+		return "sk-dnt-admin-" + uuid.NewString()
+	}
+	return "sk-dnt-admin-" + hex.EncodeToString(b)
 }
 
 // Save writes the config to disk atomically (invalidates cache).
@@ -402,4 +440,36 @@ func (db *JsonDB) GetConnectionIDsForCombo(comboName string) ([]string, error) {
 		return nil, err
 	}
 	return combo.ConnectionIDs, nil
+}
+
+// LoadForTenant returns the config filtered to only resources owned by tenantID.
+// For legacy tenant (""), returns the full config unfiltered.
+// Implements port.CredentialStoreTenantExt.
+func (db *JsonDB) LoadForTenant(tenantID string) (*domain.AppConfig, error) {
+	cfg, err := db.Load()
+	if err != nil {
+		return nil, err
+	}
+	return domain.FilterConfigByTenant(cfg, tenantID), nil
+}
+
+// GetTenants returns all registered tenants.
+func (db *JsonDB) GetTenants() ([]domain.Tenant, error) {
+	cfg, err := db.Load()
+	if err != nil {
+		return nil, err
+	}
+	if cfg.Tenants == nil {
+		return []domain.Tenant{}, nil
+	}
+	return cfg.Tenants, nil
+}
+
+// GetTenantBySlug returns a tenant by slug, or nil if not found.
+func (db *JsonDB) GetTenantBySlug(slug string) (*domain.Tenant, error) {
+	cfg, err := db.Load()
+	if err != nil {
+		return nil, err
+	}
+	return domain.FindTenantBySlug(cfg.Tenants, slug), nil
 }

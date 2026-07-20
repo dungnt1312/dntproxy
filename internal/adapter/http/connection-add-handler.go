@@ -18,59 +18,86 @@ import (
 
 // === Generic Add Connection (uses provider config registry) ===
 
-// apiAddConnection handles adding any API-key-based provider connection.
-// Reads defaults from domain.ProviderConfigs, so adding a new provider
-// only requires registering it in the config registry + main.go.
-func apiAddConnection(store port.CredentialStore, providerID string) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		provCfg := domain.GetProviderConfig(providerID)
+type addConnectionRequest struct {
+	Provider        string   `json:"provider"`
+	Name            string   `json:"name"`
+	APIKey          string   `json:"apiKey"`
+	BaseURL         string   `json:"baseUrl,omitempty"`
+	RoutePrefix     string   `json:"routePrefix,omitempty"`
+	ModelPrefix     string   `json:"modelPrefix,omitempty"`
+	SupportedModels []string `json:"supportedModels,omitempty"`
+}
 
-		var req struct {
-			Name            string   `json:"name"`
-			APIKey          string   `json:"apiKey"`
-			BaseURL         string   `json:"baseUrl,omitempty"`
-			SupportedModels []string `json:"supportedModels,omitempty"`
-		}
-		if err := c.ShouldBindJSON(&req); err != nil || req.APIKey == "" {
-			c.JSON(400, gin.H{"error": "apiKey is required"})
-			return
-		}
+func createAPIKeyConnection(c *gin.Context, store port.CredentialStore, providerID string, req addConnectionRequest) (*domain.ProviderConnection, string, int) {
+	provCfg := domain.GetProviderConfig(providerID)
 
-		// Default base URL from provider config
-		baseURL := req.BaseURL
-		if baseURL == "" {
-			baseURL = provCfg.DefaultBaseURL
+	if providerID == "openai-compatible" {
+		if req.BaseURL == "" {
+			return nil, "baseUrl is required", 400
 		}
+	} else if req.APIKey == "" {
+		return nil, "apiKey is required", 400
+	}
 
-			// Default models from provider config (RecommendedModels is the source of truth)
-			supportedModels := req.SupportedModels
-			if len(supportedModels) == 0 {
-				supportedModels = provCfg.RecommendedModels
+	baseURL := req.BaseURL
+	if baseURL == "" {
+		baseURL = provCfg.DefaultBaseURL
+	}
+	supportedModels := req.SupportedModels
+	if len(supportedModels) == 0 {
+		cfg, _ := store.Load()
+		var settings *domain.Settings
+		if cfg != nil {
+			settings = &cfg.Settings
+		}
+		supportedModels = domain.GetDefaultConnectionModels(settings, providerID)
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	conn := domain.ProviderConnection{
+		ID:              uuid.New().String(),
+		Provider:        providerID,
+		AuthType:        "apikey",
+		Weight:          100,
+		IsActive:        true,
+		APIKey:          req.APIKey,
+		BaseURL:         baseURL,
+		RoutePrefix:     domain.NormalizeRoutePrefix(req.RoutePrefix),
+		ModelPrefix:     req.ModelPrefix,
+		TestStatus:      "active",
+		SupportedModels: supportedModels,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+		TenantID:        GetTenantID(c),
+	}
+
+	if err := store.Update(func(appCfg *domain.AppConfig) {
+		name := req.Name
+		if providerID == "openai-compatible" {
+			if name == "" {
+				name = "Custom API"
+				count := 0
+				for _, x := range appCfg.ProviderConnections {
+					if x.Provider == "openai-compatible" {
+						count++
+					}
+				}
+				if count > 0 {
+					name = fmt.Sprintf("Custom API %d", count+1)
+				}
 			}
-
-		now := time.Now().UTC().Format(time.RFC3339)
-		conn := domain.ProviderConnection{
-			ID:              uuid.New().String(),
-			Provider:        providerID,
-			AuthType:        "apikey",
-			Weight:          100,
-			IsActive:        true,
-			APIKey:          req.APIKey,
-			BaseURL:         baseURL,
-			TestStatus:      "active",
-			SupportedModels: supportedModels,
-			CreatedAt:       now,
-			UpdatedAt:       now,
-		}
-
-		if err := store.Update(func(appCfg *domain.AppConfig) {
-			// Auto-name inside Update for accurate count
-			name := req.Name
+			if conn.RoutePrefix == "" {
+				conn.RoutePrefix = domain.NormalizeRoutePrefix(name)
+			}
+			allConns := append(append([]domain.ProviderConnection(nil), appCfg.ProviderConnections...), conn)
+			domain.EnsureOpenAICompatibleRoutePrefixes(allConns)
+			conn.RoutePrefix = allConns[len(allConns)-1].RoutePrefix
+		} else {
 			if name == "" {
 				name = provCfg.Name + " Account"
 				count := 0
-				for _, c := range appCfg.ProviderConnections {
-					if c.Provider == providerID {
+				for _, x := range appCfg.ProviderConnections {
+					if x.Provider == providerID {
 						count++
 					}
 				}
@@ -78,13 +105,70 @@ func apiAddConnection(store port.CredentialStore, providerID string) gin.Handler
 					name = fmt.Sprintf("%s Account %d", provCfg.Name, count+1)
 				}
 			}
-			conn.Name = name
-			appCfg.ProviderConnections = append(appCfg.ProviderConnections, conn)
-		}); err != nil {
-			c.JSON(500, gin.H{"error": "Failed to save: " + err.Error()})
+		}
+		conn.Name = name
+		appCfg.ProviderConnections = append(appCfg.ProviderConnections, conn)
+	}); err != nil {
+		return nil, "Failed to save: " + err.Error(), 500
+	}
+	return &conn, "", 0
+}
+
+// apiCreateConnection is the unified entry: POST /api/connections with { "provider": "glm", ... }.
+func apiCreateConnection(store port.CredentialStore) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req addConnectionRequest
+		if err := c.ShouldBindJSON(&req); err != nil || req.Provider == "" {
+			c.JSON(400, gin.H{"error": "provider is required"})
 			return
 		}
+		if !domain.HasProvider(req.Provider) && req.Provider != "openai-compatible" {
+			// allow unknown IDs as openai-compatible style only if explicitly openai-compatible
+			c.JSON(400, gin.H{"error": "unknown provider: " + req.Provider})
+			return
+		}
+		conn, errMsg, code := createAPIKeyConnection(c, store, req.Provider, req)
+		if code != 0 {
+			c.JSON(code, gin.H{"error": errMsg})
+			return
+		}
+		c.JSON(200, gin.H{"id": conn.ID, "name": conn.Name, "routePrefix": conn.RoutePrefix})
+	}
+}
 
+// apiAddConnectionByParam: POST /api/connections/:provider
+func apiAddConnectionByParam(store port.CredentialStore) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		providerID := c.Param("provider")
+		var req addConnectionRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(400, gin.H{"error": "Invalid request body"})
+			return
+		}
+		req.Provider = providerID
+		conn, errMsg, code := createAPIKeyConnection(c, store, providerID, req)
+		if code != 0 {
+			c.JSON(code, gin.H{"error": errMsg})
+			return
+		}
+		c.JSON(200, gin.H{"id": conn.ID, "name": conn.Name, "routePrefix": conn.RoutePrefix})
+	}
+}
+
+// apiAddConnection handles adding any API-key-based provider connection (legacy per-route).
+func apiAddConnection(store port.CredentialStore, providerID string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req addConnectionRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(400, gin.H{"error": "Invalid request body"})
+			return
+		}
+		req.Provider = providerID
+		conn, errMsg, code := createAPIKeyConnection(c, store, providerID, req)
+		if code != 0 {
+			c.JSON(code, gin.H{"error": errMsg})
+			return
+		}
 		c.JSON(200, gin.H{"id": conn.ID, "name": conn.Name, "routePrefix": conn.RoutePrefix})
 	}
 }
@@ -94,65 +178,7 @@ func apiAddOpenAIConnection(store port.CredentialStore) gin.HandlerFunc {
 	return apiAddConnection(store, "openai")
 }
 func apiAddCustomConnection(store port.CredentialStore) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		var req struct {
-			Name            string   `json:"name"`
-			APIKey          string   `json:"apiKey"`
-			BaseURL         string   `json:"baseUrl"`
-			RoutePrefix     string   `json:"routePrefix,omitempty"`
-			ModelPrefix     string   `json:"modelPrefix,omitempty"`
-			SupportedModels []string `json:"supportedModels,omitempty"`
-		}
-		if err := c.ShouldBindJSON(&req); err != nil || req.BaseURL == "" {
-			c.JSON(400, gin.H{"error": "baseUrl is required"})
-			return
-		}
-
-		now := time.Now().UTC().Format(time.RFC3339)
-		conn := domain.ProviderConnection{
-			ID:              uuid.New().String(),
-			Provider:        "openai-compatible",
-			AuthType:        "apikey",
-			Weight:          100,
-			IsActive:        true,
-			APIKey:          req.APIKey,
-			BaseURL:         req.BaseURL,
-			RoutePrefix:     domain.NormalizeRoutePrefix(req.RoutePrefix),
-			ModelPrefix:     req.ModelPrefix,
-			TestStatus:      "active",
-			SupportedModels: req.SupportedModels,
-			CreatedAt:       now,
-			UpdatedAt:       now,
-		}
-
-		if err := store.Update(func(appCfg *domain.AppConfig) {
-			name := req.Name
-			if name == "" {
-				name = "Custom API"
-				count := 0
-				for _, c := range appCfg.ProviderConnections {
-					if c.Provider == "openai-compatible" {
-						count++
-					}
-				}
-				if count > 0 {
-					name = fmt.Sprintf("Custom API %d", count+1)
-				}
-			}
-			conn.Name = name
-			if conn.RoutePrefix == "" {
-				conn.RoutePrefix = domain.NormalizeRoutePrefix(name)
-			}
-			allConns := append(append([]domain.ProviderConnection(nil), appCfg.ProviderConnections...), conn)
-			domain.EnsureOpenAICompatibleRoutePrefixes(allConns)
-			conn.RoutePrefix = allConns[len(allConns)-1].RoutePrefix
-			appCfg.ProviderConnections = append(appCfg.ProviderConnections, conn)
-		}); err != nil {
-			c.JSON(500, gin.H{"error": "Failed to save: " + err.Error()})
-			return
-		}
-		c.JSON(200, gin.H{"id": conn.ID, "name": conn.Name})
-	}
+	return apiAddConnection(store, "openai-compatible")
 }
 func apiAddGLMConnection(store port.CredentialStore) gin.HandlerFunc {
 	return apiAddConnection(store, "glm")
@@ -192,6 +218,12 @@ func apiImportConnection(store port.CredentialStore) gin.HandlerFunc {
 
 		email := auth.ExtractEmailFromJWT(result.AccessToken)
 
+		cfg, err := store.Load()
+		var settings *domain.Settings
+		if err == nil && cfg != nil {
+			settings = &cfg.Settings
+		}
+
 		providerLabel := "AWS Builder ID"
 		switch result.AuthMethod {
 		case "idc":
@@ -222,7 +254,7 @@ func apiImportConnection(store port.CredentialStore) gin.HandlerFunc {
 			ExpiresIn:       expiresIn,
 			Email:           email,
 			TestStatus:      "active",
-				SupportedModels: domain.GetProviderConfig("kiro").RecommendedModels,
+			SupportedModels: domain.GetDefaultConnectionModels(settings, "kiro"),
 			ProviderSpecificData: map[string]interface{}{
 				"profileArn": result.ProfileArn,
 				"authMethod": result.AuthMethod,
@@ -230,6 +262,7 @@ func apiImportConnection(store port.CredentialStore) gin.HandlerFunc {
 			},
 			CreatedAt: now,
 			UpdatedAt: now,
+			TenantID:  GetTenantID(c),
 		}
 		if result.ClientID != "" {
 			conn.ProviderSpecificData["clientId"] = result.ClientID
@@ -262,6 +295,9 @@ func apiImportConnection(store port.CredentialStore) gin.HandlerFunc {
 
 func apiDetectKiroToken(store port.CredentialStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if !requireAdmin(c) {
+			return
+		}
 		// Search for kiro-auth-token.json in known locations
 		candidates := getKiroTokenPaths()
 

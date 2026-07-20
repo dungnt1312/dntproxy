@@ -9,7 +9,12 @@ type AppConfig struct {
 	Settings            Settings             `json:"settings"`
 	ModelRegistry       *ModelRegistry       `json:"modelRegistry,omitempty"`
 	Profiles            []Profile            `json:"profiles,omitempty"`
+	// TenantID supports multi-tenancy (SaaS). Empty string = legacy single-tenant mode.
+	TenantID string `json:"tenantId,omitempty"`
+	// Tenants is the registry of customer tenants (admin-managed).
+	Tenants []Tenant `json:"tenants,omitempty"`
 }
+
 
 // CompressionSettings controls request body compression middleware.
 type CompressionSettings struct {
@@ -56,11 +61,17 @@ type Settings struct {
 	LogBodies bool `json:"logBodies"` // persist request/response bodies in SQLite (default: false)
 	// Telegram bot settings
 	Telegram TelegramSettings `json:"telegram,omitempty"`
-	// Migration flags
+		// Migration flags
 		DashboardAccessMigrated bool `json:"dashboardAccessMigrated,omitempty"`
+		// AdminKeyBootstrapped records that a default admin key was auto-created
+		// on first launch. Prevents re-creating one on subsequent loads.
+		AdminKeyBootstrapped bool `json:"adminKeyBootstrapped,omitempty"`
 		// Disable image generation endpoints (default: false)
 		DisableImageGeneration bool `json:"disableImageGeneration,omitempty"`
-}
+		// DefaultModels overrides the built-in RecommendedModels when creating connections.
+		// Keyed by provider ID (e.g. "xai", "openai"), value is the model list to use.
+		DefaultModels map[string][]string `json:"defaultModels,omitempty"`
+	}
 
 // APIKey represents a generated API key.
 type APIKey struct {
@@ -71,8 +82,10 @@ type APIKey struct {
 	DashboardAccess      bool     `json:"dashboardAccess"` // true = can access /api/* dashboard
 	CreatedAt            string   `json:"createdAt,omitempty"`
 	AllowedConnectionIDs []string `json:"allowedConnectionIds,omitempty"` // nil/empty = unrestricted
-	AllowedModels        []string `json:"allowedModels,omitempty"`        // nil/empty = unrestricted
-}
+		AllowedModels        []string `json:"allowedModels,omitempty"`        // nil/empty = unrestricted
+		TenantID             string   `json:"tenantId,omitempty"`             // for multi-tenancy (SaaS). Empty = legacy single-tenant.
+	}
+
 
 // DefaultConfig returns a new AppConfig with sensible defaults.
 func DefaultConfig() AppConfig {
@@ -81,6 +94,7 @@ func DefaultConfig() AppConfig {
 		Combos:              []Combo{},
 		ModelAliases:        AliasMap{},
 		APIKeys:             []APIKey{},
+		Tenants:             []Tenant{},
 		Settings: Settings{
 			ComboStrategy:      "fallback",
 			ConnectionStrategy: "weighted-random",

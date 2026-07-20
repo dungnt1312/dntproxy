@@ -12,6 +12,11 @@ import (
 var validPeriods = map[string]bool{"24h": true, "7d": true, "30d": true, "60d": true}
 
 func apiGetUsageStats(c *gin.Context) {
+	// Analytics are global today (log store has no tenant filter on these queries).
+	// Restrict to admin until tenant-scoped aggregates exist.
+	if !requireAdmin(c) {
+		return
+	}
 	period := c.DefaultQuery("period", "7d")
 	if !validPeriods[period] {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid period. Use: 24h, 7d, 30d, 60d"})
@@ -29,6 +34,9 @@ func apiGetUsageStats(c *gin.Context) {
 }
 
 func apiGetUsageChart(c *gin.Context) {
+	if !requireAdmin(c) {
+		return
+	}
 	period := c.DefaultQuery("period", "7d")
 	if !validPeriods[period] {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid period. Use: 24h, 7d, 30d, 60d"})
@@ -46,6 +54,9 @@ func apiGetUsageChart(c *gin.Context) {
 }
 
 func apiGetRequestDetails(c *gin.Context) {
+	if !requireAdmin(c) {
+		return
+	}
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "20"))
 	provider := c.Query("provider")

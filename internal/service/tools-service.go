@@ -161,14 +161,13 @@ func (s *ToolsService) getProxyEndpoint() (string, string, error) {
 		baseURL = fmt.Sprintf("http://localhost:%d", port)
 	}
 
-	// Get first active API key if auth is required
+	// Proxy auth is always enforced by middleware — always inject an active key
+	// when available so installed tools can call /v1 without manual setup.
 	var apiKey string
-	if cfg.Settings.RequireAPIKey && len(cfg.APIKeys) > 0 {
-		for _, k := range cfg.APIKeys {
-			if k.IsActive {
-				apiKey = k.Key
-				break
-			}
+	for _, k := range cfg.APIKeys {
+		if k.IsActive {
+			apiKey = k.Key
+			break
 		}
 	}
 

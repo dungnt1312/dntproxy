@@ -27,6 +27,12 @@ func apiGetLogByID(c *gin.Context) {
 		c.JSON(404, gin.H{"error": "Log entry not found"})
 		return
 	}
+	// Prevent tenants from reading another tenant's log entries by ID.
+	tenantID := GetTenantID(c)
+	if !domain.IsLegacyTenant(tenantID) && !domain.SameTenant(entry.TenantID, tenantID) {
+		c.JSON(404, gin.H{"error": "Log entry not found"})
+		return
+	}
 	c.JSON(200, entry)
 }
 
@@ -40,7 +46,7 @@ func apiGetLogSummary(c *gin.Context) {
 }
 
 func apiGetLogDaily(c *gin.Context) {
-	query := domain.LogQuery{Range: c.DefaultQuery("range", "14d")}
+	query := domain.LogQuery{Range: c.DefaultQuery("range", "14d"), TenantID: GetTenantID(c)}
 	stats, err := logger.Get().DailyStats(query)
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
@@ -91,6 +97,7 @@ func apiLogStream(c *gin.Context) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
+	tenantID := GetTenantID(c)
 	clientGone := c.Request.Context().Done()
 	for {
 		select {
@@ -107,7 +114,10 @@ func apiLogStream(c *gin.Context) {
 			if query.Level != "" && query.Level != "all" && entry.Level != query.Level {
 				continue
 			}
-			// (We could do search and range filtering, but for deltas this is usually fine)
+			// Tenant isolation: non-admin tenants only receive their own log deltas.
+			if !domain.IsLegacyTenant(tenantID) && !domain.SameTenant(entry.TenantID, tenantID) {
+				continue
+			}
 
 			data, _ := json.Marshal(map[string]interface{}{"type": "delta", "log": entry})
 			if _, err := c.Writer.Write([]byte("data: " + string(data) + "\n\n")); err != nil {
@@ -122,6 +132,9 @@ func apiLogStream(c *gin.Context) {
 }
 
 func apiClearLogs(c *gin.Context) {
+	if !requireAdmin(c) {
+		return
+	}
 	logger.Get().Clear()
 	log.Printf("[LOG] Logs cleared by admin")
 	c.JSON(200, gin.H{"ok": true})
@@ -136,10 +149,14 @@ func parseLogQuery(c *gin.Context) domain.LogQuery {
 		Search:       c.Query("q"),
 		Range:        c.DefaultQuery("range", "24h"),
 		Limit:        limit,
+		TenantID:     GetTenantID(c),
 	}
 }
 
 func apiCreatePrice(c *gin.Context) {
+	if !requireAdmin(c) {
+		return
+	}
 	var price domain.ModelPrice
 	if err := c.ShouldBindJSON(&price); err != nil {
 		c.JSON(400, gin.H{"error": err.Error()})
@@ -155,6 +172,9 @@ func apiCreatePrice(c *gin.Context) {
 }
 
 func apiUpdatePrice(c *gin.Context) {
+	if !requireAdmin(c) {
+		return
+	}
 	id := c.Param("id")
 	var price domain.ModelPrice
 	if err := c.ShouldBindJSON(&price); err != nil {
@@ -172,6 +192,9 @@ func apiUpdatePrice(c *gin.Context) {
 }
 
 func apiDeletePrice(c *gin.Context) {
+	if !requireAdmin(c) {
+		return
+	}
 	id := c.Param("id")
 	if err := logger.Get().DeletePrice(id); err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})

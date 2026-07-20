@@ -68,6 +68,9 @@ type RequestLog struct {
 
 	// Metadata
 	Compression *domain.CompressionLogMetadata
+
+	// Tenant (multi-tenancy SaaS). Empty = legacy single-tenant.
+	TenantID string
 }
 
 // NewRequestLog creates a new request log with a unique ID.
@@ -80,6 +83,13 @@ func NewRequestLog(requestID string) *RequestLog {
 		StartTime: time.Now(),
 		Currency:  "USD",
 	}
+}
+
+// NewRequestLogForTenant creates a request log scoped to a tenant.
+func NewRequestLogForTenant(requestID, tenantID string) *RequestLog {
+	rl := NewRequestLog(requestID)
+	rl.TenantID = tenantID
+	return rl
 }
 
 // Begin records the incoming client request.
@@ -225,6 +235,7 @@ func (r *RequestLog) emitStructuredLogs() {
 		RequestBody:    r.RequestBody,
 		ResponseBody:   r.ResponseBody,
 		MetadataJSON:   r.buildMetadataJSON(),
+		TenantID:       r.TenantID,
 	}
 
 	if r.ResolvedProvider == "" {

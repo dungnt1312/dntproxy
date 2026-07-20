@@ -22,6 +22,8 @@ import {
   UserCircle,
   BarChart2,
   Wrench,
+  Building2,
+  GitBranch,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 
@@ -29,13 +31,15 @@ import { Button } from "@/components/ui/button";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/stores/app-store";
-import { getStoredApiKey, onUnauthorized } from "@/lib/go-api";
+import { getStoredApiKey, clearStoredApiKey, onUnauthorized, goApi } from "@/lib/go-api";
 import { Sidebar } from "@/components/layout/sidebar";
 import { MobileMenu } from "@/components/layout/mobile-menu";
+import { TenantBadge } from "@/components/layout/tenant-badge";
 
 import DashboardScreen from "@/components/screens/dashboard-screen";
 import ConnectionsScreen from "@/components/screens/connections-screen";
 import ModelsScreen from "@/components/screens/models-screen";
+import CombosScreen from "@/components/screens/combos-screen";
 import PlaygroundScreen from "@/components/screens/playground-screen";
 import LogsScreen from "@/components/screens/logs-screen";
 import SettingsScreen from "@/components/screens/settings-screen";
@@ -47,6 +51,7 @@ import ProfilesScreen from "@/components/screens/profiles-screen";
 import ToolsScreen from "@/components/screens/tools-screen";
 import AddConnectionPage from "@/components/pages/add-connection-page";
 import LoginScreen from "@/components/screens/login-screen";
+import TenantsScreen from "@/components/screens/tenants-screen";
 
 interface NavItem {
   path: string;
@@ -73,8 +78,15 @@ const navItems: NavItem[] = [
     path: "/models",
     label: "Model Registry",
     icon: Boxes,
-    group: "Management",
+    group: "Routing",
   },
+  {
+    path: "/combos",
+    label: "Combos",
+    icon: GitBranch,
+    group: "Routing",
+  },
+  // Admin-only: registered dynamically below via adminNavItems
   // { path: "/profiles", label: "Profiles", icon: UserCircle, group: "Management" },
   // { path: "/tools", label: "AI Tools", icon: Wrench, group: "Management" },
   { path: "/api-keys", label: "API Keys", icon: Key, group: "Security" },
@@ -90,6 +102,12 @@ const navItems: NavItem[] = [
   },
 ];
 
+// Admin-only navigation item. Appended to the Management group only when the
+// current session is an admin (global/legacy key).
+const adminNavItems: NavItem[] = [
+  { path: "/tenants", label: "Tenants", icon: Building2, group: "Management" },
+];
+
 const emptySubscribe = () => () => {};
 
 function useIsMounted() {
@@ -101,7 +119,7 @@ function useIsMounted() {
 }
 
 export default function App() {
-  const { sidebarOpen, toggleSidebar } = useAppStore();
+  const { sidebarOpen, toggleSidebar, session, setSession, clearSession } = useAppStore();
   const { theme, setTheme } = useTheme();
   const mounted = useIsMounted();
   const isMobile = useIsMobile();
@@ -109,38 +127,67 @@ export default function App() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Auth gate: check if requireApiKey is enabled
-  const [authRequired, setAuthRequired] = useState<boolean | null>(null);
+  // Dashboard auth is always required (matches BE dashboardKeyMiddleware).
+  const [authReady, setAuthReady] = useState(false);
   const [authenticated, setAuthenticated] = useState(false);
 
   const showLogin = useCallback(() => {
     setAuthenticated(false);
-  }, []);
+    clearSession();
+  }, [clearSession]);
+
+  const handleLogout = useCallback(() => {
+    clearStoredApiKey();
+    clearSession();
+    setAuthenticated(false);
+  }, [clearSession]);
 
   useEffect(() => {
     onUnauthorized(showLogin);
   }, [showLogin]);
 
+  // On mount: if a key is stored, re-resolve session from the backend so a
+  // page reload preserves multi-tenancy context. Fail closed on errors.
   useEffect(() => {
-    fetch((import.meta.env.VITE_GO_API_URL || "/api") + "/settings")
-      .then((r) => r.json())
-      .then((s) => {
-        const required = Boolean(s.requireApiKey);
-        setAuthRequired(required);
-        if (!required) {
-          setAuthenticated(true);
-        } else if (getStoredApiKey()) {
-          setAuthenticated(true);
+    let cancelled = false;
+    (async () => {
+      try {
+        const stored = getStoredApiKey();
+        if (!stored) {
+          if (!cancelled) {
+            setAuthenticated(false);
+            setAuthReady(true);
+          }
+          return;
         }
-      })
-      .catch(() => {
-        setAuthRequired(false);
-        setAuthenticated(true);
-      });
-  }, []);
+        const sess = await goApi.getSession();
+        if (cancelled) return;
+        if (sess.authenticated) {
+          setAuthenticated(true);
+          setSession({
+            tenantId: sess.tenantId ?? "",
+            isAdmin: Boolean(sess.isAdmin),
+            dashboardAccess: Boolean(sess.dashboardAccess),
+            keyId: sess.keyId,
+            keyName: sess.keyName,
+          });
+        } else {
+          clearStoredApiKey();
+          setAuthenticated(false);
+        }
+      } catch {
+        // Fail closed: network/server error during bootstrap → login
+        if (!cancelled) setAuthenticated(false);
+      } finally {
+        if (!cancelled) setAuthReady(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [setSession]);
 
-  // Still loading settings
-  if (authRequired === null) {
+  if (!authReady) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="animate-pulse text-muted-foreground text-sm">Loading...</div>
@@ -148,8 +195,7 @@ export default function App() {
     );
   }
 
-  // Need login
-  if (authRequired && !authenticated) {
+  if (!authenticated) {
     return <LoginScreen onSuccess={() => setAuthenticated(true)} />;
   }
 
@@ -159,7 +205,13 @@ export default function App() {
       : location.pathname.startsWith(item.path),
   );
 
-  const groupedItems = navItems.reduce<Record<string, NavItem[]>>(
+  // Compose the nav list: base items + admin-only items when the session is
+  // an admin (global/legacy key). Tenant users never see the Tenants nav item.
+  const effectiveNavItems = session?.isAdmin
+    ? [...navItems, ...adminNavItems]
+    : navItems;
+
+  const groupedItems = effectiveNavItems.reduce<Record<string, NavItem[]>>(
     (acc, item) => {
       if (!acc[item.group]) acc[item.group] = [];
       acc[item.group].push(item);
@@ -190,6 +242,8 @@ export default function App() {
         theme={theme}
         onToggleTheme={() => setTheme(theme === "dark" ? "light" : "dark")}
         mounted={mounted}
+        session={session}
+        onLogout={handleLogout}
       />
 
       {/* Mobile Sheet */}
@@ -199,6 +253,7 @@ export default function App() {
         groupedItems={groupedItems}
         isActive={isActive}
         onNavigate={handlePageSelect}
+        onLogout={handleLogout}
       />
 
       {/* Main content */}
@@ -221,6 +276,12 @@ export default function App() {
             <p className="truncate text-sm font-semibold">
               {currentNavItem?.label ?? "Dntproxy"}
             </p>
+            {session && (
+              <TenantBadge
+                tenantId={session.tenantId}
+                isAdmin={session.isAdmin}
+              />
+            )}
           </div>
           <Button
             variant="ghost"
@@ -238,20 +299,22 @@ export default function App() {
 
         <div className="w-full p-4 md:p-6">
           <Routes>
-            <Route path="/" element={<DashboardScreen />} />
-            <Route path="/connections" element={<ConnectionsScreen />} />
-            <Route path="/connections/add" element={<AddConnectionPage />} />
-            <Route path="/models" element={<ModelsScreen />} />
-            <Route path="/profiles" element={<ProfilesScreen />} />
-            <Route path="/tools" element={<ToolsScreen />} />
-            <Route path="/playground" element={<PlaygroundScreen />} />
-            <Route path="/usage" element={<UsageScreen />} />
-            <Route path="/logs" element={<LogsScreen />} />
-            <Route path="/settings" element={<SettingsScreen />} />
-            <Route path="/api-keys" element={<ApiKeysScreen />} />
-            <Route path="/tunnel" element={<TunnelScreen />} />
-            <Route path="/backup" element={<BackupScreen />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
+	            <Route path="/" element={<DashboardScreen />} />
+	            <Route path="/connections" element={<ConnectionsScreen />} />
+	            <Route path="/connections/add" element={<AddConnectionPage />} />
+	            <Route path="/models" element={<ModelsScreen />} />
+	            <Route path="/combos" element={<CombosScreen />} />
+	            <Route path="/profiles" element={<ProfilesScreen />} />
+	            <Route path="/tools" element={<ToolsScreen />} />
+	            <Route path="/playground" element={<PlaygroundScreen />} />
+	            <Route path="/usage" element={<UsageScreen />} />
+	            <Route path="/logs" element={<LogsScreen />} />
+	            <Route path="/settings" element={<SettingsScreen />} />
+	            <Route path="/api-keys" element={<ApiKeysScreen />} />
+	            <Route path="/tenants" element={<TenantsScreen />} />
+	            <Route path="/tunnel" element={<TunnelScreen />} />
+	            <Route path="/backup" element={<BackupScreen />} />
+	            <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </div>
       </main>

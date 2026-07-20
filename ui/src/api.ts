@@ -1,12 +1,21 @@
 import type { LogFilters } from './types/logs';
-import { getStoredApiKey, onUnauthorized } from './lib/go-api';
+import { getStoredApiKey, notifyUnauthorized, onUnauthorized } from './lib/go-api';
 
 const BASE = '/api';
 
-let on401Cb: (() => void) | null = null;
+/** @deprecated Use onUnauthorized from go-api — kept as alias for older imports. */
+export const onLegacyUnauthorized = onUnauthorized;
 
-export function onLegacyUnauthorized(cb: () => void) {
-  on401Cb = cb;
+function isAuthSessionFailure(status: number, bodyText: string): boolean {
+  if (status === 401) return true;
+  if (status !== 403) return false;
+  const lower = bodyText.toLowerCase();
+  return (
+    lower.includes('dashboard access') ||
+    lower.includes('tenant is disabled') ||
+    lower.includes('missing api key') ||
+    lower.includes('invalid api key')
+  );
 }
 
 async function request(path: string, options?: RequestInit) {
@@ -23,13 +32,23 @@ async function request(path: string, options?: RequestInit) {
     ...options,
     headers,
   });
-  if (res.status === 401) {
-    on401Cb?.();
-    throw new Error('Unauthorized');
+
+  if (res.status === 401 || res.status === 403) {
+    const bodyText = await res.clone().text().catch(() => '');
+    if (isAuthSessionFailure(res.status, bodyText)) {
+      notifyUnauthorized();
+      throw new Error('Unauthorized');
+    }
   }
+
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error || err.message || res.statusText);
+    const message =
+      (typeof err?.error === 'string' && err.error) ||
+      err?.error?.message ||
+      err?.message ||
+      res.statusText;
+    throw new Error(message);
   }
   return res.json();
 }
@@ -43,9 +62,16 @@ function logQuery(filters: Partial<LogFilters> = {}) {
   return query ? `?${query}` : ''
 }
 
+import type { CreateConnectionPayload } from './types/provider-metadata';
+
 export const api = {
+  // Provider catalog (dynamic add-connection UI)
+  getProviders: () => request('/providers'),
+
   // Connections
   getConnections: () => request('/connections'),
+  createConnection: (data: CreateConnectionPayload) =>
+    request('/connections', { method: 'POST', body: JSON.stringify(data) }),
   importConnection: (data: { refreshToken: string; clientId?: string; clientSecret?: string; region?: string; authMethod?: string }) =>
     request('/connections/import', { method: 'POST', body: JSON.stringify(data) }),
   addOpenAIConnection: (data: { name?: string; apiKey: string; supportedModels?: string[] }) =>
@@ -62,6 +88,8 @@ export const api = {
     request('/connections/add-anthropic', { method: 'POST', body: JSON.stringify(data) }),
   addGeminiConnection: (data: { name?: string; apiKey: string; baseUrl?: string; supportedModels?: string[] }) =>
     request('/connections/add-gemini', { method: 'POST', body: JSON.stringify(data) }),
+  addClineConnection: (data: { name?: string; apiKey: string; baseUrl?: string; supportedModels?: string[] }) =>
+    request('/connections/add-cline', { method: 'POST', body: JSON.stringify(data) }),
   deleteConnection: (id: string) => request(`/connections/${id}`, { method: 'DELETE' }),
   testConnection: (id: string) => request(`/connections/${id}/test`, { method: 'POST' }),
   updateConnection: (id: string, data: Record<string, unknown>) =>
@@ -96,6 +124,8 @@ export const api = {
   startXAIOAuth: () => request('/auth/xai/start', { method: 'POST' }),
   exchangeXAIOAuth: (sessionId: string, callbackUrl?: string, code?: string, state?: string) =>
     request('/auth/xai/exchange', { method: 'POST', body: JSON.stringify({ sessionId, callbackUrl, code, state }) }),
+  importXAIAuthFile: (data: object) =>
+    request('/auth/xai/import-file', { method: 'POST', body: JSON.stringify({ data }) }),
 
   // Fetch models from provider API
   fetchConnectionModels: (id: string) =>

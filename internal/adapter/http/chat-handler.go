@@ -64,8 +64,13 @@ func chatHandler(chatService port.ChatService, store port.CredentialStore, comp 
 
 		// Extract API key policy from context (set by apiKeyMiddleware)
 		policy := extractAPIKeyPolicy(c)
+		tenantID := GetTenantID(c)
 
-		result := chatService.HandleChat(body, partial.Model, requestID, policy, compressionMetadata(stats))
+		// Build metadata including tenant for downstream propagation
+		meta := compressionMetadata(stats)
+		meta.TenantID = tenantID
+
+		result := chatService.HandleChat(body, partial.Model, requestID, policy, meta)
 
 		if result.Stream != nil {
 			// Only aggregate when client EXPLICITLY sends "stream": false.
@@ -164,7 +169,7 @@ func compressionMetadata(stats compressor.Stats) port.RequestMetadata {
 }
 
 func streamChunks(done <-chan struct{}, r io.Reader) (<-chan []byte, <-chan error) {
-	chunks := make(chan []byte)
+	chunks := make(chan []byte, 1)
 	errs := make(chan error, 1)
 
 	go func() {

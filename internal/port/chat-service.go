@@ -25,6 +25,7 @@ type APIKeyPolicy struct {
 // RequestMetadata carries optional per-request observability data.
 type RequestMetadata struct {
 	Compression *domain.CompressionLogMetadata
+	TenantID    string // for multi-tenancy (SaaS). Empty = legacy single-tenant.
 }
 
 // ChatService defines the chat orchestration contract.

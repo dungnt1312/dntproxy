@@ -18,21 +18,8 @@ import (
 func apiFetchConnectionModels(store port.CredentialStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
-		cfg, err := store.Load()
-		if err != nil {
-			c.JSON(500, gin.H{"error": err.Error()})
-			return
-		}
-
-		var conn *domain.ProviderConnection
-		for i := range cfg.ProviderConnections {
-			if cfg.ProviderConnections[i].ID == id {
-				conn = &cfg.ProviderConnections[i]
-				break
-			}
-		}
-		if conn == nil {
-			c.JSON(404, gin.H{"error": "Connection not found"})
+		conn, ok := requireTenantOwnsConnection(c, store, id)
+		if !ok {
 			return
 		}
 

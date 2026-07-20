@@ -8,7 +8,6 @@ import {
   RefreshCw,
   Settings2,
   RotateCcw,
-  Terminal,
   Zap,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -309,28 +308,6 @@ export default function ToolsScreen() {
                   No supported tools found in the registry.
                 </p>
               )}
-            </div>
-          </CardContent>
-        </Card>
-      </motion.div>
-
-      {/* CLI Usage */}
-      <motion.div variants={itemVariants}>
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Terminal className="w-4 h-4" />
-              CLI Usage
-            </CardTitle>
-            <CardDescription>Manage tool configurations from the command line</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-1 text-sm font-mono bg-muted p-4 rounded-lg">
-              <p><span className="text-muted-foreground">#</span> dntproxy tools list</p>
-              <p><span className="text-muted-foreground">#</span> dntproxy tools configure claude-code</p>
-              <p><span className="text-muted-foreground">#</span> dntproxy tools configure all</p>
-              <p><span className="text-muted-foreground">#</span> dntproxy tools reset claude-code</p>
-              <p><span className="text-muted-foreground">#</span> dntproxy tools status</p>
             </div>
           </CardContent>
         </Card>

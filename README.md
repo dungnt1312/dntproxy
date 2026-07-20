@@ -1,6 +1,6 @@
 # dntproxy
 
-`dntproxy` is a Go-based OpenAI-compatible proxy that routes requests to multiple AI providers (Kiro, OpenAI, GLM, MiniMax, Qwen, Anthropic).
+`dntproxy` is a Go-based OpenAI-compatible proxy that routes chat and image requests to multiple AI providers.
 
 ## Documentation
 - [Project Overview & PDR](docs/project-overview-pdr.md)
@@ -19,7 +19,11 @@
 | **GLM** (Zhipu AI) | API Key | GLM-4.6, GLM-5, GLM-5.1 |
 | **MiniMax** | API Key | MiniMax M2, M2.1, M2.5, M2.7 |
 | **Qwen** (Alibaba) | API Key, OAuth | Qwen Coder, Coder-Plus, Plus, Turbo |
-| **Anthropic** | API Key | Claude models (adapter TODO) |
+| **Anthropic** | API Key | Claude models through the Messages API |
+| **ClinePass** | API Key | Subscription models from multiple providers |
+| **Google Gemini** | API Key | Chat plus native Gemini image generation/editing |
+| **BytePlus ModelArk** | API Key | Seedream image generation and reference editing |
+| **xAI** | OAuth | Grok chat and image models |
 
 ## Quick Start
 
@@ -80,36 +84,15 @@ curl http://127.0.0.1:20199/v1/chat/completions \
 curl http://127.0.0.1:20199/health
 ```
 
-## CLI Helper Commands
-The CLI provides optional helper commands for configuration:
+## CLI (ops only)
+Configuration is managed via the **dashboard UI** and **management API**. The CLI is limited to server ops:
 
 ```bash
-# Add authentication (interactive)
-dntproxy auth add
-
-# List connections
-dntproxy auth list
-
-# Export/Import connections
-dntproxy connection export <connection-id> [file]
-dntproxy connection export-multiple --ids conn1,conn2 [file]
-dntproxy connection import <file> --mode add|replace|merge
-
-# Configure AI tools to use dntproxy
-dntproxy tools list                    # Show supported tools
-dntproxy tools configure claude-code   # Configure Claude Code
-dntproxy tools configure all           # Configure all detected tools
-dntproxy tools status                  # Show configured tools
-dntproxy tools reset claude-code       # Revert to direct access
-
-# Create model combo
-dntproxy combo add my-combo kr/claude-sonnet-4.5 oai/gpt-4o
-
-# Set model alias
-dntproxy alias set sonnet kr/claude-sonnet-4.5
-
-# Start server with custom port
-dntproxy serve --port 8080
+dntproxy                     # Start server (default port 20199)
+dntproxy serve --port 8080   # Start with custom port
+dntproxy version             # Print version
+dntproxy update              # Self-update to latest release
+dntproxy update --force      # Force update even if already on latest
 ```
 
 ## Development
@@ -139,11 +122,13 @@ bun run dev
 ```
 
 ## Features
-- **Multi-Provider Support**: Kiro, OpenAI, GLM, MiniMax, Qwen, Anthropic with extensible architecture.
+- **Multi-Provider Support**: 11 configured providers with separate chat and image execution capabilities.
+- **Image Provider Registry**: OpenAI/OpenAI-compatible, xAI, MiniMax, BytePlus Seedream, and Gemini image adapters behind one capability-driven interface.
+- **OpenAI-Compatible Images**: `/v1/images/generations` and `/v1/images/edits`; discover model-specific edit, mask, reference, format, and size limits with `/v1/models?type=image`.
 - **Multi-Account Fallback**: Exponential backoff with automatic degradation on rate limits.
 - **Combo Strategies**: `fallback` and `round-robin` model rotation across providers.
 - **Request Translation**: OpenAI `/v1/chat/completions` to provider-specific protocols (EventStream, Chat API).
-- **CLI & UI Management**: Full configuration via CLI commands and React web UI.
+- **Dashboard & Management API**: Full configuration via React web UI and `/api/*` endpoints. CLI is ops-only (`serve`, `version`, `update`).
 - **API Key Permissions**: Dashboard can restrict proxy API keys by allowed connections and models.
 - **Cloudflare Tunnel**: One-command public URL exposure with auto-downloaded cloudflared binary.
 - **Structured Logging**: SQLite request logs with 30-day retention, usage tracking, and cost estimation.
@@ -152,7 +137,7 @@ bun run dev
 
 ## Architecture
 - `internal/domain`: core business types.
-- `internal/port`: service interfaces.
+- `internal/port`: service interfaces, including the separate `ImageProvider` and `ImageProviderRegistry` contracts.
 - `internal/service`: orchestration logic.
 - `internal/adapter`: HTTP, auth, provider executors, tunnel, and storage adapters.
 - `internal/logger`: structured logging with ring buffer + SQLite persistence.

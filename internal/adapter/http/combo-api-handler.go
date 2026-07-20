@@ -46,7 +46,8 @@ func apiListCombos(store port.CredentialStore) gin.HandlerFunc {
 			c.JSON(500, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(200, cfg.Combos)
+		tenantID := GetTenantID(c)
+		c.JSON(200, domain.FilterCombosByTenant(cfg.Combos, tenantID))
 	}
 }
 
@@ -72,18 +73,7 @@ func apiCreateCombo(store port.CredentialStore) gin.HandlerFunc {
 			normalizedModels[i] = normalizeModelString(m)
 		}
 
-		cfg, err := store.Load()
-		if err != nil {
-			c.JSON(500, gin.H{"error": err.Error()})
-			return
-		}
-
-		for _, combo := range cfg.Combos {
-			if combo.Name == req.Name {
-				c.JSON(409, gin.H{"error": "Combo already exists: " + req.Name})
-				return
-			}
-		}
+		tenantID := GetTenantID(c)
 
 		now := time.Now().UTC().Format(time.RFC3339)
 		combo := domain.Combo{
@@ -93,11 +83,24 @@ func apiCreateCombo(store port.CredentialStore) gin.HandlerFunc {
 			ConnectionIDs: req.ConnectionIDs,
 			CreatedAt:     now,
 			UpdatedAt:     now,
+			TenantID:      tenantID,
 		}
-		cfg.Combos = append(cfg.Combos, combo)
 
-		if err := store.Save(cfg); err != nil {
+		errConflict := false
+		if err := store.Update(func(cfg *domain.AppConfig) {
+			for _, existing := range cfg.Combos {
+				if existing.Name == req.Name && domain.SameTenant(existing.TenantID, tenantID) {
+					errConflict = true
+					return
+				}
+			}
+			cfg.Combos = append(cfg.Combos, combo)
+		}); err != nil {
 			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+		if errConflict {
+			c.JSON(409, gin.H{"error": "Combo already exists: " + req.Name})
 			return
 		}
 		c.JSON(200, combo)
@@ -119,78 +122,83 @@ func apiUpdateCombo(store port.CredentialStore) gin.HandlerFunc {
 			return
 		}
 
-		cfg, err := store.Load()
-		if err != nil {
+		tenantID := GetTenantID(c)
+
+		var (
+			updated     *domain.Combo
+			notFound    bool
+			emptyModels bool
+		)
+		if err := store.Update(func(cfg *domain.AppConfig) {
+			var combo *domain.Combo
+			for i := range cfg.Combos {
+				if (cfg.Combos[i].ID == id || cfg.Combos[i].Name == id) &&
+					domain.SameTenant(cfg.Combos[i].TenantID, tenantID) {
+					combo = &cfg.Combos[i]
+					break
+				}
+			}
+			if combo == nil {
+				notFound = true
+				return
+			}
+			if req.Name != nil {
+				combo.Name = *req.Name
+			}
+			if req.SetModels {
+				if len(req.Models) == 0 {
+					emptyModels = true
+					return
+				}
+				normalizedModels := make([]string, len(req.Models))
+				for i, m := range req.Models {
+					normalizedModels[i] = normalizeModelString(m)
+				}
+				combo.Models = normalizedModels
+			}
+			if req.SetConnections {
+				combo.ConnectionIDs = req.ConnectionIDs
+			}
+			combo.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+			cp := *combo
+			updated = &cp
+		}); err != nil {
 			c.JSON(500, gin.H{"error": err.Error()})
 			return
 		}
-
-		var combo *domain.Combo
-		for i := range cfg.Combos {
-			if cfg.Combos[i].ID == id || cfg.Combos[i].Name == id {
-				combo = &cfg.Combos[i]
-				break
-			}
-		}
-		if combo == nil {
+		if notFound {
 			c.JSON(404, gin.H{"error": "Combo not found"})
 			return
 		}
-
-		if req.Name != nil {
-			combo.Name = *req.Name
-		}
-		if req.SetModels {
-			if len(req.Models) == 0 {
-				c.JSON(400, gin.H{"error": "combo models cannot be empty"})
-				return
-			}
-			// Normalize all model strings to prevent duplicate prefixes
-			normalizedModels := make([]string, len(req.Models))
-			for i, m := range req.Models {
-				normalizedModels[i] = normalizeModelString(m)
-			}
-			combo.Models = normalizedModels
-		}
-		if req.SetConnections {
-			combo.ConnectionIDs = req.ConnectionIDs
-		}
-		combo.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
-
-		if err := store.Save(cfg); err != nil {
-			c.JSON(500, gin.H{"error": err.Error()})
+		if emptyModels {
+			c.JSON(400, gin.H{"error": "combo models cannot be empty"})
 			return
 		}
-		c.JSON(200, combo)
+		c.JSON(200, updated)
 	}
 }
 
 func apiDeleteCombo(store port.CredentialStore, onComboDelete func(string)) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
-		cfg, err := store.Load()
-		if err != nil {
-			c.JSON(500, gin.H{"error": err.Error()})
-			return
-		}
-
+		tenantID := GetTenantID(c)
 		found := false
 		deletedName := ""
-		for i, combo := range cfg.Combos {
-			if combo.ID == id || combo.Name == id {
-				deletedName = combo.Name
-				cfg.Combos = append(cfg.Combos[:i], cfg.Combos[i+1:]...)
-				found = true
-				break
+		if err := store.Update(func(cfg *domain.AppConfig) {
+			for i, combo := range cfg.Combos {
+				if (combo.ID == id || combo.Name == id) && domain.SameTenant(combo.TenantID, tenantID) {
+					deletedName = combo.Name
+					cfg.Combos = append(cfg.Combos[:i], cfg.Combos[i+1:]...)
+					found = true
+					break
+				}
 			}
+		}); err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
 		}
 		if !found {
 			c.JSON(404, gin.H{"error": "Combo not found"})
-			return
-		}
-
-		if err := store.Save(cfg); err != nil {
-			c.JSON(500, gin.H{"error": err.Error()})
 			return
 		}
 

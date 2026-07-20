@@ -5,6 +5,7 @@ import { ConnectionUsageCharts } from './connection-usage-charts'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Activity, AlertTriangle, BarChart3, CheckCircle2 } from 'lucide-react'
+import { formatTokens, formatRelativeTime } from '@/components/screens/dashboard/helpers'
 import type { LogConnectionSummary } from '@/types/logs'
 
 interface RecentError {
@@ -20,24 +21,6 @@ interface DashboardTabbedViewProps {
   connSummaries: LogConnectionSummary[]
   recentErrors: RecentError[]
   loading: boolean
-}
-
-function formatRelativeTime(dateStr: string | null) {
-  if (!dateStr) return 'Never'
-  const diffMs = Date.now() - new Date(dateStr).getTime()
-  const sec = Math.floor(diffMs / 1000)
-  if (sec < 60) return `${sec}s ago`
-  const min = Math.floor(sec / 60)
-  if (min < 60) return `${min}m ago`
-  const hr = Math.floor(min / 60)
-  if (hr < 24) return `${hr}h ago`
-  return `${Math.floor(hr / 24)}d ago`
-}
-
-function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
-  return String(n)
 }
 
 function ActivityTab({ summaries, loading }: { summaries: LogConnectionSummary[]; loading: boolean }) {

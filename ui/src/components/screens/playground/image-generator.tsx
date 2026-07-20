@@ -17,6 +17,19 @@ type ImageModel = {
   displayName: string;
   provider: string;
   capabilities: string[];
+  imageCapabilities?: {
+    generate: boolean;
+    edit: boolean;
+    multipart?: boolean;
+    mask?: boolean;
+    multi_reference?: boolean;
+    streaming?: boolean;
+    max_references?: number;
+    max_input_bytes?: number;
+    max_total_input_bytes?: number;
+    input_formats?: string[];
+    response_formats?: string[];
+  } | null;
 };
 
 type ImageResult = {
@@ -36,12 +49,24 @@ const FORMATS: Array<{ value: "url" | "b64_json"; label: string }> = [
   { value: "url", label: "URL" },
   { value: "b64_json", label: "Base64" },
 ];
-
-interface ImageGeneratorProps {
-  // No longer depends on parent models - loads its own
+function decodedDataURLBytes(dataUrl: string): number {
+  const comma = dataUrl.indexOf(",");
+  if (comma < 0) return 0;
+  const encodedLength = dataUrl.length - comma - 1;
+  const padding = dataUrl.endsWith("==") ? 2 : dataUrl.endsWith("=") ? 1 : 0;
+  return Math.floor((encodedLength * 3) / 4) - padding;
 }
 
-export function ImageGenerator({}: ImageGeneratorProps) {
+function normalizedInputFormats(formats: string[]): string[] {
+  return formats.map((format) => {
+    const value = format.toLowerCase();
+    if (value.startsWith("image/")) return value;
+    if (value === "jpg") return "image/jpeg";
+    return `image/${value}`;
+  });
+}
+
+export function ImageGenerator() {
   const [mode, setMode] = useState<"generate" | "edit">("generate");
   const [prompt, setPrompt] = useState("");
   const [model, setModel] = useState("");
@@ -52,6 +77,7 @@ export function ImageGenerator({}: ImageGeneratorProps) {
   const [generating, setGenerating] = useState(false);
   const [results, setResults] = useState<ImageResult[]>([]);
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
+  const [errorMessage, setErrorMessage] = useState("");
 
   // Models loaded from /v1/models?type=image
   const [imageModels, setImageModels] = useState<ImageModel[]>([]);
@@ -65,12 +91,15 @@ export function ImageGenerator({}: ImageGeneratorProps) {
 
   // Load image models independently
   useEffect(() => {
-    setLoadingModels(true);
     goApi.getImageModels()
       .then((models: ImageModel[]) => {
         setImageModels(models);
-        if (models.length > 0 && !model) {
-          setModel(models[0].id);
+        if (models.length > 0) {
+          setModel((current) => current || models[0].id);
+          const formats = models[0].imageCapabilities?.response_formats;
+          if (formats?.length) {
+            setResponseFormat((current) => formats.includes(current) ? current : formats[0] as "url" | "b64_json");
+          }
         }
       })
       .catch(() => toast.error("Failed to load image models"))
@@ -80,36 +109,99 @@ export function ImageGenerator({}: ImageGeneratorProps) {
   const selectedModelDetails = useMemo(() => {
     return imageModels.find((m) => m.id === model);
   }, [imageModels, model]);
+  const imageCapabilities = selectedModelDetails?.imageCapabilities;
+  const canEdit = imageCapabilities?.edit ?? selectedModelDetails?.capabilities.includes("image-edit") ?? false;
+  const supportsMask = imageCapabilities?.mask ?? false;
+  const maxReferences = Math.max(1, imageCapabilities?.max_references || 1);
+  const maxReferenceBytes = imageCapabilities?.max_input_bytes || 10 * 1024 * 1024;
+  const maxTotalReferenceBytes = imageCapabilities?.max_total_input_bytes || maxReferenceBytes * maxReferences;
+  const acceptedFormats = normalizedInputFormats(imageCapabilities?.input_formats || ["image/png", "image/jpeg", "image/webp"]);
+  const acceptedFormatsLabel = acceptedFormats.map((format) => format.replace("image/", "").toUpperCase()).join(", ");
+  const responseFormats = FORMATS.filter((format) => !imageCapabilities?.response_formats?.length || imageCapabilities.response_formats.includes(format.value));
+  const effectiveResponseFormat = responseFormats.some((format) => format.value === responseFormat)
+    ? responseFormat
+    : responseFormats[0]?.value || responseFormat;
+  const activeMode = canEdit ? mode : "generate";
+
+  const handleModelChange = (nextModel: string) => {
+    const next = imageModels.find((entry) => entry.id === nextModel);
+    const nextCapabilities = next?.imageCapabilities;
+    const nextCanEdit = nextCapabilities?.edit ?? next?.capabilities.includes("image-edit") ?? false;
+    const nextMaxReferences = Math.max(1, nextCapabilities?.max_references || 1);
+    const nextMaxBytes = nextCapabilities?.max_input_bytes || 10 * 1024 * 1024;
+    const nextMaxTotalBytes = nextCapabilities?.max_total_input_bytes || nextMaxBytes * nextMaxReferences;
+    const nextFormats = normalizedInputFormats(nextCapabilities?.input_formats || ["image/png", "image/jpeg", "image/webp"]);
+    let runningBytes = 0;
+    const compatibleImages = editImages.filter((image) => {
+      const header = image.dataUrl.slice(5, image.dataUrl.indexOf(";")).toLowerCase();
+      const bytes = decodedDataURLBytes(image.dataUrl);
+      if (!nextFormats.includes(header) || bytes > nextMaxBytes || runningBytes + bytes > nextMaxTotalBytes) return false;
+      runningBytes += bytes;
+      return true;
+    }).slice(0, nextMaxReferences);
+    setModel(nextModel);
+    if (!nextCanEdit) setMode("generate");
+    if (!nextCapabilities?.mask) setEditMask(null);
+    setEditImages(compatibleImages);
+    if (compatibleImages.length !== editImages.length) {
+      toast.info("Some reference images were removed because the selected model does not support their format or size");
+    }
+    const formats = nextCapabilities?.response_formats;
+    if (formats?.length && !formats.includes(responseFormat)) {
+      setResponseFormat(formats[0] as "url" | "b64_json");
+    }
+  };
 
   const handleGenerate = async () => {
     if (!model || !prompt.trim()) {
-      toast.error("Please select a model and enter a prompt");
+      const message = "Please select a model and enter a prompt";
+      setErrorMessage(message);
+      toast.error(message);
       return;
     }
 
-    if (mode === "edit" && editImages.length === 0) {
-      toast.error("Please upload at least one image to edit");
+    if (activeMode === "edit" && editImages.length === 0) {
+      const message = "Please upload at least one image to edit";
+      setErrorMessage(message);
+      toast.error(message);
+      return;
+    }
+    if (activeMode === "edit" && editImages.length > maxReferences) {
+      const message = `This model supports at most ${maxReferences} reference image${maxReferences > 1 ? "s" : ""}`;
+      setErrorMessage(message);
+      toast.error(message);
+      return;
+    }
+    const totalReferenceBytes = editImages.reduce((total, image) => total + decodedDataURLBytes(image.dataUrl), 0)
+      + (supportsMask && editMask ? decodedDataURLBytes(editMask.dataUrl) : 0);
+    if (activeMode === "edit" && totalReferenceBytes > maxTotalReferenceBytes) {
+      const message = `Reference images exceed the ${Math.floor(maxTotalReferenceBytes / 1024 / 1024)}MB total limit`;
+      setErrorMessage(message);
+      toast.error(message);
       return;
     }
 
     setGenerating(true);
     setResults([]);
+    setErrorMessage("");
 
     try {
-      if (mode === "generate") {
+      if (activeMode === "generate") {
         const resp: ImageGenResponse = await goApi.generateImage({
           model,
           prompt,
           n,
           size,
           quality,
-          response_format: responseFormat,
+          response_format: effectiveResponseFormat,
         });
         if (resp.data?.length > 0) {
           setResults(resp.data);
           toast.success(`Generated ${resp.data.length} image(s)`);
         } else {
-          toast.error("No images returned");
+          const message = "No images returned";
+          setErrorMessage(message);
+          toast.error(message);
         }
       } else {
         // Edit mode - use JSON body with image URLs
@@ -117,20 +209,24 @@ export function ImageGenerator({}: ImageGeneratorProps) {
           model,
           prompt,
           images: editImages.map((img) => ({ image_url: img.dataUrl })),
-          mask: editMask?.dataUrl,
+          mask: supportsMask ? editMask?.dataUrl : undefined,
           n,
           size,
-          response_format: responseFormat,
+          response_format: effectiveResponseFormat,
         });
         if (resp.data?.length > 0) {
           setResults(resp.data);
           toast.success(`Edited ${resp.data.length} image(s)`);
         } else {
-          toast.error("No images returned");
+          const message = "No images returned";
+          setErrorMessage(message);
+          toast.error(message);
         }
       }
-    } catch (err: any) {
-      toast.error(err?.message || "Image generation failed");
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Image generation failed";
+      setErrorMessage(message);
+      toast.error(message);
     } finally {
       setGenerating(false);
     }
@@ -174,14 +270,24 @@ export function ImageGenerator({}: ImageGeneratorProps) {
   const handleFilePick = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files) return;
-    for (const file of Array.from(files)) {
-      if (file.size > 10 * 1024 * 1024) {
-        toast.error(`File ${file.name} exceeds 10MB limit`);
+    const remaining = Math.max(0, maxReferences - editImages.length);
+    const selectedFiles = Array.from(files).slice(0, remaining);
+    if (files.length > remaining) {
+      toast.error(`This model supports at most ${maxReferences} reference image${maxReferences > 1 ? "s" : ""}`);
+    }
+    for (const file of selectedFiles) {
+      if (!acceptedFormats.includes(file.type.toLowerCase())) {
+        toast.error(`File ${file.name} must be one of: ${acceptedFormatsLabel}`);
+        continue;
+      }
+      if (file.size > maxReferenceBytes) {
+        toast.error(`File ${file.name} exceeds the ${Math.floor(maxReferenceBytes / 1024 / 1024)}MB limit`);
         continue;
       }
       const reader = new FileReader();
       reader.onload = () => {
-        setEditImages((prev) => [...prev, { dataUrl: reader.result as string, name: file.name }]);
+        const image = { dataUrl: reader.result as string, name: file.name };
+        setEditImages((prev) => [...prev, image].slice(0, maxReferences));
       };
       reader.readAsDataURL(file);
     }
@@ -190,8 +296,12 @@ export function ImageGenerator({}: ImageGeneratorProps) {
   const handleMaskPick = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 10 * 1024 * 1024) {
-      toast.error("Mask file exceeds 10MB limit");
+    if (!acceptedFormats.includes(file.type.toLowerCase())) {
+      toast.error(`Mask must be one of: ${acceptedFormatsLabel}`);
+      return;
+    }
+    if (file.size > maxReferenceBytes) {
+      toast.error(`Mask file exceeds the ${Math.floor(maxReferenceBytes / 1024 / 1024)}MB limit`);
       return;
     }
     const reader = new FileReader();
@@ -202,16 +312,25 @@ export function ImageGenerator({}: ImageGeneratorProps) {
   };
 
   const handlePaste = (e: React.ClipboardEvent) => {
-    if (mode !== "edit") return;
+    if (activeMode !== "edit") return;
     const items = e.clipboardData?.items;
     if (!items) return;
     for (const item of Array.from(items)) {
       if (item.type.startsWith("image/")) {
         const file = item.getAsFile();
         if (!file) continue;
+        if (!acceptedFormats.includes(file.type.toLowerCase())) {
+          toast.error(`Pasted image must be one of: ${acceptedFormatsLabel}`);
+          continue;
+        }
+        if (file.size > maxReferenceBytes) {
+          toast.error(`Pasted image exceeds the ${Math.floor(maxReferenceBytes / 1024 / 1024)}MB limit`);
+          continue;
+        }
         const reader = new FileReader();
         reader.onload = () => {
-          setEditImages((prev) => [...prev, { dataUrl: reader.result as string, name: "pasted-image.png" }]);
+          const image = { dataUrl: reader.result as string, name: "pasted-image.png" };
+          setEditImages((prev) => [...prev, image].slice(0, maxReferences));
         };
         reader.readAsDataURL(file);
       }
@@ -227,6 +346,7 @@ export function ImageGenerator({}: ImageGeneratorProps) {
     setEditImages([]);
     setEditMask(null);
     setResults([]);
+    setErrorMessage("");
   };
 
   return (
@@ -246,25 +366,45 @@ export function ImageGenerator({}: ImageGeneratorProps) {
               Clear
             </Button>
             <Button onClick={handleGenerate} disabled={generating || !model || !prompt.trim() || (mode === "edit" && editImages.length === 0)} className="gap-1.5">
-              {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : mode === "edit" ? <Wand2 className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
-              {generating ? "Processing..." : mode === "edit" ? "Edit" : "Generate"}
+              {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : activeMode === "edit" ? <Wand2 className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
+              {generating ? "Processing..." : activeMode === "edit" ? "Edit" : "Generate"}
             </Button>
           </div>
         </div>
 
         {/* Mode tabs */}
-        <Tabs value={mode} onValueChange={(v) => { setMode(v as "generate" | "edit"); setResults([]); }}>
+        <Tabs value={activeMode} onValueChange={(v) => { setMode(v as "generate" | "edit"); setResults([]); setErrorMessage(""); }}>
           <TabsList className="h-7 w-fit">
             <TabsTrigger value="generate" className="text-xs gap-1 h-6"><Sparkles className="h-3 w-3" />Generate</TabsTrigger>
-            <TabsTrigger value="edit" className="text-xs gap-1 h-6"><Wand2 className="h-3 w-3" />Edit</TabsTrigger>
+            <TabsTrigger value="edit" disabled={!canEdit} title={!canEdit ? "The selected model supports generation only" : undefined} className="text-xs gap-1 h-6"><Wand2 className="h-3 w-3" />Edit</TabsTrigger>
           </TabsList>
         </Tabs>
+
+        {errorMessage && (
+          <div
+            role="alert"
+            className="flex items-start gap-2 rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+          >
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span className="min-w-0 flex-1 break-words">{errorMessage}</span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6 shrink-0 text-destructive hover:text-destructive"
+              aria-label="Dismiss error"
+              onClick={() => setErrorMessage("")}
+            >
+              <X className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        )}
 
         {/* Controls */}
         <div className="flex flex-wrap gap-3">
           <div className="min-w-[200px]">
             <Label className="text-xs text-muted-foreground mb-1 block">Model</Label>
-            <Select value={model} onValueChange={setModel} disabled={loadingModels || imageModels.length === 0}>
+            <Select value={model} onValueChange={handleModelChange} disabled={loadingModels || imageModels.length === 0}>
               <SelectTrigger className="h-8 text-xs">
                 <SelectValue placeholder={loadingModels ? "Loading..." : "Select model"} />
               </SelectTrigger>
@@ -308,10 +448,10 @@ export function ImageGenerator({}: ImageGeneratorProps) {
 
           <div className="min-w-[100px]">
             <Label className="text-xs text-muted-foreground mb-1 block">Format</Label>
-            <Select value={responseFormat} onValueChange={(v) => setResponseFormat(v as "url" | "b64_json")}>
+            <Select value={effectiveResponseFormat} onValueChange={(v) => setResponseFormat(v as "url" | "b64_json")}>
               <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
               <SelectContent>
-                {FORMATS.map((f) => (<SelectItem key={f.value} value={f.value} className="text-xs">{f.label}</SelectItem>))}
+                {responseFormats.map((f) => (<SelectItem key={f.value} value={f.value} className="text-xs">{f.label}</SelectItem>))}
               </SelectContent>
             </Select>
           </div>
@@ -321,31 +461,35 @@ export function ImageGenerator({}: ImageGeneratorProps) {
       {/* Prompt + Edit upload area */}
       <div className="border-b bg-background/95 px-4 py-3 md:px-6 space-y-3">
         {/* Edit: image upload */}
-        {mode === "edit" && (
+        {activeMode === "edit" && (
           <div className="space-y-2">
             <Label className="text-xs text-muted-foreground">Upload Images to Edit</Label>
             <div className="flex flex-wrap gap-2">
               {editImages.map((img, idx) => (
                 <div key={idx} className="relative group h-20 w-20 rounded-md border overflow-hidden bg-muted shrink-0">
                   <img src={img.dataUrl} alt={img.name} className="h-full w-full object-cover" />
-                  <button onClick={() => removeImage(idx)} className="absolute top-0.5 right-0.5 bg-black/60 rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button aria-label={`Remove ${img.name}`} onClick={() => removeImage(idx)} className="absolute top-0.5 right-0.5 bg-black/60 rounded-full p-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 transition-opacity">
                     <X className="h-3 w-3 text-white" />
                   </button>
                 </div>
               ))}
               <button
                 onClick={() => fileInputRef.current?.click()}
+                disabled={editImages.length >= maxReferences}
                 className="h-20 w-20 rounded-md border-2 border-dashed border-muted-foreground/30 flex flex-col items-center justify-center gap-0.5 text-muted-foreground hover:border-purple-400 hover:text-purple-500 transition-colors shrink-0"
               >
                 <Upload className="h-4 w-4" />
                 <span className="text-[10px]">Upload</span>
               </button>
             </div>
-            <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleFilePick} />
-            <p className="text-[10px] text-muted-foreground">Paste, drag & drop, or click to upload images (max 10MB each)</p>
+            <input ref={fileInputRef} type="file" accept={acceptedFormats.join(",")} multiple={maxReferences > 1} className="hidden" onChange={handleFilePick} />
+            <p className="text-[10px] text-muted-foreground">
+              Up to {maxReferences} reference image{maxReferences > 1 ? "s" : ""}, {Math.floor(maxReferenceBytes / 1024 / 1024)}MB each
+              {!supportsMask ? "; masks are not supported" : ""}
+            </p>
 
             {/* Mask upload */}
-            <div className="flex items-center gap-2 pt-1">
+            {supportsMask && <div className="flex items-center gap-2 pt-1">
               <Label className="text-xs text-muted-foreground shrink-0">Mask (optional):</Label>
               {editMask ? (
                 <div className="flex items-center gap-1.5">
@@ -353,22 +497,22 @@ export function ImageGenerator({}: ImageGeneratorProps) {
                     <img src={editMask.dataUrl} alt="mask" className="h-full w-full object-cover" />
                   </div>
                   <span className="text-xs text-muted-foreground truncate max-w-[100px]">{editMask.name}</span>
-                  <button onClick={() => setEditMask(null)} className="text-muted-foreground hover:text-red-500"><X className="h-3 w-3" /></button>
+                  <button aria-label="Remove mask" onClick={() => setEditMask(null)} className="rounded p-1 text-muted-foreground hover:text-red-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><X className="h-3 w-3" /></button>
                 </div>
               ) : (
                 <button onClick={() => maskInputRef.current?.click()} className="text-xs text-purple-500 hover:text-purple-600">
                   Upload mask
                 </button>
               )}
-              <input ref={maskInputRef} type="file" accept="image/*" className="hidden" onChange={handleMaskPick} />
-            </div>
+              <input ref={maskInputRef} type="file" accept={acceptedFormats.join(",")} className="hidden" onChange={handleMaskPick} />
+            </div>}
           </div>
         )}
 
         {/* Prompt */}
         <div>
           <Label className="text-xs text-muted-foreground mb-1.5 block">
-            {mode === "edit" ? "Edit prompt" : "Prompt"}
+            {activeMode === "edit" ? "Edit prompt" : "Prompt"}
           </Label>
           <Textarea
             value={prompt}
@@ -376,7 +520,7 @@ export function ImageGenerator({}: ImageGeneratorProps) {
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleGenerate(); }
             }}
-            placeholder={mode === "edit"
+            placeholder={activeMode === "edit"
               ? "Describe how to edit the image... (e.g. Add sunglasses to the cat)"
               : "Describe the image you want to generate..."}
             className="min-h-[60px] resize-none"
@@ -386,7 +530,7 @@ export function ImageGenerator({}: ImageGeneratorProps) {
           {selectedModelDetails && (
             <div className="mt-1.5 flex items-center gap-2">
               <Badge variant="secondary" className="text-[10px]">{selectedModelDetails.displayName || selectedModelDetails.id}</Badge>
-              {mode === "edit" && editImages.length > 0 && (
+              {activeMode === "edit" && editImages.length > 0 && (
                 <Badge variant="outline" className="text-[10px]">{editImages.length} image{editImages.length > 1 ? "s" : ""}</Badge>
               )}
             </div>

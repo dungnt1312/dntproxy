@@ -28,12 +28,27 @@ func NewTokenRefreshService(store port.CredentialStore) *TokenRefreshService {
 
 // NeedsRefresh checks if a connection's token is expiring soon.
 func (s *TokenRefreshService) NeedsRefresh(conn *domain.ProviderConnection) bool {
-	if conn.ExpiresAt == "" {
+	return s.shouldRefresh(conn, false)
+}
+
+// ShouldProactivelyRefresh is used by the background OAuth refresh loop (includes already-expired tokens).
+func (s *TokenRefreshService) ShouldProactivelyRefresh(conn *domain.ProviderConnection) bool {
+	return s.shouldRefresh(conn, true)
+}
+
+func (s *TokenRefreshService) shouldRefresh(conn *domain.ProviderConnection, includeExpired bool) bool {
+	if conn == nil || strings.TrimSpace(conn.RefreshToken) == "" {
 		return false
 	}
-	expiresAt, err := time.Parse(time.RFC3339, conn.ExpiresAt)
-	if err != nil {
-		return false
+	if conn.ExpiresAt == "" {
+		return includeExpired
+	}
+	expiresAt, ok := ParseExpiresAt(conn.ExpiresAt)
+	if !ok {
+		return includeExpired
+	}
+	if includeExpired && !expiresAt.After(time.Now().UTC()) {
+		return true
 	}
 	return time.Until(expiresAt) < tokenExpiryBuffer
 }
@@ -198,30 +213,57 @@ func (s *TokenRefreshService) refreshXAI(conn *domain.ProviderConnection) (*doma
 // CheckAndRefresh checks if token needs refresh and refreshes if needed.
 // Uses singleflight to deduplicate concurrent refreshes for the same connection.
 func (s *TokenRefreshService) CheckAndRefresh(conn *domain.ProviderConnection) (*domain.ProviderConnection, error) {
-	if !s.NeedsRefresh(conn) {
+	return s.checkAndRefresh(conn, false)
+}
+
+// ForceRefresh refreshes OAuth credentials even when expiry is unknown or not within the buffer.
+func (s *TokenRefreshService) ForceRefresh(conn *domain.ProviderConnection) (*domain.ProviderConnection, error) {
+	return s.checkAndRefresh(conn, true)
+}
+
+func (s *TokenRefreshService) checkAndRefresh(conn *domain.ProviderConnection, force bool) (*domain.ProviderConnection, error) {
+	if conn == nil {
+		return nil, fmt.Errorf("connection is nil")
+	}
+	if !force && !s.NeedsRefresh(conn) {
+		return conn, nil
+	}
+	if force && strings.TrimSpace(conn.RefreshToken) == "" {
+		return nil, fmt.Errorf("no refresh token available")
+	}
+	if !force && !s.ShouldProactivelyRefresh(conn) {
 		return conn, nil
 	}
 
 	log.Printf("[TOKEN] Token expiring soon for %s, refreshing...", conn.Name)
 
-	// Deduplicate concurrent refreshes by connection ID
 	result, err, _ := s.sfg.Do(conn.ID, func() (interface{}, error) {
-		updated, err := s.Refresh(conn)
-		if err != nil {
-			return conn, fmt.Errorf("auto-refresh failed: %w", err)
+		latest, loadErr := s.store.GetConnectionByID(conn.ID)
+		if loadErr != nil || latest == nil {
+			latest = conn
+		}
+		if !force && !s.ShouldProactivelyRefresh(latest) {
+			return latest, nil
 		}
 
-		// Persist to DB
+		updated, refreshErr := s.Refresh(latest)
+		if refreshErr != nil {
+			return latest, fmt.Errorf("auto-refresh failed: %w", refreshErr)
+		}
+
 		if err := s.store.UpdateConnection(updated); err != nil {
 			log.Printf("[TOKEN] Failed to persist refreshed token: %s", err)
 		} else {
-			log.Printf("[TOKEN] Token refreshed and persisted for %s", conn.Name)
+			log.Printf("[TOKEN] Token refreshed and persisted for %s", updated.Name)
 		}
 
 		return updated, nil
 	})
 
-	return result.(*domain.ProviderConnection), err
+	if err != nil {
+		return conn, err
+	}
+	return result.(*domain.ProviderConnection), nil
 }
 
 // ExtractEmailFromJWT extracts email from a JWT access token.

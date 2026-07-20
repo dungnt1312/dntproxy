@@ -22,7 +22,13 @@ func authStartBuilderID() gin.HandlerFunc {
 		}
 
 		sessionID := uuid.New().String()
+		starterTenant, starterKey := authCallerIDs(c)
 		authSessionsMu.Lock()
+		if len(authSessions) >= maxAuthSessions {
+			authSessionsMu.Unlock()
+			c.JSON(429, gin.H{"error": "too many pending auth sessions"})
+			return
+		}
 		authSessions[sessionID] = &authSession{
 			ClientID:     client.ClientID,
 			ClientSecret: client.ClientSecret,
@@ -30,6 +36,8 @@ func authStartBuilderID() gin.HandlerFunc {
 			Region:       "us-east-1",
 			Interval:     deviceAuth.Interval,
 			AuthMethod:   "builder-id",
+			TenantID:     starterTenant,
+			APIKeyID:     starterKey,
 			CreatedAt:    time.Now(),
 		}
 		authSessionsMu.Unlock()
@@ -68,7 +76,13 @@ func authStartIDC() gin.HandlerFunc {
 		}
 
 		sessionID := uuid.New().String()
+		starterTenant, starterKey := authCallerIDs(c)
 		authSessionsMu.Lock()
+		if len(authSessions) >= maxAuthSessions {
+			authSessionsMu.Unlock()
+			c.JSON(429, gin.H{"error": "too many pending auth sessions"})
+			return
+		}
 		authSessions[sessionID] = &authSession{
 			ClientID:     client.ClientID,
 			ClientSecret: client.ClientSecret,
@@ -77,6 +91,8 @@ func authStartIDC() gin.HandlerFunc {
 			StartURL:     req.StartURL,
 			Interval:     deviceAuth.Interval,
 			AuthMethod:   "idc",
+			TenantID:     starterTenant,
+			APIKeyID:     starterKey,
 			CreatedAt:    time.Now(),
 		}
 		authSessionsMu.Unlock()
@@ -110,6 +126,11 @@ func authPoll(store port.CredentialStore) gin.HandlerFunc {
 
 		if !ok {
 			c.JSON(404, gin.H{"error": "Session not found or expired"})
+			return
+		}
+
+		if !authSessionAllowed(c, session.TenantID, session.APIKeyID) {
+			c.JSON(403, gin.H{"error": "Access denied"})
 			return
 		}
 
@@ -147,6 +168,7 @@ func authPoll(store port.CredentialStore) gin.HandlerFunc {
 			c.JSON(500, gin.H{"error": "Failed to load config"})
 			return
 		}
+		settings := &cfg.Settings
 		if name == "" {
 			name = providerLabel + " Account"
 			name += fmt.Sprintf(" %d", len(cfg.ProviderConnections)+1)
@@ -171,7 +193,7 @@ func authPoll(store port.CredentialStore) gin.HandlerFunc {
 			ExpiresIn:       expiresIn,
 			Email:           email,
 			TestStatus:      "active",
-			SupportedModels: domain.GetProviderConfig("kiro").DefaultModels,
+			SupportedModels: domain.GetDefaultConnectionModels(settings, "kiro"),
 			ProviderSpecificData: map[string]interface{}{
 				"authMethod":   session.AuthMethod,
 				"provider":     providerLabel,
@@ -181,6 +203,7 @@ func authPoll(store port.CredentialStore) gin.HandlerFunc {
 			},
 			CreatedAt: now,
 			UpdatedAt: now,
+			TenantID:  GetTenantID(c),
 		}
 
 		cfg.ProviderConnections = append(cfg.ProviderConnections, conn)

@@ -251,3 +251,11 @@ func (m *mockCredentialStore) GetModelRegistry() (*domain.ModelRegistry, error) 
 func (m *mockCredentialStore) GetConnectionIDsForCombo(comboName string) ([]string, error) {
 	return nil, nil
 }
+
+func (m *mockCredentialStore) GetTenants() ([]domain.Tenant, error) {
+	return []domain.Tenant{}, nil
+}
+
+func (m *mockCredentialStore) GetTenantBySlug(slug string) (*domain.Tenant, error) {
+	return nil, nil
+}

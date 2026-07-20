@@ -1,5 +1,5 @@
 import React from "react";
-import { Zap, ChevronLeft, ChevronRight, Moon, Sun } from "lucide-react";
+import { Zap, ChevronLeft, ChevronRight, Moon, Sun, LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
@@ -10,6 +10,8 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { NavButton } from "./nav-button";
+import { TenantBadge } from "./tenant-badge";
+import type { SessionInfo } from "@/stores/app-store";
 
 interface NavItem {
   path: string;
@@ -27,6 +29,8 @@ interface SidebarProps {
   theme: string | undefined;
   onToggleTheme: () => void;
   mounted: boolean;
+  session?: SessionInfo | null;
+  onLogout?: () => void;
 }
 
 export function Sidebar({
@@ -38,6 +42,8 @@ export function Sidebar({
   theme,
   onToggleTheme,
   mounted,
+  session,
+  onLogout,
 }: SidebarProps) {
   return (
     <aside
@@ -51,9 +57,28 @@ export function Sidebar({
           <Zap className="w-4 h-4" />
         </div>
         {sidebarOpen && (
-          <span className="font-semibold text-lg tracking-tight truncate">
-            Dntproxy
-          </span>
+          <div className="flex flex-col min-w-0">
+            <span className="font-semibold text-lg tracking-tight truncate">
+              Dntproxy
+            </span>
+          </div>
+        )}
+        {sidebarOpen && session && (
+          <div className="ml-auto shrink-0">
+            <TenantBadge
+              tenantId={session.tenantId}
+              isAdmin={session.isAdmin}
+            />
+          </div>
+        )}
+        {!sidebarOpen && session && (
+          <div className="ml-auto shrink-0">
+            <TenantBadge
+              tenantId={session.tenantId}
+              isAdmin={session.isAdmin}
+              compact
+            />
+          </div>
         )}
       </div>
 
@@ -99,6 +124,23 @@ export function Sidebar({
             {mounted && theme === "dark" ? "Light Mode" : "Dark Mode"}
           </TooltipContent>
         </Tooltip>
+
+        {onLogout && (
+          <Tooltip delayDuration={0}>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={onLogout}
+                className="w-8 h-8"
+                title="Log out"
+              >
+                <LogOut className="w-4 h-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="right">Log out</TooltipContent>
+          </Tooltip>
+        )}
 
         <Tooltip delayDuration={0}>
           <TooltipTrigger asChild>

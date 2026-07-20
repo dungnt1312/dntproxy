@@ -33,15 +33,16 @@ type QuotaBucket struct {
 
 // UsageResponse is the single, canonical response shape for GET /api/usage/:id.
 type UsageResponse struct {
-	Provider     string        `json:"provider"`
-	Plan         string        `json:"plan,omitempty"`
-	LimitReached bool          `json:"limitReached"`
-	Message      string        `json:"message,omitempty"`
-	Quotas       []QuotaBucket `json:"quotas"`
-	Overages     *OverageInfo  `json:"overages,omitempty"`
+	Provider     string                `json:"provider"`
+	Plan         string                `json:"plan,omitempty"`
+	LimitReached bool                  `json:"limitReached"`
+	Message      string                `json:"message,omitempty"`
+	Quotas       []QuotaBucket         `json:"quotas"`
+	Overages     *OverageInfo          `json:"overages,omitempty"`
+	History      []BillingHistoryEntry `json:"history,omitempty"`
 }
 
-// OverageInfo contains overage usage when user has exceeded their plan limits.
+// OverageInfo contains overage / on-demand usage when the plan exposes a cap.
 type OverageInfo struct {
 	Used      float64 `json:"used"`
 	Cap       float64 `json:"cap"`
@@ -49,6 +50,15 @@ type OverageInfo struct {
 	Status    string  `json:"status,omitempty"`
 	Charge    float64 `json:"charge,omitempty"`
 	Rate      float64 `json:"rate,omitempty"`
+}
+
+// BillingHistoryEntry is one past billing cycle (xAI Grok Chat, etc.).
+type BillingHistoryEntry struct {
+	Year         int `json:"year"`
+	Month        int `json:"month"`
+	IncludedUsed int `json:"includedUsed"`
+	OnDemandUsed int `json:"onDemandUsed"`
+	TotalUsed    int `json:"totalUsed"`
 }
 
 func (r *UsageResponse) addBucket(key, label string, used, total int, resetAt string, unlimited bool) {
@@ -86,21 +96,9 @@ func NewUsageHandler(store port.CredentialStore) *UsageHandler {
 func (h *UsageHandler) GetUsage(c *gin.Context) {
 	connectionID := c.Param("connectionId")
 
-	cfg, err := h.store.Load()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load config"})
-		return
-	}
-
-	var conn *domain.ProviderConnection
-	for i := range cfg.ProviderConnections {
-		if cfg.ProviderConnections[i].ID == connectionID {
-			conn = &cfg.ProviderConnections[i]
-			break
-		}
-	}
-	if conn == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Connection not found"})
+	// Verify ownership before making any upstream calls with the connection's credentials.
+	conn, ok := requireTenantOwnsConnection(c, h.store, connectionID)
+	if !ok {
 		return
 	}
 
@@ -155,8 +153,8 @@ func (h *UsageHandler) fetchUsage(conn *domain.ProviderConnection) (*UsageRespon
 		return fetchKiroUsage(conn)
 	case "minimax":
 		return fetchMiniMaxUsage(conn)
-		case "xai":
-			return fetchXAIGrokChatUsage(conn)
+	case "xai":
+		return fetchXAIGrokChatUsage(conn)
 	default:
 		return &UsageResponse{
 			Provider: conn.Provider,
@@ -545,8 +543,273 @@ func isAuthExpiredError(err error) bool {
 	return false
 }
 
-// fetchXAIGrokChatUsage calls the Grok Chat Web billing endpoint and returns a UsageResponse
-// compatible with the QuotaPanel UI (quotas[] array).
+// nestedValInt reads {"val": N} style numbers from Grok billing payloads.
+func nestedValInt(m map[string]interface{}, key string) (int, bool) {
+	raw, ok := m[key]
+	if !ok || raw == nil {
+		return 0, false
+	}
+	switch v := raw.(type) {
+	case map[string]interface{}:
+		if n, ok := v["val"].(float64); ok {
+			return int(n), true
+		}
+	case float64:
+		return int(v), true
+	}
+	return 0, false
+}
+
+func nestedValFloat(m map[string]interface{}, key string) (float64, bool) {
+	raw, ok := m[key]
+	if !ok || raw == nil {
+		return 0, false
+	}
+	switch v := raw.(type) {
+	case map[string]interface{}:
+		if n, ok := v["val"].(float64); ok {
+			return n, true
+		}
+	case float64:
+		return v, true
+	}
+	return 0, false
+}
+
+func fetchGrokBillingJSON(client *http.Client, accessToken, url string) (map[string]interface{}, int, error) {
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, 0, err
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Accept", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		return nil, resp.StatusCode, nil
+	}
+	var data map[string]interface{}
+	if err := json.Unmarshal(bodyBytes, &data); err != nil {
+		return nil, resp.StatusCode, err
+	}
+	return data, resp.StatusCode, nil
+}
+
+// addPercentBucket models Grok credit percentages as used/total on a 0-100 scale.
+func (r *UsageResponse) addPercentBucket(key, label string, pct float64, resetAt string) {
+	if pct < 0 {
+		pct = 0
+	}
+	if pct > 100 {
+		pct = 100
+	}
+	used := int(pct + 0.5) // round
+	if used > 100 {
+		used = 100
+	}
+	r.addBucket(key, label, used, 100, resetAt, false)
+	if used >= 100 {
+		r.LimitReached = true
+	}
+}
+
+func applyGrokCreditsConfig(respObj *UsageResponse, config map[string]interface{}) {
+	periodEnd := ""
+	periodStart := ""
+	periodType := ""
+
+	if period, ok := config["currentPeriod"].(map[string]interface{}); ok {
+		if t, ok := period["type"].(string); ok {
+			periodType = t
+		}
+		if s, ok := period["start"].(string); ok {
+			periodStart = s
+		}
+		if e, ok := period["end"].(string); ok {
+			periodEnd = e
+		}
+	}
+	if periodEnd == "" {
+		if e, ok := config["billingPeriodEnd"].(string); ok {
+			periodEnd = e
+		}
+	}
+	if periodStart == "" {
+		if s, ok := config["billingPeriodStart"].(string); ok {
+			periodStart = s
+		}
+	}
+
+	// Plan label prefers weekly credits period when present.
+	if periodStart != "" && periodEnd != "" {
+		startLabel, endLabel := periodStart, periodEnd
+		if len(startLabel) >= 10 {
+			startLabel = startLabel[:10]
+		}
+		if len(endLabel) >= 10 {
+			endLabel = endLabel[:10]
+		}
+		label := "Credits"
+		if strings.Contains(strings.ToUpper(periodType), "WEEKLY") {
+			label = "Weekly credits"
+		} else if strings.Contains(strings.ToUpper(periodType), "MONTHLY") {
+			label = "Monthly credits"
+		}
+		respObj.Plan = fmt.Sprintf("%s: %s → %s", label, startLabel, endLabel)
+	}
+
+	// Overall credit usage (primary signal for api.x.ai spending-limit).
+	if pct, ok := config["creditUsagePercent"].(float64); ok {
+		respObj.addPercentBucket("credits", "API Credits", pct, periodEnd)
+	}
+
+	// Per-product breakdown (Api, GrokBuild, ...).
+	if products, ok := config["productUsage"].([]interface{}); ok {
+		for _, item := range products {
+			row, ok := item.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			product, _ := row["product"].(string)
+			if product == "" {
+				continue
+			}
+			pct, hasPct := row["usagePercent"].(float64)
+			if !hasPct {
+				// Product listed without percent — skip numeric bucket.
+				continue
+			}
+			key := "product-" + strings.ToLower(product)
+			label := product
+			switch strings.ToLower(product) {
+			case "api":
+				label = "API"
+			case "grokbuild":
+				label = "Grok Build"
+			}
+			respObj.addPercentBucket(key, label, pct, periodEnd)
+		}
+	}
+
+	// On-demand from credits payload (includes onDemandUsed directly).
+	onDemandCap, hasCap := nestedValFloat(config, "onDemandCap")
+	onDemandUsed, _ := nestedValFloat(config, "onDemandUsed")
+	if hasCap {
+		status := "DISABLED"
+		if onDemandCap > 0 {
+			status = "ENABLED"
+		}
+		rem := onDemandCap - onDemandUsed
+		if rem < 0 {
+			rem = 0
+		}
+		respObj.Overages = &OverageInfo{
+			Used:      onDemandUsed,
+			Cap:       onDemandCap,
+			Remaining: rem,
+			Status:    status,
+		}
+	}
+
+	if bal, ok := nestedValFloat(config, "prepaidBalance"); ok && bal > 0 {
+		respObj.Message = fmt.Sprintf("Prepaid balance: %.2f", bal)
+	}
+}
+
+func applyGrokRequestsConfig(respObj *UsageResponse, config map[string]interface{}) {
+	monthlyLimit, _ := nestedValInt(config, "monthlyLimit")
+	used, _ := nestedValInt(config, "used")
+
+	periodEnd := ""
+	if end, ok := config["billingPeriodEnd"].(string); ok {
+		periodEnd = end
+	}
+
+	// Only set plan from requests payload if credits did not already set it.
+	if respObj.Plan == "" {
+		if start, ok := config["billingPeriodStart"].(string); ok && len(start) >= 10 {
+			endLabel := periodEnd
+			if len(endLabel) >= 10 {
+				endLabel = endLabel[:10]
+			}
+			respObj.Plan = fmt.Sprintf("Billing: %s → %s", start[:10], endLabel)
+		}
+	}
+
+	if monthlyLimit > 0 {
+		respObj.addBucket("requests", "Monthly Requests", used, monthlyLimit, periodEnd, false)
+		if used >= monthlyLimit {
+			respObj.LimitReached = true
+		}
+	}
+
+	// Fill overages only if credits path did not already set them.
+	if respObj.Overages == nil {
+		if onDemandCap, hasOnDemand := nestedValInt(config, "onDemandCap"); hasOnDemand {
+			status := "DISABLED"
+			if onDemandCap > 0 {
+				status = "ENABLED"
+			}
+			respObj.Overages = &OverageInfo{
+				Used:      0,
+				Cap:       float64(onDemandCap),
+				Remaining: float64(onDemandCap),
+				Status:    status,
+			}
+		}
+	}
+
+	if hist, ok := config["history"].([]interface{}); ok {
+		for _, item := range hist {
+			row, ok := item.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			entry := BillingHistoryEntry{}
+			if cycle, ok := row["billingCycle"].(map[string]interface{}); ok {
+				if y, ok := cycle["year"].(float64); ok {
+					entry.Year = int(y)
+				}
+				if m, ok := cycle["month"].(float64); ok {
+					entry.Month = int(m)
+				}
+			}
+			if v, ok := nestedValInt(row, "includedUsed"); ok {
+				entry.IncludedUsed = v
+			}
+			if v, ok := nestedValInt(row, "onDemandUsed"); ok {
+				entry.OnDemandUsed = v
+			}
+			if v, ok := nestedValInt(row, "totalUsed"); ok {
+				entry.TotalUsed = v
+			} else {
+				entry.TotalUsed = entry.IncludedUsed + entry.OnDemandUsed
+			}
+			respObj.History = append(respObj.History, entry)
+		}
+	}
+
+	if respObj.Overages != nil && respObj.Overages.Cap > 0 && respObj.Overages.Used == 0 && len(respObj.History) > 0 {
+		newest := respObj.History[0]
+		if newest.OnDemandUsed > 0 {
+			usedOD := float64(newest.OnDemandUsed)
+			respObj.Overages.Used = usedOD
+			rem := respObj.Overages.Cap - usedOD
+			if rem < 0 {
+				rem = 0
+			}
+			respObj.Overages.Remaining = rem
+		}
+	}
+}
+
+// fetchXAIGrokChatUsage loads Grok billing:
+//  1. ?format=credits → weekly API credits / product usage (explains spending-limit)
+//  2. default billing → monthly request counters + history
 func fetchXAIGrokChatUsage(conn *domain.ProviderConnection) (*UsageResponse, error) {
 	if conn.AccessToken == "" {
 		return &UsageResponse{
@@ -556,66 +819,45 @@ func fetchXAIGrokChatUsage(conn *domain.ProviderConnection) (*UsageResponse, err
 		}, nil
 	}
 
-	billingURL := "https://cli-chat-proxy.grok.com/v1/billing"
-
-	req, err := http.NewRequest("GET", billingURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("create xai billing request: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+conn.AccessToken)
-	req.Header.Set("Accept", "application/json")
-
 	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("xai billing request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	bodyBytes, _ := io.ReadAll(resp.Body)
-
-	if resp.StatusCode != 200 {
-		return &UsageResponse{
-			Provider: "xai",
-			Message:  fmt.Sprintf("Billing endpoint returned HTTP %d", resp.StatusCode),
-			Quotas:   []QuotaBucket{},
-		}, nil
-	}
-
-	var billingData map[string]interface{}
-	if err := json.Unmarshal(bodyBytes, &billingData); err != nil {
-		return nil, fmt.Errorf("parse xai billing response: %w", err)
-	}
-
 	respObj := &UsageResponse{
 		Provider: "xai",
-		Message:  "xAI Grok Chat billing info retrieved",
+		Message:  "xAI Grok billing info retrieved",
 		Quotas:   []QuotaBucket{},
 	}
 
-	// Parse config block
-	if config, ok := billingData["config"].(map[string]interface{}); ok {
-		monthlyLimit := 0
-		used := 0
+	creditsData, creditsStatus, creditsErr := fetchGrokBillingJSON(
+		client, conn.AccessToken,
+		"https://cli-chat-proxy.grok.com/v1/billing?format=credits",
+	)
+	requestsData, requestsStatus, requestsErr := fetchGrokBillingJSON(
+		client, conn.AccessToken,
+		"https://cli-chat-proxy.grok.com/v1/billing",
+	)
 
-		if ml, ok := config["monthlyLimit"].(map[string]interface{}); ok {
-			if v, ok := ml["val"].(float64); ok {
-				monthlyLimit = int(v)
-			}
+	// Prefer credits shape when available (weekly API credits).
+	if creditsErr == nil && creditsStatus == 200 && creditsData != nil {
+		if config, ok := creditsData["config"].(map[string]interface{}); ok && config != nil {
+			applyGrokCreditsConfig(respObj, config)
 		}
-		if u, ok := config["used"].(map[string]interface{}); ok {
-			if v, ok := u["val"].(float64); ok {
-				used = int(v)
-			}
-		}
+	}
 
-		if monthlyLimit > 0 {
-			respObj.addBucket("requests", "Monthly Requests", used, monthlyLimit, "", false)
+	if requestsErr == nil && requestsStatus == 200 && requestsData != nil {
+		if config, ok := requestsData["config"].(map[string]interface{}); ok && config != nil {
+			applyGrokRequestsConfig(respObj, config)
 		}
+	}
 
-		// Billing period (optional metadata)
-		if start, ok := config["billingPeriodStart"].(string); ok {
-			respObj.Plan = fmt.Sprintf("Billing: %s → %s", start[:10], config["billingPeriodEnd"].(string)[:10])
+	if len(respObj.Quotas) == 0 && respObj.Overages == nil {
+		// Both failed or empty — surface status for debugging.
+		if creditsErr != nil {
+			return nil, fmt.Errorf("xai credits billing: %w", creditsErr)
+		}
+		if requestsErr != nil {
+			return nil, fmt.Errorf("xai requests billing: %w", requestsErr)
+		}
+		if creditsStatus != 200 && requestsStatus != 200 {
+			respObj.Message = fmt.Sprintf("Billing endpoints returned HTTP credits=%d requests=%d", creditsStatus, requestsStatus)
 		}
 	}
 

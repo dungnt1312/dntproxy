@@ -25,6 +25,29 @@ type connectionView struct {
 	SupportsQuota bool `json:"supportsQuota"`
 }
 
+// redactConnectionSecrets strips credential material from list/detail API
+// responses. Full secrets remain available via export endpoints only.
+func redactConnectionSecrets(conn domain.ProviderConnection) domain.ProviderConnection {
+	out := conn
+	out.AccessToken = ""
+	out.RefreshToken = ""
+	out.APIKey = ""
+	if len(out.ProviderSpecificData) > 0 {
+		safe := make(map[string]interface{}, len(out.ProviderSpecificData))
+		for k, v := range out.ProviderSpecificData {
+			lk := strings.ToLower(k)
+			if strings.Contains(lk, "secret") || strings.Contains(lk, "token") ||
+				strings.Contains(lk, "password") || lk == "clientsecret" ||
+				lk == "client_secret" || lk == "idtoken" || lk == "id_token" {
+				continue
+			}
+			safe[k] = v
+		}
+		out.ProviderSpecificData = safe
+	}
+	return out
+}
+
 func apiListConnections(store port.CredentialStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cfg, err := store.Load()
@@ -32,27 +55,30 @@ func apiListConnections(store port.CredentialStore) gin.HandlerFunc {
 			c.JSON(500, gin.H{"error": "Failed to load config"})
 			return
 		}
-			views := make([]connectionView, len(cfg.ProviderConnections))
-			for i, conn := range cfg.ProviderConnections {
-				provCfg := domain.GetProviderConfig(conn.Provider)
-				supportsQuota := provCfg.SupportsQuota
-				if conn.Provider == "openai" && conn.AuthType != "oauth" {
-					supportsQuota = false
-				}
-
-				// Runtime fill: if connection has no SupportedModels, use RecommendedModels
-				// This ensures old connections (created before RecommendedModels existed)
-				// still show the correct curated model list in the UI.
-				displayConn := conn
-				if len(displayConn.SupportedModels) == 0 && len(provCfg.RecommendedModels) > 0 {
-					displayConn.SupportedModels = provCfg.RecommendedModels
-				}
-
-				views[i] = connectionView{
-					ProviderConnection: displayConn,
-					SupportsQuota:      supportsQuota,
-				}
+		// Filter connections by tenant (no-op in legacy single-tenant mode).
+		tenantID := GetTenantID(c)
+		conns := domain.FilterConnectionsByTenant(cfg.ProviderConnections, tenantID)
+		views := make([]connectionView, len(conns))
+		for i, conn := range conns {
+			provCfg := domain.GetProviderConfig(conn.Provider)
+			supportsQuota := provCfg.SupportsQuota
+			if conn.Provider == "openai" && conn.AuthType != "oauth" {
+				supportsQuota = false
 			}
+
+			// Runtime fill: if connection has no SupportedModels, use RecommendedModels
+			// This ensures old connections (created before RecommendedModels existed)
+			// still show the correct curated model list in the UI.
+			displayConn := redactConnectionSecrets(conn)
+			if len(displayConn.SupportedModels) == 0 && len(provCfg.RecommendedModels) > 0 {
+				displayConn.SupportedModels = provCfg.RecommendedModels
+			}
+
+			views[i] = connectionView{
+				ProviderConnection: displayConn,
+				SupportsQuota:      supportsQuota,
+			}
+		}
 		c.JSON(200, views)
 	}
 }
@@ -62,6 +88,9 @@ func apiListConnections(store port.CredentialStore) gin.HandlerFunc {
 func apiDeleteConnection(store port.CredentialStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
+		if _, ok := requireTenantOwnsConnection(c, store, id); !ok {
+			return
+		}
 		found := false
 		if err := store.Update(func(cfg *domain.AppConfig) {
 			for i, conn := range cfg.ProviderConnections {
@@ -88,6 +117,9 @@ func apiDeleteConnection(store port.CredentialStore) gin.HandlerFunc {
 func apiUpdateConnection(store port.CredentialStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
+		if _, ok := requireTenantOwnsConnection(c, store, id); !ok {
+			return
+		}
 		var req struct {
 			Name            *string  `json:"name,omitempty"`
 			IsActive        *bool    `json:"isActive,omitempty"`
@@ -158,6 +190,9 @@ func apiUpdateConnection(store port.CredentialStore) gin.HandlerFunc {
 func apiClearConnectionError(store port.CredentialStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
+		if _, ok := requireTenantOwnsConnection(c, store, id); !ok {
+			return
+		}
 		var req struct {
 			Model string `json:"model,omitempty"`
 		}
@@ -227,6 +262,9 @@ func clearErrorModelKey(model string, conn domain.ProviderConnection) string {
 func apiResetCooldown(store port.CredentialStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
+		if _, ok := requireTenantOwnsConnection(c, store, id); !ok {
+			return
+		}
 		found := false
 		if err := store.Update(func(cfg *domain.AppConfig) {
 			for i := range cfg.ProviderConnections {
@@ -262,6 +300,21 @@ func findConnectionByID(cfg *domain.AppConfig, id string) *domain.ProviderConnec
 		}
 	}
 	return nil
+}
+
+// ensureTenantOwnsConnection returns false if a specific tenant is requesting
+// access to a connection that does not belong to it. Legacy (empty tenant)
+// always passes. Use this in mutation handlers to enforce isolation.
+func ensureTenantOwnsConnection(c *gin.Context, store port.CredentialStore, id string) (*domain.ProviderConnection, bool) {
+	conn, err := store.GetConnectionByID(id)
+	if err != nil || conn == nil {
+		return nil, false
+	}
+	tenantID := GetTenantID(c)
+	if !domain.SameTenant(conn.TenantID, tenantID) {
+		return nil, false
+	}
+	return conn, true
 }
 
 // logAction logs an admin action.

@@ -123,6 +123,7 @@ func SanitizeBody(b []byte) []byte {
 		"session_token", "sessionToken", "session-token",
 		"sessionToken", "SessionToken",
 		"authorization", "Authorization",
+		"image", "images", "mask", "subject_reference", "image_file",
 	})
 
 	// Mask sensitive fields in headers (if present)

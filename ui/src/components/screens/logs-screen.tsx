@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, useMemo } from "react";
-import { FileWarning, RefreshCw, Radio, Terminal, Table2 } from "lucide-react";
+import { FileWarning, RefreshCw, Radio, Terminal, Table2, Eye } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { goApi, getStoredApiKey } from "@/lib/go-api";
@@ -11,11 +11,12 @@ import { FilterBar } from "./logs/filter-bar";
 import { LogsTable } from "./logs/logs-table";
 import { LogDetailSheet } from "./logs/log-detail-sheet";
 import { ConsoleViewer } from "./logs/console-viewer";
+import { LiveFeed } from "./dashboard/live-feed";
 import { buildFilterParams, DEFAULT_FILTERS } from "./logs/helpers";
 
 const SSE_BASE = import.meta.env.VITE_GO_API_URL || "/api";
 
-type ViewTab = "table" | "console";
+type ViewTab = "table" | "console" | "live";
 
 export interface LogsScreenProps {
   initialFilters?: Partial<LogFilters>;
@@ -245,6 +246,7 @@ export default function LogsScreen({
   );
 
   const isConsole = !embedded && viewTab === "console";
+  const isLive = !embedded && viewTab === "live";
 
   return (
     <div className={cn("flex flex-col h-full", embedded ? "gap-3" : "gap-4 p-4 md:p-6")}>
@@ -287,6 +289,18 @@ export default function LogsScreen({
                 <Terminal className="h-3.5 w-3.5" />
                 Console
               </button>
+              <button
+                onClick={() => setViewTab("live")}
+                className={cn(
+                  "flex items-center gap-1.5 px-2.5 py-1 rounded text-sm font-medium transition-colors",
+                  viewTab === "live"
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                <Eye className="h-3.5 w-3.5" />
+                Live
+              </button>
             </div>
 
             {/* Live toggle + Refresh — only for table view */}
@@ -324,8 +338,15 @@ export default function LogsScreen({
         </div>
       )}
 
+      {/* Live Feed View */}
+      {isLive && (
+        <div className="flex-1 min-h-0">
+          <LiveFeed />
+        </div>
+      )}
+
       {/* Table View (also used for embedded mode) */}
-      {!isConsole && (
+      {!isConsole && !isLive && (
         <>
           {/* Filter Bar */}
           <FilterBar

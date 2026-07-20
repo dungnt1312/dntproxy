@@ -30,6 +30,7 @@ type LogEntry struct {
 	CostTotal      float64 `json:"costTotal,omitempty"`
 	Currency       string  `json:"currency,omitempty"`
 	MetadataJSON   string  `json:"metadataJson,omitempty"`
+	TenantID       string  `json:"tenantId,omitempty"` // multi-tenancy support for SaaS
 }
 
 // CompressionLogMetadata stores per-request token compression savings.
@@ -51,6 +52,7 @@ type LogQuery struct {
 	Search       string
 	Range        string
 	Limit        int
+	TenantID     string // for multi-tenancy filtering
 }
 
 // LogSummary contains aggregate usage and cost data for the selected logs.
@@ -83,13 +85,14 @@ type LogConnectionSummary struct {
 
 // DailyUsageStat contains aggregated usage metrics for a single calendar day.
 type DailyUsageStat struct {
-	Date         string  `json:"date"`
-	Requests     int     `json:"requests"`
-	Errors       int     `json:"errors"`
-	InputTokens  int     `json:"inputTokens"`
-	OutputTokens int     `json:"outputTokens"`
-	TotalTokens  int     `json:"totalTokens"`
-	CostTotal    float64 `json:"costTotal"`
+	Date         string         `json:"date"`
+	Requests     int            `json:"requests"`
+	Errors       int            `json:"errors"`
+	InputTokens  int            `json:"inputTokens"`
+	OutputTokens int            `json:"outputTokens"`
+	TotalTokens  int            `json:"totalTokens"`
+	CostTotal    float64        `json:"costTotal"`
+	Models       map[string]int `json:"models,omitempty"`
 }
 
 // ModelPrice stores an editable price profile used for estimated cost.
@@ -102,4 +105,5 @@ type ModelPrice struct {
 	Currency     string  `json:"currency"`
 	SourceNote   string  `json:"sourceNote"`
 	UpdatedAtMs  int64   `json:"updatedAtMs"`
+	IsUserEdited bool    `json:"isUserEdited"`
 }

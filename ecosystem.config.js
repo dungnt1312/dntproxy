@@ -1,33 +1,40 @@
+const path = require('path')
+const os = require('os')
+const fs = require('fs')
+
+const home = process.env.HOME || process.env.USERPROFILE || os.homedir()
+const projectDir = process.env.DNTPROXY_PROJECT_DIR || path.resolve(__dirname)
+
+// Prefer install-local.sh path, then install.ps1 path, then project-local binary.
+const candidates = [
+  path.join(home, '.local', 'bin', process.platform === 'win32' ? 'dntproxy.exe' : 'dntproxy'),
+  path.join(process.env.LOCALAPPDATA || '', 'dntproxy', 'bin', 'dntproxy.exe'),
+  path.join(projectDir, process.platform === 'win32' ? 'dntproxy.exe' : 'dntproxy'),
+].filter(Boolean)
+
+const script = candidates.find((p) => {
+  try { return fs.existsSync(p) } catch { return false }
+}) || candidates[0]
+
 module.exports = {
   apps: [
     {
       name: 'dntproxy',
-      script: 'C:\\Users\\dungnt\\.local\\bin\\dntproxy.exe',
-      args: '--port=20199',
+      script,
+      args: 'serve',
       interpreter: 'none',
-      cwd: 'C:\\laragon\\www\\dntproxy',
+      cwd: projectDir,
       env: {
-        PORT: '20199',
-        DNTPROXY_LOG_RAW_BODIES: '1',
+        PORT: process.env.PORT || '20199',
+        // Keep raw body logging off by default (enable via env when debugging).
+        DNTPROXY_LOG_RAW_BODIES: process.env.DNTPROXY_LOG_RAW_BODIES || '0',
       },
-      // Auto-restart on crash
       autorestart: true,
-      // Max restart attempts
       max_restarts: 10,
-      // Restart delay
       restart_delay: 3000,
-      // Log files
-      out_file: 'C:\\laragon\\www\\dntproxy\\logs\\pm2-out.log',
-      error_file: 'C:\\laragon\\www\\dntproxy\\logs\\pm2-error.log',
-      // Merge stdout/stderr
-      merge_logs: true,
-      // Don't watch files
       watch: false,
-      // Instances
       instances: 1,
-      // Kill timeout
       kill_timeout: 5000,
-      // Listen on startup
       listen_timeout: 10000,
     },
   ],

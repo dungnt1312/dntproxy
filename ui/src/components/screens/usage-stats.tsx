@@ -7,6 +7,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { formatTokens, formatCost } from "./dashboard/helpers";
 
 export interface UsageGroup {
   key: string;
@@ -29,16 +30,6 @@ export interface UsageStatsData {
   byProvider: UsageGroup[] | null;
   byModel: UsageGroup[] | null;
   byConnection: UsageGroup[] | null;
-}
-
-function fmtNum(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return String(n || 0);
-}
-
-function fmtCost(n: number): string {
-  return `$${(n || 0).toFixed(4)}`;
 }
 
 function SummaryCard({
@@ -88,16 +79,16 @@ function GroupTable({ title, rows }: { title: string; rows: UsageGroup[] }) {
                   {row.requests}
                 </TableCell>
                 <TableCell className="text-right text-xs">
-                  {fmtNum(row.promptTokens)}
+                  {formatTokens(row.promptTokens)}
                 </TableCell>
                 <TableCell className="text-right text-xs">
-                  {fmtNum(row.completionTokens)}
+                  {formatTokens(row.completionTokens)}
                 </TableCell>
                 <TableCell className="text-right text-xs font-medium">
-                  {fmtNum(row.totalTokens)}
+                  {formatTokens(row.totalTokens)}
                 </TableCell>
                 <TableCell className="text-right text-xs text-amber-500">
-                  {fmtCost(row.totalCost)}
+                  {formatCost(row.totalCost)}
                 </TableCell>
               </TableRow>
             ))}
@@ -139,16 +130,16 @@ export default function UsageStats({ data, loading }: UsageStatsProps) {
         <SummaryCard label="Total Requests" value={String(data.totalRequests || 0)} />
         <SummaryCard
           label="Prompt Tokens"
-          value={fmtNum(data.totalPromptTokens || 0)}
+          value={formatTokens(data.totalPromptTokens || 0)}
         />
         <SummaryCard
           label="Completion Tokens"
-          value={fmtNum(data.totalCompletionTokens || 0)}
-          sub={`Total: ${fmtNum(totalTokens)}`}
+          value={formatTokens(data.totalCompletionTokens || 0)}
+          sub={`Total: ${formatTokens(totalTokens)}`}
         />
         <SummaryCard
           label="Estimated Cost"
-          value={fmtCost(data.totalCost || 0)}
+          value={formatCost(data.totalCost || 0)}
           sub="USD"
         />
       </div>

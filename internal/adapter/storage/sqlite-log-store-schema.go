@@ -3,6 +3,8 @@ package storage
 import (
 	"context"
 	"fmt"
+	"log"
+	"strings"
 	"time"
 
 	"github.com/dungnt/dntproxy/internal/domain"
@@ -50,7 +52,8 @@ func (s *SQLiteLogStore) migrate(ctx context.Context) error {
 			output_per_1m REAL NOT NULL,
 			currency TEXT NOT NULL,
 			source_note TEXT,
-			updated_at_ms INTEGER NOT NULL
+			updated_at_ms INTEGER NOT NULL,
+			is_user_edited INTEGER DEFAULT 0
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_logs_time ON request_logs(timestamp_ms DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_logs_connection_time ON request_logs(connection_id, timestamp_ms DESC)`,
@@ -67,45 +70,71 @@ func (s *SQLiteLogStore) migrate(ctx context.Context) error {
 		}
 	}
 
-	// Graceful column additions for existing databases (SQLite ignores
-	// duplicate column errors, so we swallow them here).
+	// Graceful column additions for existing databases
 	for _, altStmt := range []string{
 		`ALTER TABLE request_logs ADD COLUMN request_body TEXT`,
 		`ALTER TABLE request_logs ADD COLUMN response_body TEXT`,
+		`ALTER TABLE request_logs ADD COLUMN tenant_id TEXT`,
+		`ALTER TABLE model_prices ADD COLUMN is_user_edited INTEGER DEFAULT 0`,
 	} {
-		// SQLite returns an error if the column already exists — ignore it.
 		s.db.ExecContext(ctx, altStmt) //nolint:errcheck
 	}
 
-	return s.seedPrices(ctx)
+	s.db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_logs_tenant_time ON request_logs(tenant_id, timestamp_ms DESC)`) //nolint:errcheck
+
+	return s.syncPricesFromRegistry(ctx)
 }
 
-func (s *SQLiteLogStore) seedPrices(ctx context.Context) error {
+// syncPricesFromRegistry upserts prices from ModelDefinition into model_prices.
+// Rows marked is_user_edited=1 are skipped (user has manually set them).
+// Rows with is_user_edited=0 are updated to match the current ModelDefinition values.
+func (s *SQLiteLogStore) syncPricesFromRegistry(ctx context.Context) error {
 	now := time.Now().UnixMilli()
-	defaults := []domain.ModelPrice{
-		{Provider: "kiro", ModelPattern: "%opus%", InputPer1M: 15, OutputPer1M: 75, Currency: "USD", SourceNote: "Estimated from public Anthropic API token pricing; Kiro billing may differ."},
-		{Provider: "kiro", ModelPattern: "%sonnet%", InputPer1M: 3, OutputPer1M: 15, Currency: "USD", SourceNote: "Estimated from public Anthropic API token pricing; Kiro billing may differ."},
-		{Provider: "kiro", ModelPattern: "%haiku%", InputPer1M: 0.8, OutputPer1M: 4, Currency: "USD", SourceNote: "Estimated from public Anthropic API token pricing; Kiro billing may differ."},
-		{Provider: "kiro", ModelPattern: "%deepseek%", InputPer1M: 0.28, OutputPer1M: 0.42, Currency: "USD", SourceNote: "Estimated from public DeepSeek API token pricing; Kiro billing may differ."},
-		{Provider: "anthropic", ModelPattern: "%opus%", InputPer1M: 15, OutputPer1M: 75, Currency: "USD", SourceNote: "Estimated from public Anthropic API token pricing."},
-		{Provider: "anthropic", ModelPattern: "%sonnet%", InputPer1M: 3, OutputPer1M: 15, Currency: "USD", SourceNote: "Estimated from public Anthropic API token pricing."},
-		{Provider: "anthropic", ModelPattern: "%haiku%", InputPer1M: 0.8, OutputPer1M: 4, Currency: "USD", SourceNote: "Estimated from public Anthropic API token pricing."},
-		{Provider: "openai", ModelPattern: "%gpt-5%", InputPer1M: 1.25, OutputPer1M: 10, Currency: "USD", SourceNote: "Default estimate; edit prices if your provider differs."},
-		{Provider: "openai-compatible", ModelPattern: "%", InputPer1M: 0, OutputPer1M: 0, Currency: "USD", SourceNote: "Unknown provider price. Configure this before relying on cost."},
+	registry := domain.DefaultModelRegistry()
+
+	// Build price list from all active models in the registry
+	seen := make(map[string]bool)
+	for key, def := range registry.Models {
+		if !def.IsActive {
+			continue
+		}
+		// key format: "provider/model-id"
+		idx := strings.Index(key, "/")
+		if idx < 0 {
+			continue
+		}
+		provider := key[:idx]
+		modelID := key[idx+1:]
+
+		// Generate a LIKE pattern that matches this specific model
+		pattern := "%" + modelID + "%"
+		uniqKey := provider + ":" + pattern
+
+		// Deduplicate: same provider+pattern means same price row
+		dedupKey := provider + ":" + modelID
+		if seen[dedupKey] {
+			continue
+		}
+		seen[dedupKey] = true
+
+		// upsert: INSERT OR REPLACE but preserve is_user_edited
+		_, err := s.db.ExecContext(ctx, `INSERT INTO model_prices
+			(id, provider, model_pattern, input_per_1m, output_per_1m, currency, source_note, updated_at_ms, is_user_edited)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
+			ON CONFLICT(provider, model_pattern) DO UPDATE SET
+				input_per_1m = CASE WHEN is_user_edited THEN input_per_1m ELSE excluded.input_per_1m END,
+				output_per_1m = CASE WHEN is_user_edited THEN output_per_1m ELSE excluded.output_per_1m END,
+				source_note = CASE WHEN is_user_edited THEN source_note ELSE excluded.source_note END,
+				updated_at_ms = excluded.updated_at_ms`,
+			uuid.New().String(), provider, pattern, def.InputPrice, def.OutputPrice,
+			"USD", "Auto-synced from ModelDefinition", now)
+		if err != nil {
+			log.Printf("[PRICES] Failed upsert %s:%s: %s", provider, pattern, err)
+			continue
+		}
+		_ = uniqKey
 	}
 
-	for _, price := range defaults {
-		if price.ID == "" {
-			price.ID = uuid.New().String()
-		}
-		_, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO model_prices
-			(id, provider, model_pattern, input_per_1m, output_per_1m, currency, source_note, updated_at_ms)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-			price.ID, price.Provider, price.ModelPattern, price.InputPer1M, price.OutputPer1M,
-			price.Currency, price.SourceNote, now)
-		if err != nil {
-			return fmt.Errorf("seed model prices: %w", err)
-		}
-	}
+	log.Printf("[PRICES] Synced %d model prices from ModelDefinition", len(seen))
 	return nil
 }

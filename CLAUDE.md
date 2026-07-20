@@ -10,7 +10,7 @@ OpenAI-compatible proxy that routes requests to Kiro (AWS CodeWhisperer). Suppor
 
 - **Language:** Go 1.25+
 - **HTTP:** Gin
-- **CLI:** Cobra
+- **CLI:** Cobra (ops only: serve / version / update)
 - **Storage:** JSON file (`~/.dntproxy/db.json` on Linux/macOS, `%APPDATA%/dntproxy/db.json` on Windows)
 - **File locking:** gofrs/flock
 
@@ -19,7 +19,7 @@ OpenAI-compatible proxy that routes requests to Kiro (AWS CodeWhisperer). Suppor
 Clean architecture with 4 layers:
 
 ```
-cmd/dntproxy/main.go          → Entry point, CLI (cobra)
+cmd/dntproxy/main.go          → Entry point, thin ops CLI (cobra)
 internal/domain/               → Core types, no external deps
 internal/port/                 → Interfaces (CredentialStore, ProviderExecutor, TokenRefresher)
 internal/adapter/              → Implementations
@@ -124,12 +124,9 @@ OpenAI request → model resolve → combo expand → account select →
 - Import token (manual refresh token with auto-register)
 - Auto token refresh before expiry (5min buffer, integrated into account selector)
 
-### Phase 3: CLI Commands — DONE
-- `dntproxy auth add` (interactive, all 4 methods)
-- `dntproxy auth list/remove/test`
-- `dntproxy combo add/list/remove`
-- `dntproxy alias set/list/remove`
-- `dntproxy key generate/list/remove`
+### Phase 3: Dashboard / Management API — DONE
+- React dashboard + `/api/*` for configuration (connections, combos, aliases, keys, etc.)
+- CLI slimmed to ops only: `dntproxy` / `serve`, `version`, `update`
 
 ### Phase 4: Polish — TODO
 - Request logging

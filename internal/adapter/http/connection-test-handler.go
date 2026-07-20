@@ -26,14 +26,9 @@ func apiTestConnection(store port.CredentialStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
 
-		// Load a snapshot of the connection for testing (read-only)
-		conn, err := store.GetConnectionByID(id)
-		if err != nil {
-			c.JSON(500, gin.H{"error": err.Error()})
-			return
-		}
-		if conn == nil {
-			c.JSON(404, gin.H{"error": "Connection not found"})
+		// Verify ownership before making any upstream calls with the connection's credentials.
+		conn, ok := requireTenantOwnsConnection(c, store, id)
+		if !ok {
 			return
 		}
 
@@ -167,6 +162,9 @@ func testProviderAPI(conn *domain.ProviderConnection) testProviderResult {
 		}
 		return testProviderResult{OK: true, Response: "Token present (full test requires actual API call)"}
 	}
+	if cfg.Format == domain.FormatImageAPI {
+		return testImageProviderAPI(conn, cfg)
+	}
 
 	baseURL := conn.BaseURL
 	if baseURL == "" {
@@ -254,6 +252,40 @@ func testProviderAPI(conn *domain.ProviderConnection) testProviderResult {
 	return testProviderResult{OK: false, Error: fmt.Sprintf("HTTP %d: %s", resp.StatusCode, string(respBody))}
 }
 
+// testImageProviderAPI performs a non-generative auth/connectivity probe so
+// testing an image-only connection never creates a billable image.
+func testImageProviderAPI(conn *domain.ProviderConnection, cfg domain.ProviderConfig) testProviderResult {
+	baseURL := strings.TrimRight(strings.TrimSpace(conn.BaseURL), "/")
+	if baseURL == "" {
+		baseURL = strings.TrimRight(cfg.DefaultBaseURL, "/")
+	}
+	probeURL := baseURL + "/models"
+	req, err := http.NewRequest(http.MethodGet, probeURL, nil)
+	if err != nil {
+		return testProviderResult{OK: false, Error: fmt.Sprintf("create request: %s", err)}
+	}
+	apiKey := conn.APIKey
+	if apiKey == "" {
+		apiKey = conn.AccessToken
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+	if err != nil {
+		return testProviderResult{OK: false, Error: fmt.Sprintf("request failed: %s", err)}
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return testProviderResult{OK: true, Response: fmt.Sprintf("HTTP %d OK (non-generative probe)", resp.StatusCode)}
+	}
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return testProviderResult{OK: false, Error: fmt.Sprintf("HTTP %d: %s", resp.StatusCode, string(body))}
+	}
+	return testProviderResult{OK: false, Error: fmt.Sprintf("Non-generative probe returned HTTP %d: %s", resp.StatusCode, string(body))}
+}
+
 func providerTestURL(conn *domain.ProviderConnection, cfg domain.ProviderConfig) string {
 	baseURL := conn.BaseURL
 	if baseURL == "" {
@@ -271,7 +303,11 @@ func providerTestURL(conn *domain.ProviderConnection, cfg domain.ProviderConfig)
 
 // === Test Model ===
 
-func apiTestModel(store port.CredentialStore, providers port.ProviderRegistry) gin.HandlerFunc {
+func apiTestModel(store port.CredentialStore, providers port.ProviderRegistry, registries ...port.ImageProviderRegistry) gin.HandlerFunc {
+	var imageProviders port.ImageProviderRegistry
+	if len(registries) > 0 {
+		imageProviders = registries[0]
+	}
 	return func(c *gin.Context) {
 		id := c.Param("id")
 		var req struct {
@@ -282,21 +318,9 @@ func apiTestModel(store port.CredentialStore, providers port.ProviderRegistry) g
 			return
 		}
 
-		cfg, err := store.Load()
-		if err != nil {
-			c.JSON(500, gin.H{"error": err.Error()})
-			return
-		}
-
-		var conn *domain.ProviderConnection
-		for i := range cfg.ProviderConnections {
-			if cfg.ProviderConnections[i].ID == id {
-				conn = &cfg.ProviderConnections[i]
-				break
-			}
-		}
-		if conn == nil {
-			c.JSON(404, gin.H{"error": "Connection not found"})
+		// Verify ownership before making any upstream calls with the connection's credentials.
+		conn, ok := requireTenantOwnsConnection(c, store, id)
+		if !ok {
 			return
 		}
 
@@ -315,7 +339,7 @@ func apiTestModel(store port.CredentialStore, providers port.ProviderRegistry) g
 				return
 			}
 			*conn = *refreshed
-			store.Save(cfg)
+			_ = store.UpdateConnection(conn)
 		}
 
 		creds := shared.ConnectionToCredentials(conn)
@@ -347,6 +371,20 @@ func apiTestModel(store port.CredentialStore, providers port.ProviderRegistry) g
 		provider := conn.Provider
 		executor := providers.GetExecutor(provider)
 		if executor == nil {
+			if imageProviders != nil {
+				if imageProvider := imageProviders.GetImageProvider(provider); imageProvider != nil {
+					capabilities := imageProvider.Capabilities(modelName)
+					if capabilities.Generate || capabilities.Edit {
+						result := testImageProviderAPI(conn, domain.GetProviderConfig(provider))
+						if result.OK {
+							c.JSON(http.StatusOK, gin.H{"status": "ok", "model": modelName, "response": result.Response})
+						} else {
+							c.JSON(http.StatusOK, gin.H{"status": "error", "message": result.Error})
+						}
+						return
+					}
+				}
+			}
 			// Fallback for providers not yet registered
 			switch provider {
 			case "kiro":

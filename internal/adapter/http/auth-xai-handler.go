@@ -1,6 +1,7 @@
 package http
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -15,6 +16,8 @@ import (
 )
 
 type xaiSession struct {
+	TenantID      string
+	APIKeyID      string
 	CodeVerifier  string
 	State         string
 	Nonce         string
@@ -54,13 +57,16 @@ func authXAIStart() gin.HandlerFunc {
 		}
 
 		sessionID := uuid.New().String()
+		starterTenant, starterKey := authCallerIDs(c)
 		xaiSessionsMu.Lock()
 		if len(xaiSessions) >= maxAuthSessions {
 			xaiSessionsMu.Unlock()
-			c.JSON(http.StatusTooManyRequests, gin.H{"error": "too many auth sessions"})
+			c.JSON(http.StatusTooManyRequests, gin.H{"error": "too many pending auth sessions"})
 			return
 		}
 		xaiSessions[sessionID] = &xaiSession{
+			TenantID:      starterTenant,
+			APIKeyID:      starterKey,
 			CodeVerifier:  codeVerifier,
 			State:         state,
 			Nonce:         nonce,
@@ -103,6 +109,11 @@ func authXAIExchange(store port.CredentialStore) gin.HandlerFunc {
 			return
 		}
 
+		if !authSessionAllowed(c, sess.TenantID, sess.APIKeyID) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+			return
+		}
+
 		code, state, err := parseXAICallback(req.Code, req.State, req.CallbackURL)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -135,24 +146,27 @@ func authXAIExchange(store port.CredentialStore) gin.HandlerFunc {
 			name = "Grok Account"
 		}
 
+		cfg, _ := store.Load()
+		var settings *domain.Settings
+		if cfg != nil {
+			settings = &cfg.Settings
+		}
+
 		conn := domain.ProviderConnection{
-			ID:           uuid.New().String(),
-			Provider:     "xai",
-			AuthType:     "oauth",
-			Name:         name,
-			Weight:       100,
-			IsActive:     true,
-			AccessToken:  tokens.AccessToken,
-			RefreshToken: tokens.RefreshToken,
-			ExpiresAt:    now.Add(time.Duration(expiresIn) * time.Second).Format(time.RFC3339),
-			ExpiresIn:    expiresIn,
-			Email:        tokens.Email,
-			BaseURL:      adapterauth.XAIDefaultAPIBaseURL,
-			TestStatus:   "active",
-			SupportedModels: []string{
-				"grok-4.3",
-				"grok-3-mini",
-			},
+			ID:              uuid.New().String(),
+			Provider:        "xai",
+			AuthType:        "oauth",
+			Name:            name,
+			Weight:          100,
+			IsActive:        true,
+			AccessToken:     tokens.AccessToken,
+			RefreshToken:    tokens.RefreshToken,
+			ExpiresAt:       now.Add(time.Duration(expiresIn) * time.Second).Format(time.RFC3339),
+			ExpiresIn:       expiresIn,
+			Email:           tokens.Email,
+			BaseURL:         adapterauth.XAIDefaultAPIBaseURL,
+			TestStatus:      "active",
+			SupportedModels: domain.GetDefaultConnectionModels(settings, "xai"),
 			ProviderSpecificData: map[string]interface{}{
 				"authMethod":    "xai-oauth",
 				"tokenEndpoint": sess.TokenEndpoint,
@@ -162,6 +176,7 @@ func authXAIExchange(store port.CredentialStore) gin.HandlerFunc {
 			},
 			CreatedAt: now.Format(time.RFC3339),
 			UpdatedAt: now.Format(time.RFC3339),
+			TenantID:  GetTenantID(c),
 		}
 
 		if err := store.Update(func(appCfg *domain.AppConfig) {
@@ -219,4 +234,186 @@ func cleanupXAISessions() {
 			delete(xaiSessions, id)
 		}
 	}
+}
+
+// xaiAuthFileJSON represents the raw xAI/Grok auth file from a third-party CLI.
+type xaiAuthFileJSON struct {
+	AccessToken  string `json:"access_token"`
+	AuthKind     string `json:"auth_kind"`
+	BaseURL      string `json:"base_url"`
+	Disabled     bool   `json:"disabled"`
+	Email        string `json:"email"`
+	Expired      string `json:"expired"`
+	ExpiresIn    int    `json:"expires_in"`
+	IDToken      string `json:"id_token"`
+	LastRefresh  string `json:"last_refresh"`
+	RedirectURI  string `json:"redirect_uri"`
+	RefreshToken string `json:"refresh_token"`
+	Sub          string `json:"sub"`
+	TokenEp      string `json:"token_endpoint"`
+	TokenType    string `json:"token_type"`
+	Type         string `json:"type"`
+}
+
+func authXAIImportFile(store port.CredentialStore) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req struct {
+			Data json.RawMessage `json:"data"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
+			return
+		}
+
+		// If data is sent as the raw auth file directly (not wrapped), use the whole body
+		raw := req.Data
+		if len(raw) == 0 {
+			body, _ := c.GetRawData()
+			raw = body
+		}
+
+		var f xaiAuthFileJSON
+		if err := json.Unmarshal(raw, &f); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid xAI auth file format: " + err.Error()})
+			return
+		}
+
+		if f.AccessToken == "" && f.RefreshToken == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Auth file must contain access_token or refresh_token"})
+			return
+		}
+
+		conn, dupe, err := createXAIConnectionFromAuthFile(store, c, f)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"id":        conn.ID,
+			"name":      conn.Name,
+			"email":     conn.Email,
+			"duplicate": dupe,
+		})
+	}
+}
+
+func createXAIConnectionFromAuthFile(store port.CredentialStore, c *gin.Context, f xaiAuthFileJSON) (*domain.ProviderConnection, bool, error) {
+	baseURL := strings.TrimSpace(f.BaseURL)
+	if baseURL == "" {
+		baseURL = adapterauth.XAIDefaultAPIBaseURL
+	}
+
+	expiresIn := f.ExpiresIn
+	if expiresIn == 0 {
+		expiresIn = 3600
+	}
+	now := time.Now().UTC()
+
+	expiresAt := f.Expired
+	if norm, ok := adapterauth.NormalizeExpiresAtRFC3339(f.Expired); ok {
+		expiresAt = norm
+	} else if expiresAt == "" {
+		expiresAt = now.Add(time.Duration(expiresIn) * time.Second).Format(time.RFC3339)
+	}
+
+	tokenEndpoint := strings.TrimSpace(f.TokenEp)
+	if tokenEndpoint == "" {
+		tokenEndpoint = adapterauth.XAIIssuer + "/oauth2/token"
+	}
+
+	redirectURI := strings.TrimSpace(f.RedirectURI)
+	if redirectURI == "" {
+		redirectURI = adapterauth.XAIRedirectURI
+	}
+
+	// Check for duplicate by email or subject
+	existingDup := false
+	cfg, _ := store.Load()
+	if cfg != nil {
+		for _, x := range cfg.ProviderConnections {
+			if x.Provider != "xai" {
+				continue
+			}
+			if f.Email != "" && strings.EqualFold(x.Email, f.Email) {
+				existingDup = true
+				break
+			}
+			if x.ProviderSpecificData != nil {
+				if sub, ok := x.ProviderSpecificData["subject"].(string); ok && f.Sub != "" && sub == f.Sub {
+					existingDup = true
+					break
+				}
+			}
+		}
+	}
+
+	name := strings.TrimSpace(f.Email)
+	if name == "" {
+		name = f.Sub
+	}
+	if name == "" {
+		name = "Grok Account"
+	}
+
+	cfg, _ = store.Load()
+	var settings *domain.Settings
+	if cfg != nil {
+		settings = &cfg.Settings
+	}
+
+	conn := domain.ProviderConnection{
+		ID:              uuid.New().String(),
+		Provider:        "xai",
+		AuthType:        "oauth",
+		Name:            name,
+		Weight:          100,
+		IsActive:        !f.Disabled,
+		AccessToken:     strings.TrimSpace(f.AccessToken),
+		RefreshToken:    strings.TrimSpace(f.RefreshToken),
+		ExpiresAt:       expiresAt,
+		ExpiresIn:       expiresIn,
+		Email:           strings.TrimSpace(f.Email),
+		BaseURL:         baseURL,
+		TestStatus:      "active",
+		SupportedModels: domain.GetDefaultConnectionModels(settings, "xai"),
+		ProviderSpecificData: map[string]interface{}{
+			"authMethod":    "xai-oauth",
+			"tokenEndpoint": tokenEndpoint,
+			"redirectURI":   redirectURI,
+			"idToken":       strings.TrimSpace(f.IDToken),
+			"subject":       f.Sub,
+		},
+		CreatedAt: now.Format(time.RFC3339),
+		UpdatedAt: now.Format(time.RFC3339),
+		TenantID:  GetTenantID(c),
+	}
+
+	if err := store.Update(func(appCfg *domain.AppConfig) {
+		if conn.Name == "Grok Account" {
+			count := 0
+			for _, x := range appCfg.ProviderConnections {
+				if x.Provider == "xai" {
+					count++
+				}
+			}
+			if count > 0 {
+				conn.Name = fmt.Sprintf("Grok Account %d", count+1)
+			}
+		}
+		appCfg.ProviderConnections = append(appCfg.ProviderConnections, conn)
+	}); err != nil {
+		return nil, false, fmt.Errorf("Failed to save: %w", err)
+	}
+
+	if strings.TrimSpace(conn.RefreshToken) != "" {
+		refreshSvc := adapterauth.NewTokenRefreshService(store)
+		if refreshSvc.ShouldProactivelyRefresh(&conn) {
+			if updated, refErr := refreshSvc.ForceRefresh(&conn); refErr == nil && updated != nil {
+				conn = *updated
+			}
+		}
+	}
+
+	return &conn, existingDup, nil
 }

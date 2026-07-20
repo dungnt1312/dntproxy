@@ -11,7 +11,8 @@ import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { toast } from 'sonner';
 import { getProviderLabel, getProviderMeta, PROVIDER_ORDER } from '@/lib/provider-registry';
-import { ConnectionStats } from './connections/connection-stats';
+import { ConnectionHealthDashboard } from './connections/connection-health-dashboard';
+import { ConnectionDetailSheet } from './connections/connection-detail-sheet';
 import { ConnectionGroup } from './connections/connection-group';
 import {
     ConnectionStatusFilter,
@@ -37,6 +38,7 @@ export default function ConnectionsScreen() {
     const [loadError, setLoadError] = useState('');
     const [editModelsConn, setEditModelsConn] = useState<Connection | null>(null);
     const [editConn, setEditConn] = useState<Connection | null>(null);
+    const [detailConn, setDetailConn] = useState<Connection | null>(null);
     const [deleteTarget, setDeleteTarget] = useState<{
         id: string;
         name: string;
@@ -194,8 +196,8 @@ export default function ConnectionsScreen() {
                 </Button>
             </div>
 
-            {/* Stats */}
-            {conns.length > 0 && <ConnectionStats {...connectionStats} />}
+            {/* Health Dashboard */}
+            {conns.length > 0 && <ConnectionHealthDashboard connections={conns} />}
 
             {/* Toolbar */}
             {conns.length > 0 && (
@@ -301,10 +303,27 @@ export default function ConnectionsScreen() {
                             onDelete={(id, name) => setDeleteTarget({ id, name })}
                             onEditModels={setEditModelsConn}
                             onEditConnection={setEditConn}
+                            onViewDetails={setDetailConn}
                         />
                     ))}
                 </div>
             )}
+
+            <ConnectionDetailSheet
+                connection={detailConn}
+                open={!!detailConn}
+                onOpenChange={(open) => {
+                    if (!open) setDetailConn(null);
+                }}
+                onEditModels={(conn) => {
+                    setDetailConn(null);
+                    setEditModelsConn(conn);
+                }}
+                onEditConnection={(conn) => {
+                    setDetailConn(null);
+                    setEditConn(conn);
+                }}
+            />
 
             {editModelsConn && (
                 <EditModelsModal

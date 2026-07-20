@@ -42,6 +42,7 @@ export function KeysTable({
             <TableHead>Name</TableHead>
             <TableHead>Key</TableHead>
             <TableHead>Status</TableHead>
+            <TableHead>Tenant</TableHead>
             <TableHead>Access</TableHead>
             <TableHead>Created</TableHead>
             <TableHead className="text-right">Actions</TableHead>
@@ -107,6 +108,11 @@ export function KeysTable({
                 </TableCell>
                 <TableCell>
                   <PermissionSummary apiKey={apiKey} />
+                </TableCell>
+                <TableCell>
+                  <span className="text-xs text-muted-foreground">
+                    {apiKey.tenantId ? apiKey.tenantId : '—'}
+                  </span>
                 </TableCell>
                 <TableCell className="text-muted-foreground text-sm">
                   {formatDate(apiKey.createdAt)}

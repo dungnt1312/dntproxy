@@ -5,6 +5,7 @@ import { getProviderLabel } from "@/lib/provider-registry";
 import type { UiModel } from "./types";
 import { getModelDisplayName } from "./model-display";
 import { ModelTestButton, type ModelTestResult } from "./model-test-button";
+import { ModelRoutingBadges, getModelRoutingLabel } from "./model-routing-badges";
 
 interface ModelRegistryMobileListProps {
   models: UiModel[];
@@ -47,6 +48,7 @@ export function ModelRegistryMobileList({
             {model.id}
           </code>
           <div className="mt-3 flex flex-wrap gap-2">
+            <ModelRoutingBadges model={model} compact />
             <span className="inline-flex items-center gap-1.5 rounded-full bg-muted/60 px-2 py-1 text-xs font-medium">
               <span className={model.isActive === false ? "h-1.5 w-1.5 rounded-full bg-destructive" : "h-1.5 w-1.5 rounded-full bg-emerald-500"} />
               {model.isActive === false ? "Inactive" : "Active"}
@@ -55,6 +57,7 @@ export function ModelRegistryMobileList({
               <span className="text-xs text-muted-foreground">No active connection</span>
             )}
           </div>
+          <p className="mt-2 text-xs text-muted-foreground">{getModelRoutingLabel(model)}</p>
           {(model.connections || []).length > 0 && (
             <div className="mt-3 space-y-2">
               {model.connections?.map((connection) => {

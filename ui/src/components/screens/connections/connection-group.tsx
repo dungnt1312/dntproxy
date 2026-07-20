@@ -17,6 +17,7 @@ interface ConnectionGroupProps {
     onDelete: (id: string, name: string) => void;
     onEditModels: (conn: Connection) => void;
     onEditConnection: (conn: Connection) => void;
+    onViewDetails?: (conn: Connection) => void;
 }
 
 /**
@@ -34,6 +35,7 @@ export function ConnectionGroup({
     onDelete,
     onEditModels,
     onEditConnection,
+    onViewDetails,
 }: ConnectionGroupProps) {
     const hasActiveItems = group.items.some((c) => c.isActive);
     const activeCount = group.items.filter((c) => c.isActive).length;
@@ -119,6 +121,7 @@ export function ConnectionGroup({
                             onDelete={onDelete}
                             onEditModels={onEditModels}
                             onEditConnection={onEditConnection}
+                            onViewDetails={onViewDetails}
                         />
                     ))}
                 </div>

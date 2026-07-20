@@ -28,25 +28,27 @@ func TestDefaultModelRegistryIncludesXAIModels(t *testing.T) {
 	}
 }
 
+// TestDefaultXAIModelsIncludeExpandedRegistry verifies that the xAI curated
+// RecommendedModels (= DefaultModels) contains at least the three primary models.
+// Full registry coverage is tested by TestDefaultModelRegistryIncludesXAIModels.
 func TestDefaultXAIModelsIncludeExpandedRegistry(t *testing.T) {
 	models := GetProviderConfig("xai").DefaultModels
-	want := map[string]bool{
-		"grok-build-0.1":               false,
-		"grok-4.3":                     false,
-		"grok-4.20-0309-reasoning":     false,
-		"grok-4.20-0309-non-reasoning": false,
-		"grok-4.20-multi-agent-0309":   false,
-		"grok-3-mini":                  false,
-		"grok-3-mini-fast":             false,
+	// These are the primary models that must always be in the recommended list.
+	required := []string{
+		"grok-4.20-0309-reasoning",
+		"grok-4.3",
+		"grok-4.20-0309-non-reasoning",
 	}
-	for _, model := range models {
-		if _, ok := want[model]; ok {
-			want[model] = true
+	modelSet := make(map[string]bool, len(models))
+	for _, m := range models {
+		modelSet[m] = true
+	}
+	for _, model := range required {
+		if !modelSet[model] {
+			t.Fatalf("xai RecommendedModels missing %q; got %#v", model, models)
 		}
 	}
-	for model, found := range want {
-		if !found {
-			t.Fatalf("default xai models missing %q; got %#v", model, models)
-		}
+	if len(models) == 0 {
+		t.Fatalf("xai DefaultModels should not be empty")
 	}
 }

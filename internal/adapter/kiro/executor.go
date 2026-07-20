@@ -86,7 +86,7 @@ func (e *Executor) Execute(model string, body []byte, credentials *domain.Creden
 		if errRead == nil {
 			respBodyStr = string(bodyBytes)
 		}
-		
+
 		reqlog.SetBodies("", shared.PrepareLoggedBody(bodyBytes))
 		errUpstream := fmt.Errorf("%s", respBodyStr)
 		reqlog.Upstream(kiroBaseURL, "POST", resp.StatusCode, duration, errUpstream)
@@ -96,6 +96,9 @@ func (e *Executor) Execute(model string, body []byte, credentials *domain.Creden
 
 	reqlog.Upstream(kiroBaseURL, "POST", resp.StatusCode, duration, nil)
 
+	// Look up model definition for context window (used in token estimation)
+	ctxWindow := domain.GetModelContextWindow(model, "kiro")
+
 	// Create a pipe to transform EventStream → SSE
 	pr, pw := io.Pipe()
 
@@ -103,14 +106,14 @@ func (e *Executor) Execute(model string, body []byte, credentials *domain.Creden
 		defer pw.Close()
 		defer resp.Body.Close()
 
-		transformer := NewResponseTransformer(model)
+		transformer := NewResponseTransformer(model, ctxWindow)
 		transformer.SetUsageCallback(func(usage UsageReport) {
 			reqlog.SetUsage(usage.InputTokens, usage.OutputTokens, usage.Source)
 		})
 		transformer.SetPayloadCallback(func(payload PayloadReport) {
 			reqlog.SetBodies("", payload.ResponsePreview)
 		})
-		
+
 		buf := make([]byte, 0, 64*1024)
 		readBuf := make([]byte, 32*1024)
 

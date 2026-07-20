@@ -32,6 +32,8 @@ export function formatRelativeTime(dateStr: string | null): string {
 }
 
 export function formatDayLabel(date: string): string {
+  // Hourly labels like "14:00"
+  if (/^\d{2}:\d{2}$/.test(date)) return date
   const d = new Date(date + 'T00:00:00Z')
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
 }

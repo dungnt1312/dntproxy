@@ -39,6 +39,7 @@ type ProviderConnection struct {
 	ModelPrefix string `json:"modelPrefix,omitempty"`
 	CreatedAt   string `json:"createdAt,omitempty"`
 	UpdatedAt   string `json:"updatedAt,omitempty"`
+	TenantID    string `json:"tenantId,omitempty"` // multi-tenancy support. Empty = legacy single-tenant.
 }
 
 // SupportsModel checks if this connection supports the given model.

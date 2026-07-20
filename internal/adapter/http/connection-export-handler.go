@@ -15,6 +15,9 @@ import (
 func apiExportConnection(store port.CredentialStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
+		if _, ok := requireTenantOwnsConnection(c, store, id); !ok {
+			return
+		}
 
 		data, err := backup.ExportConnection(store, id)
 		if err != nil {
@@ -42,6 +45,13 @@ func apiExportConnections(store port.CredentialStore) gin.HandlerFunc {
 			return
 		}
 
+		// Verify the caller owns every requested connection.
+		for _, id := range req.ConnectionIDs {
+			if _, ok := requireTenantOwnsConnection(c, store, id); !ok {
+				return
+			}
+		}
+
 		data, err := backup.ExportConnections(store, req.ConnectionIDs)
 		if err != nil {
 			c.JSON(400, gin.H{"error": err.Error()})
@@ -58,6 +68,9 @@ func apiExportConnections(store port.CredentialStore) gin.HandlerFunc {
 
 func apiImportConnectionFromFile(store port.CredentialStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if !requireAdmin(c) {
+			return
+		}
 		var req struct {
 			backup.ConnectionExportData
 			Mode string `json:"mode"` // "add", "replace", "merge"
@@ -96,6 +109,9 @@ func apiImportConnectionFromFile(store port.CredentialStore) gin.HandlerFunc {
 
 func apiImportConnectionsFromFile(store port.CredentialStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if !requireAdmin(c) {
+			return
+		}
 		var req struct {
 			backup.BackupData
 			Mode string `json:"mode"` // "add", "replace", "merge"

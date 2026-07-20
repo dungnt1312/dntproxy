@@ -15,6 +15,9 @@ import (
 
 func apiExportBackup(store port.CredentialStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if !requireAdmin(c) {
+			return
+		}
 		data, err := backup.Export(store)
 		if err != nil {
 			c.JSON(500, gin.H{"error": err.Error()})
@@ -31,6 +34,9 @@ func apiExportBackup(store port.CredentialStore) gin.HandlerFunc {
 
 func apiImportBackup(store port.CredentialStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if !requireAdmin(c) {
+			return
+		}
 		var req struct {
 			Version             string                      `json:"version"`
 			ExportedAt          string                      `json:"exportedAt"`

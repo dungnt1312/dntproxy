@@ -444,6 +444,16 @@ func isTenantDisabledCached(store port.CredentialStore, tenantID string) bool {
 		disabled:  disabled,
 		expiresAt: time.Now().Add(5 * time.Second),
 	}
+	// Evict expired entries when map grows beyond a threshold to prevent unbounded
+	// growth from deleted or renamed tenants.
+	if len(tenantDisableCache.m) > 1000 {
+		now := time.Now()
+		for k, v := range tenantDisableCache.m {
+			if now.After(v.expiresAt) {
+				delete(tenantDisableCache.m, k)
+			}
+		}
+	}
 	tenantDisableCache.Unlock()
 	return disabled
 }

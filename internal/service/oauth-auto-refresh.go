@@ -10,7 +10,7 @@ import (
 	"github.com/dungnt/dntproxy/internal/port"
 )
 
-const oauthAutoRefreshInterval = 5 * time.Second
+const oauthAutoRefreshInterval = 60 * time.Second
 
 // RunOAuthAutoRefresh periodically refreshes OAuth connections before access tokens expire.
 func RunOAuthAutoRefresh(store port.CredentialStore, done <-chan struct{}) {

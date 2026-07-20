@@ -257,19 +257,17 @@ type xaiAuthFileJSON struct {
 
 func authXAIImportFile(store port.CredentialStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		var req struct {
-			Data json.RawMessage `json:"data"`
-		}
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})
+		raw, err := c.GetRawData()
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to read request body"})
 			return
 		}
-
-		// If data is sent as the raw auth file directly (not wrapped), use the whole body
-		raw := req.Data
-		if len(raw) == 0 {
-			body, _ := c.GetRawData()
-			raw = body
+		// Support both {"data": "{...}"} wrapper and raw auth file
+		var wrapper struct {
+			Data json.RawMessage `json:"data"`
+		}
+		if json.Unmarshal(raw, &wrapper) == nil && len(wrapper.Data) > 0 {
+			raw = wrapper.Data
 		}
 
 		var f xaiAuthFileJSON

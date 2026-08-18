@@ -130,6 +130,7 @@ func messagesHandler(chatService port.ChatService, store port.CredentialStore, c
 		tenantID := GetTenantID(c)
 		meta := compressionMetadata(stats)
 		meta.TenantID = tenantID
+		meta.Context = c.Request.Context()
 		result := chatService.HandleChat(openaiBody, antReq.Model, requestID, policy, meta)
 
 		if result.Stream == nil {
@@ -234,13 +235,17 @@ func handleStreamingMessages(c *gin.Context, stream io.ReadCloser, model string,
 						id:    tc.ID,
 						name:  tc.Function.Name,
 					})
+					blockIndex++
 				}
 
 				if tc.Function.Arguments != "" {
-					// Accumulate tool input JSON
+					argIndex := blockIndex
+					if len(toolCallBlocks) > 0 {
+						argIndex = toolCallBlocks[len(toolCallBlocks)-1].index
+					}
 					writeAnthropicSSE(c.Writer, "content_block_delta", map[string]interface{}{
 						"type":  "content_block_delta",
-						"index": blockIndex,
+						"index": argIndex,
 						"delta": map[string]interface{}{
 							"type":         "input_json_delta",
 							"partial_json": tc.Function.Arguments,
@@ -279,13 +284,23 @@ func handleStreamingMessages(c *gin.Context, stream io.ReadCloser, model string,
 			c.Writer.Flush()
 		}
 
+		if chunk.Usage != nil {
+			outputTokens = chunk.Usage.CompletionTokens
+		}
+
 		// Handle finish reason
 		if choice.FinishReason != nil {
-			// Close any open block
-			if contentBlockStarted || len(toolCallBlocks) > 0 {
+			if contentBlockStarted {
 				writeAnthropicSSE(c.Writer, "content_block_stop", map[string]interface{}{
 					"type":  "content_block_stop",
 					"index": blockIndex,
+				})
+				contentBlockStarted = false
+			}
+			for _, tb := range toolCallBlocks {
+				writeAnthropicSSE(c.Writer, "content_block_stop", map[string]interface{}{
+					"type":  "content_block_stop",
+					"index": tb.index,
 				})
 			}
 
@@ -302,11 +317,6 @@ func handleStreamingMessages(c *gin.Context, stream io.ReadCloser, model string,
 				},
 			})
 			c.Writer.Flush()
-		}
-
-		// Check for usage info
-		if chunk.Usage != nil {
-			outputTokens = chunk.Usage.CompletionTokens
 		}
 
 		select {
@@ -533,8 +543,32 @@ func translateAnthropicToOpenAI(req *anthropicMessagesRequest) ([]byte, error) {
 			openaiReq["tools"] = tools
 		}
 	}
+	if req.ToolChoice != nil {
+		openaiReq["tool_choice"] = mapAnthropicToolChoice(req.ToolChoice)
+	}
 
 	return json.Marshal(openaiReq)
+}
+
+func mapAnthropicToolChoice(tc interface{}) interface{} {
+	m, ok := tc.(map[string]interface{})
+	if !ok {
+		return "auto"
+	}
+	switch m["type"] {
+	case "any":
+		return "required"
+	case "none":
+		return "none"
+	case "tool":
+		name, _ := m["name"].(string)
+		return map[string]interface{}{
+			"type":     "function",
+			"function": map[string]interface{}{"name": name},
+		}
+	default:
+		return "auto"
+	}
 }
 
 // convertAnthropicMessage converts a single Anthropic message to OpenAI message(s).
@@ -606,8 +640,9 @@ func convertUserMessage(msg anthropicMsgItem) ([]map[string]interface{}, error) 
 					"text": text,
 				})
 			case "image":
-				// Pass through image content
-				contentParts = append(contentParts, block)
+				if converted := convertAnthropicImage(block); converted != nil {
+					contentParts = append(contentParts, converted)
+				}
 			}
 		}
 
@@ -642,6 +677,38 @@ func convertUserMessage(msg anthropicMsgItem) ([]map[string]interface{}, error) 
 			"role":    "user",
 			"content": fmt.Sprintf("%v", msg.Content),
 		}}, nil
+	}
+}
+
+func convertAnthropicImage(block map[string]interface{}) map[string]interface{} {
+	source, _ := block["source"].(map[string]interface{})
+	if source == nil {
+		return nil
+	}
+	switch source["type"] {
+	case "base64":
+		media, _ := source["media_type"].(string)
+		data, _ := source["data"].(string)
+		if media == "" || data == "" {
+			return nil
+		}
+		return map[string]interface{}{
+			"type": "image_url",
+			"image_url": map[string]interface{}{
+				"url": fmt.Sprintf("data:%s;base64,%s", media, data),
+			},
+		}
+	case "url":
+		url, _ := source["url"].(string)
+		if url == "" {
+			return nil
+		}
+		return map[string]interface{}{
+			"type": "image_url",
+			"image_url": map[string]interface{}{"url": url},
+		}
+	default:
+		return nil
 	}
 }
 

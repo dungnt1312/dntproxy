@@ -19,9 +19,19 @@ type chatRequest struct {
 }
 
 type chatMessage struct {
-	Role       string      `json:"role"`
-	Content    interface{} `json:"content"`
-	ToolCallID string      `json:"tool_call_id,omitempty"`
+	Role       string          `json:"role"`
+	Content    interface{}     `json:"content"`
+	ToolCallID string          `json:"tool_call_id,omitempty"`
+	ToolCalls  []chatToolCall  `json:"tool_calls,omitempty"`
+}
+
+type chatToolCall struct {
+	ID       string `json:"id"`
+	Type     string `json:"type"`
+	Function struct {
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	} `json:"function"`
 }
 
 type chatTool struct {
@@ -37,7 +47,7 @@ type chatToolFunction struct {
 
 type responsesRequest struct {
 	Model           string                   `json:"model"`
-	Input           []responsesInput         `json:"input"`
+	Input           []interface{}            `json:"input"`
 	Instructions    string                   `json:"instructions,omitempty"`
 	Stream          bool                     `json:"stream"`
 	Temperature     *float64                 `json:"temperature,omitempty"`
@@ -103,10 +113,28 @@ func TranslateChatToResponses(model string, body []byte) ([]byte, error) {
 				}
 				out.Instructions += text
 			}
-		case "user", "assistant":
+		case "user":
 			out.Input = append(out.Input, responsesInput{Role: role, Content: msg.Content})
+		case "assistant":
+			if text := contentToText(msg.Content); text != "" {
+				out.Input = append(out.Input, responsesInput{Role: "assistant", Content: text})
+			} else if len(msg.ToolCalls) == 0 {
+				out.Input = append(out.Input, responsesInput{Role: "assistant", Content: msg.Content})
+			}
+			for _, tc := range msg.ToolCalls {
+				out.Input = append(out.Input, map[string]interface{}{
+					"type":      "function_call",
+					"call_id":   tc.ID,
+					"name":      tc.Function.Name,
+					"arguments": tc.Function.Arguments,
+				})
+			}
 		case "tool":
-			out.Input = append(out.Input, responsesInput{Role: "user", Content: msg.Content})
+			out.Input = append(out.Input, map[string]interface{}{
+				"type":    "function_call_output",
+				"call_id": msg.ToolCallID,
+				"output":  contentToText(msg.Content),
+			})
 		default:
 			return nil, fmt.Errorf("unsupported message role %q", role)
 		}
@@ -162,6 +190,41 @@ func TranslateResponsesEvent(data []byte, state *ResponseState) string {
 	case "response.output_text.delta":
 		delta, _ := event["delta"].(string)
 		return formatChunk(state, map[string]interface{}{"content": delta}, nil)
+	case "response.output_item.added":
+		item, _ := event["item"].(map[string]interface{})
+		if item == nil {
+			return ""
+		}
+		if itemType, _ := item["type"].(string); itemType == "function_call" {
+			id, _ := item["call_id"].(string)
+			name, _ := item["name"].(string)
+			return formatChunk(state, map[string]interface{}{
+				"tool_calls": []interface{}{
+					map[string]interface{}{
+						"index": 0,
+						"id":    id,
+						"type":  "function",
+						"function": map[string]interface{}{
+							"name":      name,
+							"arguments": "",
+						},
+					},
+				},
+			}, nil)
+		}
+		return ""
+	case "response.function_call_arguments.delta":
+		delta, _ := event["delta"].(string)
+		return formatChunk(state, map[string]interface{}{
+			"tool_calls": []interface{}{
+				map[string]interface{}{
+					"index": 0,
+					"function": map[string]interface{}{
+						"arguments": delta,
+					},
+				},
+			},
+		}, nil)
 	case "response.completed", "response.incomplete":
 		extractUsage(event, state)
 		finish := "stop"

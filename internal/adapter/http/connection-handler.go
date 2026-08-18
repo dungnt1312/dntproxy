@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dungnt/dntproxy/internal/adapter/shared"
 	"github.com/dungnt/dntproxy/internal/domain"
 	"github.com/dungnt/dntproxy/internal/port"
 	"github.com/gin-gonic/gin"
@@ -70,8 +71,8 @@ func apiListConnections(store port.CredentialStore) gin.HandlerFunc {
 			// This ensures old connections (created before RecommendedModels existed)
 			// still show the correct curated model list in the UI.
 			displayConn := redactConnectionSecrets(conn)
-			if len(displayConn.SupportedModels) == 0 && len(provCfg.RecommendedModels) > 0 {
-				displayConn.SupportedModels = provCfg.RecommendedModels
+			if len(displayConn.SupportedModels) == 0 {
+				displayConn.SupportedModels = domain.GetDefaultConnectionModels(&cfg.Settings, conn.Provider)
 			}
 
 			views[i] = connectionView{
@@ -117,7 +118,8 @@ func apiDeleteConnection(store port.CredentialStore) gin.HandlerFunc {
 func apiUpdateConnection(store port.CredentialStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
-		if _, ok := requireTenantOwnsConnection(c, store, id); !ok {
+		owned, ok := requireTenantOwnsConnection(c, store, id)
+		if !ok {
 			return
 		}
 		var req struct {
@@ -135,6 +137,12 @@ func apiUpdateConnection(store port.CredentialStore) gin.HandlerFunc {
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(400, gin.H{"error": "Invalid request"})
 			return
+		}
+		if req.BaseURL != nil {
+			if err := shared.ValidateOutboundURL(*req.BaseURL, shared.AllowPrivateOutbound(owned.TenantID)); err != nil {
+				c.JSON(400, gin.H{"error": "invalid baseUrl: " + err.Error()})
+				return
+			}
 		}
 
 		found := false

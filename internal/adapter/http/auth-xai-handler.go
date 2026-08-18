@@ -300,6 +300,8 @@ func createXAIConnectionFromAuthFile(store port.CredentialStore, c *gin.Context,
 	baseURL := strings.TrimSpace(f.BaseURL)
 	if baseURL == "" {
 		baseURL = adapterauth.XAIDefaultAPIBaseURL
+	} else if _, err := adapterauth.ValidateXAIEndpoint(baseURL, "base_url"); err != nil {
+		baseURL = adapterauth.XAIDefaultAPIBaseURL
 	}
 
 	expiresIn := f.ExpiresIn
@@ -318,6 +320,12 @@ func createXAIConnectionFromAuthFile(store port.CredentialStore, c *gin.Context,
 	tokenEndpoint := strings.TrimSpace(f.TokenEp)
 	if tokenEndpoint == "" {
 		tokenEndpoint = adapterauth.XAIIssuer + "/oauth2/token"
+	} else {
+		validated, err := adapterauth.ValidateXAIEndpoint(tokenEndpoint, "token_endpoint")
+		if err != nil {
+			return nil, false, fmt.Errorf("invalid token endpoint: %w", err)
+		}
+		tokenEndpoint = validated
 	}
 
 	redirectURI := strings.TrimSpace(f.RedirectURI)

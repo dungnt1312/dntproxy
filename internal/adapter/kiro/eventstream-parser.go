@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"hash/crc32"
 )
 
 // EventFrame represents a parsed AWS EventStream frame.
@@ -14,21 +15,27 @@ type EventFrame struct {
 
 // ParseEventFrames extracts complete EventStream frames from a buffer.
 // Returns parsed frames and the remaining unprocessed bytes.
-func ParseEventFrames(buf []byte) ([]EventFrame, []byte) {
+const maxEventStreamFrame = 16 << 20
+
+func ParseEventFrames(buf []byte) ([]EventFrame, []byte, error) {
 	var frames []EventFrame
-	iterations := 0
-	maxIterations := 1000
+	if len(buf) > maxEventStreamFrame {
+		return nil, nil, fmt.Errorf("eventstream buffer exceeded %d bytes", maxEventStreamFrame)
+	}
 
-	for len(buf) >= 16 && iterations < maxIterations {
-		iterations++
-
-		// First 4 bytes: total message length (big-endian)
+	for len(buf) >= 16 {
 		totalLength := int(binary.BigEndian.Uint32(buf[0:4]))
-		if totalLength < 16 || totalLength > len(buf) {
+		if totalLength < 16 || totalLength > maxEventStreamFrame {
+			return frames, nil, fmt.Errorf("invalid eventstream frame length %d", totalLength)
+		}
+		if totalLength > len(buf) {
 			break
 		}
 
 		frameData := buf[:totalLength]
+		if !validEventStreamCRC(frameData) {
+			return frames, nil, fmt.Errorf("eventstream crc mismatch")
+		}
 		buf = buf[totalLength:]
 
 		frame := parseOneFrame(frameData)
@@ -37,7 +44,19 @@ func ParseEventFrames(buf []byte) ([]EventFrame, []byte) {
 		}
 	}
 
-	return frames, buf
+	return frames, buf, nil
+}
+
+func validEventStreamCRC(data []byte) bool {
+	if len(data) < 16 {
+		return false
+	}
+	preludeCRC := binary.BigEndian.Uint32(data[8:12])
+	if crc32.ChecksumIEEE(data[0:8]) != preludeCRC {
+		return false
+	}
+	messageCRC := binary.BigEndian.Uint32(data[len(data)-4:])
+	return crc32.ChecksumIEEE(data[:len(data)-4]) == messageCRC
 }
 
 func parseOneFrame(data []byte) *EventFrame {

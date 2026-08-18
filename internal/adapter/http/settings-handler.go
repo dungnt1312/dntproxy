@@ -17,23 +17,25 @@ func apiGetSettings(store port.CredentialStore) gin.HandlerFunc {
 			return
 		}
 
-		// Override with actual running port from context
-		settings := cfg.Settings
-		if actualPort := GetServerPort(c); actualPort > 0 {
-			settings.Port = actualPort
-		}
-
-		// Strip secrets for non-admin callers. This endpoint is intentionally
-		// exempt from auth middleware (needed for UI bootstrap), so we resolve
-		// the key directly from the Authorization header instead of relying on
-		// GetTenantID (which is empty when middleware is skipped).
 		key := extractAPIKey(c.Request)
 		apiKey, ok := store.GetAPIKeyByValue(key)
-		if ok && apiKey != nil && !domain.IsLegacyTenant(apiKey.TenantID) {
-			settings.Telegram.BotToken = ""
+		authenticated := ok && apiKey != nil && apiKey.IsActive
+		if !authenticated {
+			c.JSON(200, gin.H{})
+			return
 		}
 
-		c.JSON(200, settings)
+		s := cfg.Settings
+		c.JSON(200, settingsAPIView{
+			ComboStrategy:            s.ComboStrategy,
+			ComboStrategies:          s.ComboStrategies,
+			ConnectionStrategy:       s.ConnectionStrategy,
+			ConnectionStrategies:     s.ConnectionStrategies,
+			Compression:              s.Compression,
+			LogBodies:                s.LogBodies,
+			DefaultModels:            s.DefaultModels,
+			DisableImageGeneration:   s.DisableImageGeneration,
+		})
 	}
 }
 
@@ -42,7 +44,7 @@ func apiUpdateSettings(store port.CredentialStore) gin.HandlerFunc {
 		if !requireAdmin(c) {
 			return
 		}
-		var req domain.Settings
+		var req settingsUpdateRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(400, gin.H{"error": "Invalid settings"})
 			return
@@ -50,16 +52,15 @@ func apiUpdateSettings(store port.CredentialStore) gin.HandlerFunc {
 
 		var updated domain.Settings
 		if err := store.Update(func(cfg *domain.AppConfig) {
-			if req.Port > 0 {
-				cfg.Settings.Port = req.Port
-			}
 			if req.ComboStrategy != "" {
 				cfg.Settings.ComboStrategy = req.ComboStrategy
 			}
 			if req.ConnectionStrategy != "" {
 				cfg.Settings.ConnectionStrategy = req.ConnectionStrategy
 			}
-			cfg.Settings.RequireAPIKey = req.RequireAPIKey
+			if req.ConnectionStrategies != nil {
+				cfg.Settings.ConnectionStrategies = req.ConnectionStrategies
+			}
 			if req.ComboStrategies != nil {
 				cfg.Settings.ComboStrategies = req.ComboStrategies
 			}
@@ -69,14 +70,8 @@ func apiUpdateSettings(store port.CredentialStore) gin.HandlerFunc {
 			if req.DefaultModels != nil {
 				cfg.Settings.DefaultModels = req.DefaultModels
 			}
-
-			// Telegram settings
-			cfg.Settings.Telegram.Enabled = req.Telegram.Enabled
-			if req.Telegram.BotToken != "" {
-				cfg.Settings.Telegram.BotToken = req.Telegram.BotToken
-			}
-			if req.Telegram.OwnerID != 0 {
-				cfg.Settings.Telegram.OwnerID = req.Telegram.OwnerID
+			if req.DisableImageGeneration != nil {
+				cfg.Settings.DisableImageGeneration = *req.DisableImageGeneration
 			}
 
 			updated = cfg.Settings
@@ -88,6 +83,39 @@ func apiUpdateSettings(store port.CredentialStore) gin.HandlerFunc {
 		// Update runtime flag for body logging
 		shared.SetLogBodiesEnabled(updated.LogBodies)
 
-		c.JSON(200, updated)
+		c.JSON(200, settingsAPIView{
+			ComboStrategy:          updated.ComboStrategy,
+			ComboStrategies:        updated.ComboStrategies,
+			ConnectionStrategy:     updated.ConnectionStrategy,
+			ConnectionStrategies:   updated.ConnectionStrategies,
+			Compression:            updated.Compression,
+			LogBodies:              updated.LogBodies,
+			DefaultModels:          updated.DefaultModels,
+			DisableImageGeneration: updated.DisableImageGeneration,
+		})
 	}
+}
+
+// Port and requireApiKey are not accepted here. Listen port comes from
+// PORT / --port; API keys are always required.
+type settingsUpdateRequest struct {
+	ComboStrategy        string              `json:"comboStrategy"`
+	ConnectionStrategy   string              `json:"connectionStrategy"`
+	ConnectionStrategies map[string]string   `json:"connectionStrategies"`
+	ComboStrategies      map[string]string   `json:"comboStrategies"`
+	Compression          domain.CompressionSettings `json:"compression"`
+	LogBodies                bool                 `json:"logBodies"`
+	DefaultModels            map[string][]string  `json:"defaultModels"`
+	DisableImageGeneration   *bool                `json:"disableImageGeneration"`
+}
+
+type settingsAPIView struct {
+	ComboStrategy          string                       `json:"comboStrategy"`
+	ComboStrategies        map[string]string            `json:"comboStrategies,omitempty"`
+	ConnectionStrategy     string                       `json:"connectionStrategy,omitempty"`
+	ConnectionStrategies   map[string]string            `json:"connectionStrategies,omitempty"`
+	Compression            domain.CompressionSettings   `json:"compression"`
+	LogBodies              bool                         `json:"logBodies"`
+	DefaultModels          map[string][]string          `json:"defaultModels,omitempty"`
+	DisableImageGeneration bool                         `json:"disableImageGeneration"`
 }

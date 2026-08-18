@@ -23,9 +23,6 @@ import (
 // serverPortKey is the context key for storing actual server port
 const serverPortKey = "server_port"
 
-// telegramBotKey is the context key for the telegram bot instance
-const telegramBotKey = "telegram_bot"
-
 // tenantIDKey is the context key for the resolved tenant ID (multi-tenancy).
 const tenantIDKey = "tenant_id"
 
@@ -34,8 +31,7 @@ const apiKeyObjKey = "api_key_obj"
 
 // Package-level references for late-bound components
 var (
-	globalTelegramBot interface{}
-	globalServerPort  int
+	globalServerPort int
 )
 
 // NewRouter creates and configures the Gin router.
@@ -43,7 +39,7 @@ func NewRouter(store port.CredentialStore, providers port.ProviderRegistry, imag
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.Use(gin.Recovery())
-	r.Use(corsMiddleware())
+	r.Use(corsMiddleware(store))
 	r.Use(requestLogger())
 
 	// Initialize runtime log-bodies flag from persisted settings
@@ -68,7 +64,7 @@ func NewRouter(store port.CredentialStore, providers port.ProviderRegistry, imag
 		}
 	})
 
-	// OpenAI-compatible endpoints (with optional API key check)
+	// OpenAI-compatible endpoints (API key always required)
 	v1 := r.Group("/v1")
 	v1.Use(apiKeyMiddleware(store))
 	{
@@ -97,11 +93,6 @@ func NewRouter(store port.CredentialStore, providers port.ProviderRegistry, imag
 // SetServerPort stores the actual server port for late-bound access.
 func SetServerPort(r *gin.Engine, port int) {
 	globalServerPort = port
-}
-
-// SetTelegramBot stores the telegram bot reference for handler access.
-func SetTelegramBot(r *gin.Engine, bot interface{}, alerter interface{}) {
-	globalTelegramBot = bot
 }
 
 // GetServerPort retrieves the actual server port.
@@ -228,14 +219,64 @@ func (p *prefixFS) Open(name string) (http.File, error) {
 	return p.fs.Open(p.prefix + "/" + strings.TrimPrefix(name, "/"))
 }
 
-func corsMiddleware() gin.HandlerFunc {
+func originAllowed(origin string, store port.CredentialStore) bool {
+	if origin == "" {
+		return false
+	}
+	if isLocalDevOrigin(origin) {
+		return true
+	}
+	if store == nil {
+		return false
+	}
+	settings, err := store.GetSettings()
+	if err != nil || settings == nil || settings.TunnelURL == "" {
+		return false
+	}
+	tunnel := strings.TrimRight(settings.TunnelURL, "/")
+	// TunnelURL is typically https://<id>.trycloudflare.com — allow only that origin.
+	if origin == tunnel {
+		return true
+	}
+	if strings.HasPrefix(tunnel, origin) || strings.HasPrefix(origin+"/", tunnel+"/") {
+		return origin == strings.TrimRight(tunnel, "/")
+	}
+	return false
+}
+
+func isLocalDevOrigin(origin string) bool {
+	switch origin {
+	case "http://localhost", "http://127.0.0.1", "http://[::1]":
+		return true
+	}
+	if port, ok := strings.CutPrefix(origin, "http://localhost:"); ok {
+		return isNumericPort(port)
+	}
+	if port, ok := strings.CutPrefix(origin, "http://127.0.0.1:"); ok {
+		return isNumericPort(port)
+	}
+	if port, ok := strings.CutPrefix(origin, "http://[::1]:"); ok {
+		return isNumericPort(port)
+	}
+	return false
+}
+
+func isNumericPort(port string) bool {
+	if port == "" {
+		return false
+	}
+	for _, r := range port {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func corsMiddleware(store port.CredentialStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		origin := c.Request.Header.Get("Origin")
-		// Allow localhost origins (any port) and Cloudflare tunnel origins
-		if origin != "" && (strings.HasPrefix(origin, "http://localhost") ||
-			strings.HasPrefix(origin, "http://127.0.0.1") ||
-			strings.HasPrefix(origin, "http://[::1]") ||
-			strings.HasSuffix(origin, ".trycloudflare.com")) {
+		if originAllowed(origin, store) {
 			c.Header("Access-Control-Allow-Origin", origin)
 		}
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
@@ -267,15 +308,8 @@ func dashboardKeyMiddleware(store port.CredentialStore) gin.HandlerFunc {
 
 func apiKeyMiddlewareWithDashboard(store port.CredentialStore, requireDashboard bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Dashboard routes (/api/*) always require auth.
-		// API routes (/v1/*) respect the RequireAPIKey setting for backward compatibility.
-		if !requireDashboard {
-			cfg, err := store.Load()
-			if err == nil && cfg != nil && !cfg.Settings.RequireAPIKey {
-				c.Next()
-				return
-			}
-		}
+		// Both /api/* and /v1/* always require an API key. settings.requireApiKey
+		// is ignored so a settings save or default-false db.json cannot open the proxy.
 
 		// Exempt endpoints needed for UI auth bootstrap
 		path := c.Request.URL.Path

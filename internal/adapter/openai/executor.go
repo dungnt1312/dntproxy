@@ -3,6 +3,7 @@ package openai
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -76,11 +77,27 @@ func isCodexOAuth(credentials *domain.Credentials) bool {
 }
 
 // Execute sends a request to OpenAI (or compatible) API and returns a streaming reader.
-func (e *Executor) Execute(model string, body []byte, credentials *domain.Credentials, reqlog port.RequestLogger) (io.ReadCloser, int, error) {
-	if isCodexOAuth(credentials) {
-		return e.executeCodexResponses(model, body, credentials, reqlog)
+func (e *Executor) Execute(ctx context.Context, model string, body []byte, credentials *domain.Credentials, reqlog port.RequestLogger) (io.ReadCloser, int, error) {
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	return e.executeStandard(model, body, credentials, reqlog)
+	if isCodexOAuth(credentials) {
+		return e.executeCodexResponses(ctx, model, body, credentials, reqlog)
+	}
+	return e.executeStandard(ctx, model, body, credentials, reqlog)
+}
+
+func forceUpstreamStream(body []byte) []byte {
+	var payload map[string]interface{}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return body
+	}
+	payload["stream"] = true
+	rewritten, err := json.Marshal(payload)
+	if err != nil {
+		return body
+	}
+	return rewritten
 }
 
 func applyModelPrefix(body []byte, prefix string) ([]byte, error) {
@@ -106,7 +123,7 @@ func applyModelPrefix(body []byte, prefix string) ([]byte, error) {
 }
 
 // executeStandard handles standard OpenAI API key requests (api.openai.com/v1/chat/completions).
-func (e *Executor) executeStandard(model string, body []byte, credentials *domain.Credentials, reqlog port.RequestLogger) (io.ReadCloser, int, error) {
+func (e *Executor) executeStandard(ctx context.Context, model string, body []byte, credentials *domain.Credentials, reqlog port.RequestLogger) (io.ReadCloser, int, error) {
 	baseURL := resolveBaseURL(credentials)
 	chatPath := resolveChatPath(credentials)
 	url := baseURL + chatPath
@@ -114,8 +131,9 @@ func (e *Executor) executeStandard(model string, body []byte, credentials *domai
 	if err != nil {
 		return nil, 400, err
 	}
+	forwardBody = forceUpstreamStream(forwardBody)
 
-	req, err := http.NewRequest("POST", url, bytes.NewReader(forwardBody))
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(forwardBody))
 	if err != nil {
 		return nil, 500, fmt.Errorf("create request: %w", err)
 	}
@@ -182,7 +200,7 @@ func (e *Executor) executeStandard(model string, body []byte, credentials *domai
 // executeCodexResponses handles OpenAI OAuth tokens via the Codex Responses API.
 // Translates: Chat Completions request → Codex Responses API request
 // And:        Codex Responses API SSE → Chat Completions SSE
-func (e *Executor) executeCodexResponses(model string, body []byte, credentials *domain.Credentials, reqlog port.RequestLogger) (io.ReadCloser, int, error) {
+func (e *Executor) executeCodexResponses(ctx context.Context, model string, body []byte, credentials *domain.Credentials, reqlog port.RequestLogger) (io.ReadCloser, int, error) {
 	// Translate request: Chat Completions → Codex Responses API
 	translatedBody, err := TranslateChatToCodexResponses(body)
 	if err != nil {
@@ -191,7 +209,7 @@ func (e *Executor) executeCodexResponses(model string, body []byte, credentials 
 
 	url := codexResponsesURL
 
-	req, err := http.NewRequest("POST", url, bytes.NewReader(translatedBody))
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(translatedBody))
 	if err != nil {
 		return nil, 500, fmt.Errorf("create request: %w", err)
 	}

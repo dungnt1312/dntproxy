@@ -3,6 +3,8 @@ package minimax
 import (
 	"net/http"
 	"time"
+
+	"github.com/dungnt/dntproxy/internal/adapter/shared"
 )
 
 // ImageResponseHeaderTimeout allows MiniMax enough time to finish generation
@@ -23,5 +25,6 @@ func NewImageHTTPClient() *http.Client {
 			ResponseHeaderTimeout: ImageResponseHeaderTimeout,
 			ForceAttemptHTTP2:     true,
 		},
+		CheckRedirect: shared.CheckRedirectSafe,
 	}
 }

@@ -58,7 +58,7 @@ export default function PlaygroundScreen() {
 	    handleProviderChange,
 	  } = usePlaygroundModelSelection(chatModels);
 
-  const { messages, sending, queuedCount, enqueueTurn, clearQueue } = useChatQueue((log) => {
+  const { messages, sending, queuedCount, streamingId, enqueueTurn, clearQueue } = useChatQueue((log) => {
     setRequestLogs((prev) => [log, ...prev].slice(0, 50));
   });
 
@@ -87,13 +87,17 @@ export default function PlaygroundScreen() {
     scrollAnchorRef.current?.scrollIntoView({ behavior: sending ? "auto" : "smooth" });
   }, [messages, sending]);
 
+  const sendingLockRef = useRef(false);
+
   const handleSend = () => {
     const content = input.trim();
     if ((!content && attachments.length === 0) || !finalModelString) return;
+    if (sendingLockRef.current) return;
     if (attachments.length > 0 && !supportsImages) {
       toast.error("Selected model does not support image input");
       return;
     }
+    sendingLockRef.current = true;
 
     const userMessage: Message = {
       id: crypto.randomUUID(),
@@ -105,6 +109,9 @@ export default function PlaygroundScreen() {
     setInput("");
     setAttachments([]);
     enqueueTurn(userMessage, finalModelString, params);
+    window.setTimeout(() => {
+      sendingLockRef.current = false;
+    }, 200);
   };
 
   const handleClear = () => {
@@ -183,7 +190,7 @@ export default function PlaygroundScreen() {
                   {finalModelString && <div className="flex items-center gap-2"><Badge variant="secondary">{finalModelString}</Badge><Zap className="h-4 w-4 text-emerald-600" /></div>}
                 </div>
               ) : (
-                <ChatView messages={messages} />
+                <ChatView messages={messages} streamingId={streamingId} />
               )}
               <div ref={scrollAnchorRef} />
             </div>

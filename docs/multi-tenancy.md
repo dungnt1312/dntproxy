@@ -2,7 +2,7 @@
 
 dntproxy supports multi-tenancy for SaaS deployments where a single proxy
 instance serves multiple customers (tenants) with **logical isolation** of
-connections, combos, aliases, API keys, and logs.
+connections, combos, API keys, and logs. Model aliases remain global.
 
 ## Overview
 
@@ -121,6 +121,10 @@ No manual migration step is required.
 
 - **Aliases** (`modelAliases`) are currently shared globally. Per-tenant
   aliasing would require extending the alias map structure.
+- Tenant connections cannot store a private/loopback `baseUrl`. Admin/legacy
+  connections still may (self-host Ollama).
+- Deleting a tenant that still has keys, connections, or combos requires
+  `cascade=true`.
 - **Settings** (`settings`) and **model registry** are global. Per-tenant
   settings are not yet supported.
 - **Physical isolation** (per-tenant DB files) is not implemented; this

@@ -120,6 +120,62 @@ func TestAPIKeyUpdateStoresPermissionsAndActiveState(t *testing.T) {
 	}
 }
 
+func TestAPIKeyUpdateOmitsAllowlistsLeavesExisting(t *testing.T) {
+	router, db := newKeyTestRouter(t)
+	create := performJSONRequest(router, http.MethodPost, "/keys", map[string]any{
+		"name":                 "restricted",
+		"allowedConnectionIds": []string{"conn-openai"},
+		"allowedModels":        []string{"oai/gpt-4o"},
+	})
+	if create.Code != http.StatusOK {
+		t.Fatalf("create status = %d body = %s", create.Code, create.Body.String())
+	}
+	cfg, err := db.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := cfg.APIKeys[0].ID
+
+	rec := performJSONRequest(router, http.MethodPut, "/keys/"+id, map[string]any{
+		"name": "renamed-only",
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("update status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	cfg, err = db.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := cfg.APIKeys[0]
+	if key.Name != "renamed-only" {
+		t.Fatalf("name = %q", key.Name)
+	}
+	if len(key.AllowedConnectionIDs) != 1 || key.AllowedConnectionIDs[0] != "conn-openai" {
+		t.Fatalf("allowlist wiped: %#v", key.AllowedConnectionIDs)
+	}
+}
+
+func TestAPIKeyListMasksSecrets(t *testing.T) {
+	router, db := newKeyTestRouter(t)
+	create := performJSONRequest(router, http.MethodPost, "/keys", map[string]any{"name": "visible"})
+	if create.Code != http.StatusOK {
+		t.Fatalf("create status = %d", create.Code)
+	}
+	cfg, err := db.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain := cfg.APIKeys[0].Key
+
+	rec := performJSONRequest(router, http.MethodGet, "/keys", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	if bytes.Contains(rec.Body.Bytes(), []byte(plain)) {
+		t.Fatal("list returned plaintext API key")
+	}
+}
+
 func TestAPIKeyRejectsUnknownConnection(t *testing.T) {
 	router, _ := newKeyTestRouter(t)
 

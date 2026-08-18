@@ -57,6 +57,12 @@ func CheckFallbackError(status int, errorText string, backoffLevel int) Fallback
 	}
 
 	// Error text patterns take priority
+	if strings.Contains(lower, "timeout awaiting response headers") {
+		// HTTP/2 response-header timeouts are transient upstream stalls, not
+		// account failures. Fall back to another account for this request but
+		// don't penalize this one (CooldownMs 0 → no cooldown/lastError/lock).
+		return FallbackResult{ShouldFallback: true, CooldownMs: 0, NewBackoffLevel: backoffLevel}
+	}
 	if strings.Contains(lower, "no credentials") {
 		return FallbackResult{ShouldFallback: true, CooldownMs: CooldownNotFound, NewBackoffLevel: backoffLevel}
 	}
@@ -86,8 +92,13 @@ func CheckFallbackError(status int, errorText string, backoffLevel int) Fallback
 	switch status {
 	case 401:
 		return FallbackResult{ShouldFallback: true, CooldownMs: CooldownUnauthorized, NewBackoffLevel: backoffLevel}
-	case 402, 403:
+	case 402:
 		return FallbackResult{ShouldFallback: true, CooldownMs: CooldownPaymentReq, NewBackoffLevel: backoffLevel}
+	case 403:
+		// Non-entitlement 403s (e.g. Kiro transiently refusing) are not account
+		// failures — fall back without penalty. model_not_entitled is handled
+		// above with a model-only cooldown.
+		return FallbackResult{ShouldFallback: true, CooldownMs: 0, NewBackoffLevel: backoffLevel}
 	case 404:
 		return FallbackResult{ShouldFallback: true, CooldownMs: CooldownNotFound, NewBackoffLevel: backoffLevel}
 	case 429:
@@ -97,7 +108,9 @@ func CheckFallbackError(status int, errorText string, backoffLevel int) Fallback
 		}
 		return FallbackResult{ShouldFallback: true, CooldownMs: GetQuotaCooldown(backoffLevel), NewBackoffLevel: newLevel}
 	case 406, 408, 500, 502, 503, 504:
-		return FallbackResult{ShouldFallback: true, CooldownMs: CooldownTransient, NewBackoffLevel: backoffLevel}
+		// Per-model lock only — a 5xx on model A must not cool the whole account
+		// and block combo model B on the same connection.
+		return FallbackResult{ShouldFallback: true, CooldownMs: CooldownTransient, NewBackoffLevel: backoffLevel, ModelOnly: true}
 	}
 
 	// Default: fallback with transient cooldown
@@ -109,7 +122,6 @@ func isModelEntitlementError(lower string) bool {
 		"model_not_entitled",
 		"not entitled",
 		"not subscribed",
-		"not available",
 		"unavailable model",
 		"未订阅",
 		"封禁",

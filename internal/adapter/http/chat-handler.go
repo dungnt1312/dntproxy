@@ -69,6 +69,7 @@ func chatHandler(chatService port.ChatService, store port.CredentialStore, comp 
 		// Build metadata including tenant for downstream propagation
 		meta := compressionMetadata(stats)
 		meta.TenantID = tenantID
+		meta.Context = c.Request.Context()
 
 		result := chatService.HandleChat(body, partial.Model, requestID, policy, meta)
 
@@ -98,23 +99,40 @@ func chatHandler(chatService port.ChatService, store port.CredentialStore, comp 
 			var bytesReceived int64
 			done := make(chan struct{})
 			defer close(done)
-			chunks, errs := streamChunks(done, result.Stream)
+			events := streamChunks(done, result.Stream)
 			timeout := time.NewTimer(streamReadTimeout)
 			defer timeout.Stop()
+			writeSSEEnd := func(msg string) {
+				if msg != "" {
+					_, _ = c.Writer.Write([]byte("data: {\"error\":{\"message\":\"" + msg + "\"}}\n\n"))
+				}
+				_, _ = c.Writer.Write([]byte("data: [DONE]\n\n"))
+				c.Writer.Flush()
+			}
 			for {
 				select {
-				case chunk, ok := <-chunks:
+				case ev, ok := <-events:
 					if !ok {
 						result.Stream.Close()
 						return
 					}
-					if len(chunk) > 0 {
-						if _, writeErr := c.Writer.Write(chunk); writeErr != nil {
+					if ev.err != nil && ev.err != io.EOF {
+						log.Printf("[CHAT] Stream error: model=%s bytes=%d err=%s", partial.Model, bytesReceived, ev.err)
+						writeSSEEnd("stream interrupted")
+						result.Stream.Close()
+						return
+					}
+					if len(ev.data) > 0 {
+						if _, writeErr := c.Writer.Write(ev.data); writeErr != nil {
 							result.Stream.Close()
 							return
 						}
 						c.Writer.Flush()
-						bytesReceived += int64(len(chunk))
+						bytesReceived += int64(len(ev.data))
+					}
+					if ev.err == io.EOF {
+						result.Stream.Close()
+						return
 					}
 					if !timeout.Stop() {
 						select {
@@ -123,17 +141,13 @@ func chatHandler(chatService port.ChatService, store port.CredentialStore, comp 
 						}
 					}
 					timeout.Reset(streamReadTimeout)
-				case readErr, ok := <-errs:
-					if ok && readErr != nil && readErr != io.EOF {
-						log.Printf("[CHAT] Stream error: model=%s bytes=%d err=%s", partial.Model, bytesReceived, readErr)
-					}
-					result.Stream.Close()
-					return
 				case <-timeout.C:
 					log.Printf("[CHAT] Stream timeout after %v | model=%s bytes=%d", streamReadTimeout, partial.Model, bytesReceived)
+					writeSSEEnd("stream timeout")
 					result.Stream.Close()
 					return
 				case <-c.Request.Context().Done():
+					writeSSEEnd("client disconnected")
 					result.Stream.Close()
 					return
 				}
@@ -168,14 +182,16 @@ func compressionMetadata(stats compressor.Stats) port.RequestMetadata {
 	}
 }
 
-func streamChunks(done <-chan struct{}, r io.Reader) (<-chan []byte, <-chan error) {
-	chunks := make(chan []byte, 1)
-	errs := make(chan error, 1)
+type streamEvent struct {
+	data []byte
+	err  error
+}
+
+func streamChunks(done <-chan struct{}, r io.Reader) <-chan streamEvent {
+	out := make(chan streamEvent, 1)
 
 	go func() {
-		defer close(chunks)
-		defer close(errs)
-
+		defer close(out)
 		buf := make([]byte, 4096)
 		for {
 			select {
@@ -189,22 +205,24 @@ func streamChunks(done <-chan struct{}, r io.Reader) (<-chan []byte, <-chan erro
 				chunk := make([]byte, n)
 				copy(chunk, buf[:n])
 				select {
-				case chunks <- chunk:
+				case out <- streamEvent{data: chunk}:
 				case <-done:
 					return
 				}
 			}
 			if err != nil {
-				select {
-				case errs <- err:
-				case <-done:
+				if err != io.EOF || n == 0 {
+					select {
+					case out <- streamEvent{err: err}:
+					case <-done:
+					}
 				}
 				return
 			}
 		}
 	}()
 
-	return chunks, errs
+	return out
 }
 
 // --- Non-streaming aggregation types ---
@@ -341,23 +359,22 @@ func aggregateChatCompletion(stream io.Reader, requestedModel, requestID string)
 				choice.Message.Content += chunkChoice.Delta.Content
 			}
 
-			// Aggregate tool calls
 			for _, tc := range chunkChoice.Delta.ToolCalls {
-				if tc.Function.Name != "" {
-					// New tool call
-					choice.Message.ToolCalls = append(choice.Message.ToolCalls, chatToolCallEntry{
-						ID:   tc.ID,
-						Type: tc.Type,
-						Function: chatToolCallFn{
-							Name:      tc.Function.Name,
-							Arguments: tc.Function.Arguments,
-						},
-					})
-				} else if len(choice.Message.ToolCalls) > 0 {
-					// Append arguments to last tool call
-					last := &choice.Message.ToolCalls[len(choice.Message.ToolCalls)-1]
-					last.Function.Arguments += tc.Function.Arguments
+				idx := tc.Index
+				for len(choice.Message.ToolCalls) <= idx {
+					choice.Message.ToolCalls = append(choice.Message.ToolCalls, chatToolCallEntry{Type: "function"})
 				}
+				dest := &choice.Message.ToolCalls[idx]
+				if tc.ID != "" {
+					dest.ID = tc.ID
+				}
+				if tc.Type != "" {
+					dest.Type = tc.Type
+				}
+				if tc.Function.Name != "" {
+					dest.Function.Name = tc.Function.Name
+				}
+				dest.Function.Arguments += tc.Function.Arguments
 			}
 
 			if chunkChoice.FinishReason != nil {

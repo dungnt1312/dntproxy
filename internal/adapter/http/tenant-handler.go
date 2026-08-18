@@ -195,6 +195,27 @@ func apiDeleteTenant(store port.CredentialStore) gin.HandlerFunc {
 		// cascade=true also deletes the tenant's connections, combos, and keys.
 		cascade := strings.EqualFold(c.Query("cascade"), "true")
 
+		cfg, err := store.Load()
+		if err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+		var existing *domain.Tenant
+		for i := range cfg.Tenants {
+			if cfg.Tenants[i].ID == id {
+				existing = &cfg.Tenants[i]
+				break
+			}
+		}
+		if existing == nil {
+			c.JSON(404, gin.H{"error": "Tenant not found"})
+			return
+		}
+		if !cascade && tenantHasLeftoverResources(cfg, existing.Slug) {
+			c.JSON(400, gin.H{"error": "Tenant still has keys, connections, or combos. Retry with cascade=true to delete them."})
+			return
+		}
+
 		found := false
 		deletedSlug := ""
 		if err := store.Update(func(cfg *domain.AppConfig) {
@@ -224,9 +245,32 @@ func apiDeleteTenant(store port.CredentialStore) gin.HandlerFunc {
 			c.JSON(404, gin.H{"error": "Tenant not found"})
 			return
 		}
+		invalidateTenantDisableCache(deletedSlug)
 		logAction("tenant deleted: %s (cascade=%v)", deletedSlug, cascade)
 		c.JSON(200, gin.H{"ok": true})
 	}
+}
+
+func tenantHasLeftoverResources(cfg *domain.AppConfig, slug string) bool {
+	if cfg == nil || slug == "" {
+		return false
+	}
+	for _, k := range cfg.APIKeys {
+		if k.TenantID == slug {
+			return true
+		}
+	}
+	for _, conn := range cfg.ProviderConnections {
+		if conn.TenantID == slug {
+			return true
+		}
+	}
+	for _, combo := range cfg.Combos {
+		if combo.TenantID == slug {
+			return true
+		}
+	}
+	return false
 }
 
 // apiGenerateTenantKey creates an API key pinned to the tenant's slug.

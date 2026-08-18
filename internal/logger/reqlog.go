@@ -20,6 +20,7 @@ type RequestLog struct {
 
 	// Identity
 	ID        string
+	RequestID string
 	StartTime time.Time
 
 	// Client (inbound)
@@ -79,7 +80,8 @@ func NewRequestLog(requestID string) *RequestLog {
 		requestID = uuid.New().String()
 	}
 	return &RequestLog{
-		ID:        requestID,
+		ID:        uuid.New().String(),
+		RequestID: requestID,
 		StartTime: time.Now(),
 		Currency:  "USD",
 	}
@@ -90,6 +92,13 @@ func NewRequestLogForTenant(requestID, tenantID string) *RequestLog {
 	rl := NewRequestLog(requestID)
 	rl.TenantID = tenantID
 	return rl
+}
+
+func (r *RequestLog) requestIDOrID() string {
+	if r.RequestID != "" {
+		return r.RequestID
+	}
+	return r.ID
 }
 
 // Begin records the incoming client request.
@@ -223,7 +232,7 @@ func (r *RequestLog) emitStructuredLogs() {
 		ConnectionID:   r.ConnectionID,
 		ConnectionName: r.ConnectionName,
 		Model:          r.ResolvedModel,
-		RequestID:      r.ID,
+		RequestID:      r.requestIDOrID(),
 		Message:        r.buildMessage(),
 		Error:          r.Error,
 		BodySize:       r.BodySize,

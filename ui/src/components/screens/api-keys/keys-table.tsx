@@ -1,4 +1,4 @@
-import { Edit3, Eye, EyeOff, Trash2 } from 'lucide-react'
+import { Edit3, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -11,7 +11,6 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { cn } from '@/lib/utils'
-import { CopyButton } from './copy-button'
 import { PermissionSummary } from './permission-summary'
 import type { ApiKey } from './types'
 
@@ -50,7 +49,6 @@ export function KeysTable({
         </TableHeader>
         <TableBody>
           {keys.map((apiKey) => {
-            const isRevealed = revealedKeys.has(apiKey.id)
             return (
               <TableRow key={apiKey.id}>
                 <TableCell>
@@ -65,22 +63,8 @@ export function KeysTable({
                 <TableCell>
                   <div className="flex items-center gap-1">
                     <code className="text-xs bg-muted px-2 py-1 rounded font-mono max-w-[280px] truncate select-all">
-                      {isRevealed ? apiKey.key : maskKey(apiKey.key)}
+                      {maskKey(apiKey.key)}
                     </code>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="size-7"
-                          onClick={() => onToggleReveal(apiKey.id)}
-                        >
-                          {isRevealed ? <EyeOff className="size-3" /> : <Eye className="size-3" />}
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>{isRevealed ? 'Hide key' : 'Reveal key'}</TooltipContent>
-                    </Tooltip>
-                    <CopyButton text={apiKey.key} label="Key" />
                   </div>
                 </TableCell>
                 <TableCell>

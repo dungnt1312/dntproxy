@@ -5,6 +5,8 @@ import "testing"
 func TestDefaultModelRegistryIncludesXAIModels(t *testing.T) {
 	registry := DefaultModelRegistry()
 	models := []string{
+		"xai/grok-4.6",
+		"xai/grok-4.5",
 		"xai/grok-build-0.1",
 		"xai/grok-4.3",
 		"xai/grok-4.20-0309-reasoning",
@@ -35,9 +37,9 @@ func TestDefaultXAIModelsIncludeExpandedRegistry(t *testing.T) {
 	models := GetProviderConfig("xai").DefaultModels
 	// These are the primary models that must always be in the recommended list.
 	required := []string{
-		"grok-4.20-0309-reasoning",
+		"grok-4.6",
+		"grok-4.5",
 		"grok-4.3",
-		"grok-4.20-0309-non-reasoning",
 	}
 	modelSet := make(map[string]bool, len(models))
 	for _, m := range models {

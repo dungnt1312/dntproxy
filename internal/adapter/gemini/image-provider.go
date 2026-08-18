@@ -38,12 +38,12 @@ type ImageProvider struct {
 var _ port.ImageProvider = (*ImageProvider)(nil)
 
 func NewImageProvider(loader ImageLoader) *ImageProvider {
-	return NewImageProviderWithClient(loader, &http.Client{Timeout: 180 * time.Second})
+	return NewImageProviderWithClient(loader, shared.NewSafeHTTPClient(180*time.Second))
 }
 
 func NewImageProviderWithClient(loader ImageLoader, client *http.Client) *ImageProvider {
 	if client == nil {
-		client = &http.Client{Timeout: 180 * time.Second}
+		client = shared.NewSafeHTTPClient(180 * time.Second)
 	}
 	return &ImageProvider{client: client, load: loader}
 }

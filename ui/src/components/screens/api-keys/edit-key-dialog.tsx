@@ -13,6 +13,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { PermissionsEditor } from './permissions-editor'
+import { useAppStore } from '@/stores/app-store'
 import type { ApiKey, ApiKeyUpdatePayload, ConnectionOption, ModelOption } from './types'
 
 interface EditKeyDialogProps {
@@ -25,6 +26,7 @@ interface EditKeyDialogProps {
 }
 
 export function EditKeyDialog({ apiKey, open, onOpenChange, onSave, connections, models }: EditKeyDialogProps) {
+  const isAdmin = Boolean(useAppStore((s) => s.session?.isAdmin))
   const [name, setName] = useState('')
   const [isActive, setIsActive] = useState(true)
   const [dashboardAccess, setDashboardAccess] = useState(false)
@@ -80,6 +82,7 @@ export function EditKeyDialog({ apiKey, open, onOpenChange, onSave, connections,
               <Label htmlFor="editKeyActive" className="pb-0.5">{isActive ? 'Active' : 'Inactive'}</Label>
             </div>
           </div>
+          {isAdmin ? (
           <div className="flex items-center justify-between rounded-lg border p-3">
             <div className="space-y-0.5">
               <Label htmlFor="editDashboardAccess">Dashboard Access</Label>
@@ -93,6 +96,7 @@ export function EditKeyDialog({ apiKey, open, onOpenChange, onSave, connections,
               onCheckedChange={setDashboardAccess}
             />
           </div>
+          ) : null}
           <PermissionsEditor
             value={{ allowedConnectionIds, allowedModels }}
             onChange={(next) => {

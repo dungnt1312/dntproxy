@@ -75,6 +75,7 @@ type Credentials struct {
 	ProfileArn           string
 	BaseURL              string
 	ModelPrefix          string
+	TenantID             string
 	ProviderSpecificData map[string]interface{}
 }
 

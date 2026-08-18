@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dungnt/dntproxy/internal/adapter/shared"
 	"github.com/dungnt/dntproxy/internal/domain"
 	"github.com/dungnt/dntproxy/internal/port"
 	"github.com/gin-gonic/gin"
@@ -341,6 +342,10 @@ func handleOpenAIAPIKeyQuota(c *gin.Context, conn *domain.ProviderConnection, st
 		c.JSON(400, gin.H{"error": "No base URL configured"})
 		return
 	}
+	if err := shared.ValidateOutboundURL(baseURL, shared.AllowPrivateOutbound(conn.TenantID)); err != nil {
+		c.JSON(400, gin.H{"error": "invalid baseUrl: " + err.Error()})
+		return
+	}
 	baseURL = domain.StripVersionSuffix(baseURL)
 
 	req, _ := http.NewRequest("GET", baseURL+"/v1/models", nil)
@@ -351,7 +356,7 @@ func handleOpenAIAPIKeyQuota(c *gin.Context, conn *domain.ProviderConnection, st
 	}
 	req.Header.Set("User-Agent", "dntproxy/1.0")
 
-	httpClient := &http.Client{Timeout: 10 * time.Second}
+	httpClient := shared.NewSafeHTTPClient(10 * time.Second)
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		c.JSON(502, gin.H{"error": "Request failed: " + err.Error()})

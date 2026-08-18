@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 )
 
 const cloudflaredVersion = "2026.3.0"
@@ -39,7 +40,7 @@ func NewCloudflared(state *StateManager, onURL func(string)) *Cloudflared {
 // EnsureBinary downloads cloudflared if not already present.
 func (c *Cloudflared) EnsureBinary() error {
 	binPath := c.binaryPath()
-	if _, err := os.Stat(binPath); err == nil {
+	if info, err := os.Stat(binPath); err == nil && info.Size() > 1024 {
 		return nil
 	}
 
@@ -61,7 +62,8 @@ func (c *Cloudflared) downloadBinary(target string) error {
 
 	fmt.Printf("[tunnel] Downloading cloudflared %s from %s\n", cloudflaredVersion, url)
 
-	resp, err := http.Get(url)
+	client := &http.Client{Timeout: 3 * time.Minute}
+	resp, err := client.Get(url)
 	if err != nil {
 		return fmt.Errorf("download cloudflared: %w", err)
 	}
@@ -75,20 +77,36 @@ func (c *Cloudflared) downloadBinary(target string) error {
 		return err
 	}
 
+	tmp := target + ".tmp"
+	_ = os.Remove(tmp)
+	defer os.Remove(tmp)
+
 	// Handle tar.gz archives
 	if strings.HasSuffix(url, ".tgz") || strings.HasSuffix(url, ".tar.gz") {
-		return c.extractTarGz(resp.Body, target)
+		if err := c.extractTarGz(resp.Body, tmp); err != nil {
+			return err
+		}
+	} else {
+		f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
+		if err != nil {
+			return err
+		}
+		_, copyErr := io.Copy(f, io.LimitReader(resp.Body, 200<<20))
+		closeErr := f.Close()
+		if copyErr != nil {
+			return fmt.Errorf("write binary: %w", copyErr)
+		}
+		if closeErr != nil {
+			return closeErr
+		}
 	}
 
-	// Direct binary download
-	f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
-	if err != nil {
-		return err
+	info, err := os.Stat(tmp)
+	if err != nil || info.Size() < 1024 {
+		return fmt.Errorf("downloaded cloudflared looks incomplete")
 	}
-	defer f.Close()
-
-	if _, err := io.Copy(f, resp.Body); err != nil {
-		return fmt.Errorf("write binary: %w", err)
+	if err := os.Rename(tmp, target); err != nil {
+		return fmt.Errorf("install cloudflared: %w", err)
 	}
 
 	fmt.Printf("[tunnel] Downloaded cloudflared to %s\n", target)

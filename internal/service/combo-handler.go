@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -8,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/dungnt/dntproxy/internal/adapter/shared"
 	"github.com/dungnt/dntproxy/internal/domain"
 	"github.com/dungnt/dntproxy/internal/logger"
 )
@@ -36,11 +38,15 @@ type ComboResult struct {
 // HandleCombo tries models in order (or round-robin) until one succeeds.
 // handleSingle is called for each model and should return a ComboResult.
 func (ch *ComboHandler) HandleCombo(
+	ctx context.Context,
 	models []string,
 	comboName string,
 	strategy string,
 	handleSingle func(modelStr string) (*ComboResult, error),
 ) (*ComboResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	rotated := ch.getRotatedModels(models, comboName, strategy)
 
 	var lastError string
@@ -48,11 +54,23 @@ func (ch *ComboHandler) HandleCombo(
 	var earliestRetry string
 
 	for i, modelStr := range rotated {
+		if err := ctx.Err(); err != nil {
+			return &ComboResult{OK: false, StatusCode: 499, Error: "client disconnected", Terminal: true}, err
+		}
 		if logger.IsDevMode() {
 			log.Printf("[COMBO] Trying model %d/%d: %s", i+1, len(rotated), modelStr)
 		}
 
 		result, err := handleSingle(modelStr)
+		if isClientAbort(ctx, result, err) {
+			msg := "client disconnected"
+			if result != nil && result.Error != "" {
+				msg = result.Error
+			} else if err != nil {
+				msg = err.Error()
+			}
+			return &ComboResult{OK: false, StatusCode: 499, Error: msg, Terminal: true}, err
+		}
 		if err != nil {
 			lastError = err.Error()
 			lastStatus = 500
@@ -88,7 +106,13 @@ func (ch *ComboHandler) HandleCombo(
 			if logger.IsDevMode() {
 				log.Printf("[COMBO] Model %s transient %d, waiting 2s", modelStr, result.StatusCode)
 			}
-			time.Sleep(2 * time.Second)
+			timer := time.NewTimer(2 * time.Second)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return &ComboResult{OK: false, StatusCode: 499, Error: "client disconnected"}, ctx.Err()
+			case <-timer.C:
+			}
 		}
 
 		lastError = result.Error
@@ -161,4 +185,14 @@ func shouldComboFallback(status int) bool {
 
 func isTransientStatus(status int) bool {
 	return status == 502 || status == 503 || status == 504
+}
+
+func isClientAbort(ctx context.Context, result *ComboResult, err error) bool {
+	if ctx.Err() != nil {
+		return true
+	}
+	if result != nil && result.StatusCode == 499 {
+		return true
+	}
+	return shared.IsCanceledOrClosedStream(err)
 }

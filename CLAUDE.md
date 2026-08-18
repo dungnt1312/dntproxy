@@ -100,7 +100,7 @@ OpenAI request → model resolve → combo expand → account select →
   "apiKeys": [],
   "settings": {
     "comboStrategy": "fallback",
-    "requireApiKey": false,
+    "requireApiKey": true,
     "port": 20199
   }
 }

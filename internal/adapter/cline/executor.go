@@ -6,6 +6,7 @@ package cline
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -30,7 +31,10 @@ func NewExecutor() *Executor {
 
 // Execute sends a request to ClinePass API.
 // Strips the "cl/" routing prefix from the model name before forwarding.
-func (e *Executor) Execute(model string, body []byte, credentials *domain.Credentials, reqlog port.RequestLogger) (io.ReadCloser, int, error) {
+func (e *Executor) Execute(ctx context.Context, model string, body []byte, credentials *domain.Credentials, reqlog port.RequestLogger) (io.ReadCloser, int, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	baseURL := credentials.BaseURL
 	if baseURL == "" {
 		cfg := domain.GetProviderConfig(credentials.Provider)
@@ -49,7 +53,7 @@ func (e *Executor) Execute(model string, body []byte, credentials *domain.Creden
 		return nil, http.StatusBadRequest, err
 	}
 
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(forwardBody))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(forwardBody))
 	if err != nil {
 		return nil, http.StatusInternalServerError, fmt.Errorf("create cline request: %w", err)
 	}
@@ -69,7 +73,7 @@ func (e *Executor) Execute(model string, body []byte, credentials *domain.Creden
 	reqlog.SetBodies(shared.PrepareLoggedBody(forwardBody), "")
 
 	start := time.Now()
-	resp, err := shared.StreamingHTTPClient.Do(req)
+	resp, err := shared.HTTP1StreamingClient.Do(req)
 	duration := time.Since(start)
 
 	if err != nil {
@@ -132,6 +136,7 @@ func stripClinePrefix(body []byte) ([]byte, error) {
 		model = strings.TrimPrefix(model, "cl/")
 		payload["model"] = model
 	}
+	payload["stream"] = true
 
 	rewritten, err := json.Marshal(payload)
 	if err != nil {

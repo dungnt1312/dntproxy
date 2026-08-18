@@ -77,6 +77,13 @@ type KiroPayload struct {
 	ConversationState KiroConversationState `json:"conversationState"`
 	ProfileArn        string                `json:"profileArn,omitempty"`
 	InferenceConfig   *KiroInferenceConfig  `json:"inferenceConfig,omitempty"`
+	ToolConfig        *KiroToolConfig       `json:"toolConfig,omitempty"`
+}
+
+// KiroToolConfig is the Bedrock-style tool configuration required by Kiro
+// whenever toolUse/toolResult content blocks are present.
+type KiroToolConfig struct {
+	Tools []KiroTool `json:"tools"`
 }
 
 // KiroConversationState holds the conversation context.
@@ -119,6 +126,9 @@ type OpenAIMessage struct {
 type ContentBlock struct {
 	Type      string          `json:"type"`
 	Text      string          `json:"text,omitempty"`
+	ID        string          `json:"id,omitempty"`
+	Name      string          `json:"name,omitempty"`
+	Input     json.RawMessage `json:"input,omitempty"`
 	ImageURL  interface{}     `json:"image_url,omitempty"`
 	ToolUseID string          `json:"tool_use_id,omitempty"`
 	Content   json.RawMessage `json:"content,omitempty"` // for tool_result
@@ -153,7 +163,7 @@ type OpenAIFunction struct {
 // BuildKiroPayload converts an OpenAI request to Kiro format.
 func BuildKiroPayload(req *OpenAIRequest, model string, creds *domain.Credentials) (*KiroPayload, error) {
 	tools := convertTools(req.Tools)
-	history, currentMsg := convertMessages(req.Messages, tools, model)
+	history, currentMsg, effectiveTools := convertMessages(req.Messages, tools, model)
 
 	// Inject timestamp into current message content
 	finalContent := ""
@@ -184,6 +194,13 @@ func BuildKiroPayload(req *OpenAIRequest, model string, creds *domain.Credential
 			CurrentMessage:  current,
 			History:         history,
 		},
+	}
+
+	// Bedrock/Kiro requires toolConfig whenever tools are used (toolUse and
+	// toolResult content blocks). Without it the API rejects with 400
+	// TOOL_CONFIG_MISSING and the stream never starts.
+	if len(effectiveTools) > 0 {
+		payload.ToolConfig = &KiroToolConfig{Tools: effectiveTools}
 	}
 
 	// Set profileArn
@@ -249,7 +266,7 @@ func convertTools(tools []OpenAITool) []KiroTool {
 	return result
 }
 
-func convertMessages(messages []OpenAIMessage, tools []KiroTool, model string) ([]KiroMessage, *KiroMessage) {
+func convertMessages(messages []OpenAIMessage, tools []KiroTool, model string) ([]KiroMessage, *KiroMessage, []KiroTool) {
 	var history []KiroMessage
 	var currentMessage *KiroMessage
 
@@ -412,7 +429,7 @@ func convertMessages(messages []OpenAIMessage, tools []KiroTool, model string) (
 		}
 	}
 
-	return history, currentMessage
+	return history, currentMessage, effectiveTools
 }
 
 func extractStringContent(raw json.RawMessage) string {
@@ -542,21 +559,18 @@ func extractAssistantContent(msg OpenAIMessage) (string, []KiroToolUse) {
 					textParts = append(textParts, b.Text)
 				}
 			case "tool_use":
-				// Claude-style tool_use in content array
-				var tu struct {
-					ID    string      `json:"id"`
-					Name  string      `json:"name"`
-					Input interface{} `json:"input"`
+				if b.Name == "" {
+					continue
 				}
-				// Re-parse from raw block
-				raw, _ := json.Marshal(b)
-				if err := json.Unmarshal(raw, &tu); err == nil && tu.Name != "" {
-					toolUses = append(toolUses, KiroToolUse{
-						ToolUseID: tu.ID,
-						Name:      tu.Name,
-						Input:     tu.Input,
-					})
+				var input interface{}
+				if len(b.Input) > 0 {
+					_ = json.Unmarshal(b.Input, &input)
 				}
+				toolUses = append(toolUses, KiroToolUse{
+					ToolUseID: b.ID,
+					Name:      b.Name,
+					Input:     input,
+				})
 			}
 		}
 		textContent = strings.TrimSpace(strings.Join(textParts, "\n"))

@@ -37,6 +37,7 @@ func NewImageClient() *ImageClient {
 			ResponseHeaderTimeout: ImageResponseHeaderTimeout,
 			ForceAttemptHTTP2:     true,
 		},
+		CheckRedirect: shared.CheckRedirectSafe,
 	}}
 }
 

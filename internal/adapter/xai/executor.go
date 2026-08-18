@@ -3,6 +3,7 @@ package xai
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -21,7 +22,10 @@ func NewExecutor() *Executor {
 	return &Executor{}
 }
 
-func (e *Executor) Execute(model string, body []byte, credentials *domain.Credentials, reqlog port.RequestLogger) (io.ReadCloser, int, error) {
+func (e *Executor) Execute(ctx context.Context, model string, body []byte, credentials *domain.Credentials, reqlog port.RequestLogger) (io.ReadCloser, int, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	translatedBody, err := TranslateChatToResponses(model, body)
 	if err != nil {
 		return nil, http.StatusBadRequest, err
@@ -33,7 +37,7 @@ func (e *Executor) Execute(model string, body []byte, credentials *domain.Creden
 	}
 	targetURL := baseURL + "/responses"
 
-	req, err := http.NewRequest(http.MethodPost, targetURL, bytes.NewReader(translatedBody))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(translatedBody))
 	if err != nil {
 		return nil, http.StatusInternalServerError, fmt.Errorf("create xai request: %w", err)
 	}

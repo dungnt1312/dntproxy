@@ -29,6 +29,7 @@ func apiListKeys(store port.CredentialStore) gin.HandlerFunc {
 		out := make([]domain.APIKey, len(keys))
 		for i, k := range keys {
 			out[i] = k
+			out[i].Key = maskAPIKey(k.Key)
 		}
 		c.JSON(200, out)
 	}
@@ -49,12 +50,11 @@ func apiCreateKey(store port.CredentialStore) gin.HandlerFunc {
 		}
 		req.AllowedConnectionIDs = uniqueNonEmpty(req.AllowedConnectionIDs)
 		req.AllowedModels = uniqueNonEmpty(req.AllowedModels)
-		if err := validateAllowedConnectionIDs(store, req.AllowedConnectionIDs); err != nil {
+		callerTenant := GetTenantID(c)
+		if err := validateAllowedConnectionIDs(store, req.AllowedConnectionIDs, callerTenant); err != nil {
 			c.JSON(400, gin.H{"error": err.Error()})
 			return
 		}
-
-		callerTenant := GetTenantID(c)
 		isAdmin := domain.IsLegacyTenant(callerTenant)
 
 		// Non-admin tenants can only create keys for their own tenant and
@@ -166,21 +166,27 @@ func apiUpdateKey(store port.CredentialStore) gin.HandlerFunc {
 			return
 		}
 		var req struct {
-			Name                 *string  `json:"name"`
-			IsActive             *bool    `json:"isActive"`
-			DashboardAccess      *bool    `json:"dashboardAccess"`
-			AllowedConnectionIDs []string `json:"allowedConnectionIds"`
-			AllowedModels        []string `json:"allowedModels"`
+			Name                 *string   `json:"name"`
+			IsActive             *bool     `json:"isActive"`
+			DashboardAccess      *bool     `json:"dashboardAccess"`
+			AllowedConnectionIDs *[]string `json:"allowedConnectionIds"`
+			AllowedModels        *[]string `json:"allowedModels"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(400, gin.H{"error": "invalid request body"})
 			return
 		}
-		req.AllowedConnectionIDs = uniqueNonEmpty(req.AllowedConnectionIDs)
-		req.AllowedModels = uniqueNonEmpty(req.AllowedModels)
-		if err := validateAllowedConnectionIDs(store, req.AllowedConnectionIDs); err != nil {
-			c.JSON(400, gin.H{"error": err.Error()})
-			return
+		var allowedConns []string
+		var allowedModels []string
+		if req.AllowedConnectionIDs != nil {
+			allowedConns = uniqueNonEmpty(*req.AllowedConnectionIDs)
+			if err := validateAllowedConnectionIDs(store, allowedConns, GetTenantID(c)); err != nil {
+				c.JSON(400, gin.H{"error": err.Error()})
+				return
+			}
+		}
+		if req.AllowedModels != nil {
+			allowedModels = uniqueNonEmpty(*req.AllowedModels)
 		}
 
 		// Non-admin tenants cannot grant dashboard access.
@@ -201,9 +207,12 @@ func apiUpdateKey(store port.CredentialStore) gin.HandlerFunc {
 					if req.DashboardAccess != nil {
 						cfg.APIKeys[i].DashboardAccess = *req.DashboardAccess
 					}
-					// Always update these (nil in JSON → empty slice → unrestricted)
-					cfg.APIKeys[i].AllowedConnectionIDs = req.AllowedConnectionIDs
-					cfg.APIKeys[i].AllowedModels = req.AllowedModels
+					if req.AllowedConnectionIDs != nil {
+						cfg.APIKeys[i].AllowedConnectionIDs = allowedConns
+					}
+					if req.AllowedModels != nil {
+						cfg.APIKeys[i].AllowedModels = allowedModels
+					}
 					found = true
 					break
 				}
@@ -237,7 +246,14 @@ func uniqueNonEmpty(values []string) []string {
 	return result
 }
 
-func validateAllowedConnectionIDs(store port.CredentialStore, ids []string) error {
+func maskAPIKey(key string) string {
+	if len(key) <= 8 {
+		return "****"
+	}
+	return key[:7] + "..." + key[len(key)-4:]
+}
+
+func validateAllowedConnectionIDs(store port.CredentialStore, ids []string, tenantID string) error {
 	if len(ids) == 0 {
 		return nil
 	}
@@ -246,8 +262,9 @@ func validateAllowedConnectionIDs(store port.CredentialStore, ids []string) erro
 	if err != nil {
 		return err
 	}
-	existing := make(map[string]struct{}, len(cfg.ProviderConnections))
-	for _, conn := range cfg.ProviderConnections {
+	conns := domain.FilterConnectionsByTenant(cfg.ProviderConnections, tenantID)
+	existing := make(map[string]struct{}, len(conns))
+	for _, conn := range conns {
 		existing[conn.ID] = struct{}{}
 	}
 	for _, id := range ids {

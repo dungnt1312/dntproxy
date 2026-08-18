@@ -3,12 +3,11 @@ import { Pause, Play, Trash2, Search, ArrowDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { getStoredApiKey } from "@/lib/go-api";
+import { consumeSSE } from "@/lib/go-api";
 import type { LogEntry } from "@/types/logs";
 import { buildFilterParams } from "./helpers";
 import type { LogFilters } from "@/types/logs";
 
-const SSE_BASE = import.meta.env.VITE_GO_API_URL || "/api";
 const MAX_LINES = 2000;
 
 // Color mapping for log levels
@@ -79,7 +78,7 @@ export function ConsoleViewer({ filters }: ConsoleViewerProps) {
   const [autoScroll, setAutoScroll] = useState(true);
 
   const containerRef = useRef<HTMLDivElement>(null);
-  const eventSourceRef = useRef<EventSource | null>(null);
+  const sseAbortRef = useRef<AbortController | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const backoffRef = useRef(1000);
   const pausedLinesRef = useRef<LogEntry[]>([]);
@@ -101,62 +100,49 @@ export function ConsoleViewer({ filters }: ConsoleViewerProps) {
 
   // SSE connection
   useEffect(() => {
-    const connectSSE = () => {
-      if (eventSourceRef.current) eventSourceRef.current.close();
-
-      const params = buildFilterParams(filters);
-      const apiKey = getStoredApiKey();
-      if (apiKey) params.set("key", apiKey);
-      const url = `${SSE_BASE}/logs/stream?${params.toString()}`;
-
-      const sse = new EventSource(url);
-      eventSourceRef.current = sse;
-
-      sse.onopen = () => {
-        backoffRef.current = 1000;
-      };
-
-      sse.onmessage = (event) => {
-        try {
-          const rawData = event.data;
-          if (rawData === ": keepalive") return;
-
-          const data = JSON.parse(rawData);
-          if (data.type === "init" && Array.isArray(data.logs)) {
-            const sorted = [...data.logs].reverse(); // oldest first for console
-            setLines(sorted.slice(-MAX_LINES));
-          } else if (data.type === "delta" && data.log) {
-            if (paused) {
-              pausedLinesRef.current.push(data.log);
-            } else {
-              setLines((prev) => {
-                const next = [...prev, data.log];
-                return next.length > MAX_LINES ? next.slice(-MAX_LINES) : next;
-              });
-            }
+    const handlePayload = (rawData: string) => {
+      if (!rawData || rawData === ": keepalive") return;
+      try {
+        const data = JSON.parse(rawData);
+        if (data.type === "init" && Array.isArray(data.logs)) {
+          const sorted = [...data.logs].reverse();
+          setLines(sorted.slice(-MAX_LINES));
+        } else if (data.type === "delta" && data.log) {
+          if (paused) {
+            pausedLinesRef.current.push(data.log);
+          } else {
+            setLines((prev) => {
+              const next = [...prev, data.log];
+              return next.length > MAX_LINES ? next.slice(-MAX_LINES) : next;
+            });
           }
-        } catch (e) {
-          console.error("Console SSE parse error", e);
         }
-      };
+      } catch (e) {
+        console.error("Console SSE parse error", e);
+      }
+    };
 
-      sse.onerror = () => {
-        sse.close();
+    const connectSSE = () => {
+      sseAbortRef.current?.abort();
+      const controller = new AbortController();
+      sseAbortRef.current = controller;
+      const params = buildFilterParams(filters);
+      void consumeSSE(`/api/logs/stream?${params.toString()}`, handlePayload, controller.signal).catch(() => {
+        if (controller.signal.aborted) return;
         if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
         reconnectTimerRef.current = setTimeout(() => {
           backoffRef.current = Math.min(backoffRef.current * 2, 30000);
           connectSSE();
         }, backoffRef.current);
-      };
+      });
+      backoffRef.current = 1000;
     };
 
     connectSSE();
 
     return () => {
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close();
-        eventSourceRef.current = null;
-      }
+      sseAbortRef.current?.abort();
+      sseAbortRef.current = null;
       if (reconnectTimerRef.current) {
         clearTimeout(reconnectTimerRef.current);
         reconnectTimerRef.current = null;

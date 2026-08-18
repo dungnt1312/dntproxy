@@ -172,7 +172,7 @@ func apiListModels(store port.CredentialStore) gin.HandlerFunc {
 			}
 
 			// Add combos
-			for _, combo := range cfg.Combos {
+			for _, combo := range domain.FilterCombosByTenant(cfg.Combos, tenantID) {
 				if !comboAllowedByPolicy(combo.Models, combo.Name, reachableModels, reachablePublicModels, policy) {
 					continue
 				}

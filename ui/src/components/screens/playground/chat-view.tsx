@@ -3,17 +3,17 @@ import ReactMarkdown from "react-markdown";
 import { Badge } from "@/components/ui/badge";
 import type { Attachment, Message } from "./types";
 
-export function ChatView({ messages }: { messages: Message[] }) {
+export function ChatView({ messages, streamingId }: { messages: Message[]; streamingId?: string }) {
   return (
     <>
       {messages.map((message) => (
-        <MessageRow key={message.id} message={message} />
+        <MessageRow key={message.id} message={message} isStreaming={message.id === streamingId} />
       ))}
     </>
   );
 }
 
-function MessageRow({ message }: { message: Message }) {
+function MessageRow({ message, isStreaming }: { message: Message; isStreaming?: boolean }) {
   const isUser = message.role === "user";
   const isError = message.status === "error" && message.role === "assistant";
 
@@ -27,7 +27,7 @@ function MessageRow({ message }: { message: Message }) {
         ) : isUser ? (
           <UserMessage message={message} />
         ) : (
-          <AssistantMessage content={message.content} />
+          <AssistantMessage content={message.content} isStreaming={isStreaming} />
         )}
       </div>
     </div>
@@ -76,7 +76,7 @@ function AttachmentGrid({ attachments }: { attachments: Attachment[] }) {
   );
 }
 
-function AssistantMessage({ content }: { content: string }) {
+function AssistantMessage({ content, isStreaming }: { content: string; isStreaming?: boolean }) {
   if (!content) {
     return (
       <div className="flex items-center gap-2 rounded-2xl rounded-tl-md border bg-card px-4 py-2.5 text-sm text-muted-foreground shadow-sm">
@@ -90,6 +90,7 @@ function AssistantMessage({ content }: { content: string }) {
     <div className="max-w-full rounded-2xl rounded-tl-md border bg-card px-4 py-3 text-sm text-card-foreground shadow-sm">
       <div className="prose prose-sm max-w-none break-words dark:prose-invert prose-pre:max-w-full prose-pre:overflow-x-auto prose-code:break-words">
         <ReactMarkdown>{content}</ReactMarkdown>
+        {isStreaming && <span className="streaming-cursor" aria-hidden="true" />}
       </div>
     </div>
   );

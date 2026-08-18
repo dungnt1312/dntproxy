@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, useMemo } from "react";
 import { FileWarning, RefreshCw, Radio, Terminal, Table2, Eye } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { goApi, getStoredApiKey } from "@/lib/go-api";
+import { goApi, consumeSSE } from "@/lib/go-api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
@@ -13,8 +13,6 @@ import { LogDetailSheet } from "./logs/log-detail-sheet";
 import { ConsoleViewer } from "./logs/console-viewer";
 import { LiveFeed } from "./dashboard/live-feed";
 import { buildFilterParams, DEFAULT_FILTERS } from "./logs/helpers";
-
-const SSE_BASE = import.meta.env.VITE_GO_API_URL || "/api";
 
 type ViewTab = "table" | "console" | "live";
 
@@ -91,7 +89,7 @@ export default function LogsScreen({
   const [selectedLogId, setSelectedLogId] = useState<string | null>(null);
 
   // SSE refs
-  const eventSourceRef = useRef<EventSource | null>(null);
+  const sseAbortRef = useRef<AbortController | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const backoffRef = useRef(1000);
   const fetchReqIdRef = useRef(0);
@@ -143,10 +141,8 @@ export default function LogsScreen({
   // SSE Live stream handling
   useEffect(() => {
     if (!live) {
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close();
-        eventSourceRef.current = null;
-      }
+      sseAbortRef.current?.abort();
+      sseAbortRef.current = null;
       if (reconnectTimerRef.current) {
         clearTimeout(reconnectTimerRef.current);
         reconnectTimerRef.current = null;
@@ -154,64 +150,56 @@ export default function LogsScreen({
       return;
     }
 
-	const connectSSE = () => {
-	  if (eventSourceRef.current) eventSourceRef.current.close();
-
-	  const params = buildFilterParams(debouncedFilters);
-	  const apiKey = getStoredApiKey();
-	  if (apiKey) params.set("key", apiKey);
-	  const url = `${SSE_BASE}/logs/stream?${params.toString()}`;
-
-      const sse = new EventSource(url);
-      eventSourceRef.current = sse;
-
-      sse.onopen = () => {
-        backoffRef.current = 1000;
-        setIsLoading(false);
-      };
-
-      sse.onmessage = (event) => {
-        try {
-          const rawData = event.data;
-          if (rawData === ": keepalive") return;
-
-          const data = JSON.parse(rawData);
-          if (data.type === "init" && Array.isArray(data.logs)) {
-            logIdSetRef.current = new Set(data.logs.map((log: LogEntry) => log.id));
-            setLogs(data.logs);
-            setPage(1);
-          } else if (data.type === "delta" && data.log) {
-            setLogs((prev) => {
-              if (logIdSetRef.current.has(data.log.id)) return prev;
-              const newLogs = [data.log, ...prev];
-              // Optional: cap array size in live mode
-              const cappedLogs = newLogs.slice(0, 1000);
-              logIdSetRef.current = new Set(cappedLogs.map((log) => log.id));
-              return cappedLogs;
-            });
-          }
-        } catch (e) {
-          console.error("SSE parse error", e);
+    const handlePayload = (rawData: string) => {
+      if (!rawData || rawData === ": keepalive") return;
+      try {
+        const data = JSON.parse(rawData);
+        if (data.type === "init" && Array.isArray(data.logs)) {
+          logIdSetRef.current = new Set(data.logs.map((log: LogEntry) => log.id));
+          setLogs(data.logs);
+          setPage(1);
+        } else if (data.type === "delta" && data.log) {
+          setLogs((prev) => {
+            if (logIdSetRef.current.has(data.log.id)) return prev;
+            const newLogs = [data.log, ...prev];
+            const cappedLogs = newLogs.slice(0, 1000);
+            logIdSetRef.current = new Set(cappedLogs.map((log) => log.id));
+            return cappedLogs;
+          });
         }
-      };
+      } catch (e) {
+        console.error("SSE parse error", e);
+      }
+    };
 
-      sse.onerror = (e) => {
-        sse.close();
-        if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
-        reconnectTimerRef.current = setTimeout(() => {
-          backoffRef.current = Math.min(backoffRef.current * 2, 30000);
-          connectSSE();
-        }, backoffRef.current);
-      };
+    const connectSSE = () => {
+      sseAbortRef.current?.abort();
+      const controller = new AbortController();
+      sseAbortRef.current = controller;
+      const params = buildFilterParams(debouncedFilters);
+      void consumeSSE(`/api/logs/stream?${params.toString()}`, handlePayload, controller.signal)
+        .then(() => {
+          backoffRef.current = 1000;
+          setIsLoading(false);
+        })
+        .catch((err) => {
+          if (controller.signal.aborted) return;
+          if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+          reconnectTimerRef.current = setTimeout(() => {
+            backoffRef.current = Math.min(backoffRef.current * 2, 30000);
+            connectSSE();
+          }, backoffRef.current);
+          console.error(err);
+        });
+      backoffRef.current = 1000;
+      setIsLoading(false);
     };
 
     connectSSE();
 
     return () => {
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close();
-        eventSourceRef.current = null;
-      }
+      sseAbortRef.current?.abort();
+      sseAbortRef.current = null;
       if (reconnectTimerRef.current) {
         clearTimeout(reconnectTimerRef.current);
         reconnectTimerRef.current = null;

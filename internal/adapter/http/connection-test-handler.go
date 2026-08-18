@@ -175,6 +175,9 @@ func testProviderAPI(conn *domain.ProviderConnection) testProviderResult {
 		chatPath = "/v1/chat/completions"
 	}
 	url := providerTestURL(conn, cfg)
+	if err := shared.ValidateOutboundURL(url, shared.AllowPrivateOutbound(conn.TenantID)); err != nil {
+		return testProviderResult{OK: false, Error: "invalid baseUrl: " + err.Error()}
+	}
 
 	// Use first supported model for test, fallback to a generic one
 	testModel := "test"
@@ -215,7 +218,7 @@ func testProviderAPI(conn *domain.ProviderConnection) testProviderResult {
 		req.Header.Set("Authorization", "Bearer "+conn.AccessToken)
 	}
 
-	client := &http.Client{Timeout: 15 * time.Second}
+	client := shared.NewSafeHTTPClient(15 * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		return testProviderResult{OK: false, Error: fmt.Sprintf("request failed: %s", err)}
@@ -398,7 +401,7 @@ func apiTestModel(store port.CredentialStore, providers port.ProviderRegistry, r
 		}
 
 		reqlog := logger.NewRequestLog(uuid.New().String())
-		stream, statusCode, execErr := executor.Execute(modelName, bodyBytes, creds, reqlog)
+		stream, statusCode, execErr := executor.Execute(c.Request.Context(), modelName, bodyBytes, creds, reqlog)
 		if stream != nil {
 			stream.Close()
 		}

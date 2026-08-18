@@ -194,3 +194,32 @@ func TestModelAccessServiceTenantComboIsolation(t *testing.T) {
 		t.Errorf("legacy expected to resolve globex-combo")
 	}
 }
+
+func TestModelAccessServiceSameComboNameDoesNotHideTenantCopy(t *testing.T) {
+	cfg := &domain.AppConfig{
+		ProviderConnections: []domain.ProviderConnection{
+			{ID: "c1", Provider: "kiro", AuthType: "oauth", IsActive: true, Weight: 100, TenantID: "acme", SupportedModels: []string{"model-a"}},
+			{ID: "c2", Provider: "kiro", AuthType: "oauth", IsActive: true, Weight: 100, TenantID: "globex", SupportedModels: []string{"model-a"}},
+		},
+		Combos: []domain.Combo{
+			{Name: "smart", Models: []string{"kiro/model-a@c1"}, TenantID: "acme"},
+			{Name: "smart", Models: []string{"kiro/model-a@c2"}, TenantID: "globex"},
+		},
+		Settings: domain.Settings{ComboStrategy: "fallback"},
+	}
+	store := &tenantTestCredentialStore{testCredentialStore: newTestCredentialStore(cfg)}
+	mas := NewModelAccessService(store)
+
+	plan, err := mas.ResolveRouteForTenant("smart", nil, "globex")
+	if err != nil {
+		t.Fatalf("globex smart combo: %v", err)
+	}
+	if !plan.IsCombo || plan.ComboName != "smart" {
+		t.Fatalf("globex should resolve its own smart combo, plan=%+v", plan)
+	}
+	for _, a := range plan.Attempts {
+		if a.PinnedConnectionID == "c1" {
+			t.Fatalf("globex resolved acme pin: %+v", a)
+		}
+	}
+}

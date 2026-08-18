@@ -16,17 +16,18 @@ type SendTurnOptions = {
   userMessage: Message;
   messages: Message[];
   setMessages: (fn: (msgs: Message[]) => Message[]) => void;
+  assistantId: string;
 };
 
 export function useChatStream(
   onLog: (log: RequestLog) => void,
 ) {
   const pendingDeltaRef = useRef("");
-  const deltaTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const rafRef = useRef<number | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const clearTimer = useCallback(() => {
-    if (deltaTimerRef.current) { clearTimeout(deltaTimerRef.current); deltaTimerRef.current = null; }
+    if (rafRef.current !== null) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
   }, []);
 
   const flushDelta = useCallback(
@@ -72,18 +73,20 @@ export function useChatStream(
   const queueDelta = useCallback(
     (assistantId: string, setMessages: SendTurnOptions["setMessages"], delta: string) => {
       pendingDeltaRef.current += delta;
-      if (!deltaTimerRef.current) {
-        deltaTimerRef.current = setTimeout(() => flushDelta(assistantId, setMessages), 48);
+      if (rafRef.current === null) {
+        rafRef.current = requestAnimationFrame(() => {
+          rafRef.current = null;
+          flushDelta(assistantId, setMessages);
+        });
       }
     },
     [flushDelta],
   );
 
   const sendTurn = useCallback(
-    async ({ model, params, userMessage, messages, setMessages }: SendTurnOptions) => {
+    async ({ model, params, userMessage, messages, setMessages, assistantId }: SendTurnOptions) => {
       const content = userMessage.content.trim();
       if ((!content && !userMessage.attachments?.length) || !model) return;
-      const assistantId = crypto.randomUUID();
 
       insertAssistantMessage(userMessage, assistantId, setMessages);
 
@@ -186,7 +189,9 @@ export function useChatStream(
       } finally {
         clearTimer();
         pendingDeltaRef.current = "";
-        abortRef.current = null;
+        if (abortRef.current === controller) {
+          abortRef.current = null;
+        }
       }
     },
     [clearTimer, flushDelta, insertAssistantMessage, markUserStatus, onLog, queueDelta],

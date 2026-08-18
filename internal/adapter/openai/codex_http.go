@@ -7,8 +7,9 @@ import (
 	"net/http"
 	"os"
 	"strconv"
-	"strings"
 	"time"
+
+	"github.com/dungnt/dntproxy/internal/adapter/shared"
 )
 
 const (
@@ -34,6 +35,7 @@ func newCodexHTTPClient() *http.Client {
 			ResponseHeaderTimeout: codexResponseHeaderTimeout(),
 			ForceAttemptHTTP2:     true,
 		},
+		CheckRedirect: shared.CheckRedirectSafe,
 		// No overall timeout: Codex responses stream can run for minutes.
 	}
 }
@@ -67,10 +69,7 @@ func durationFromEnvMillis(name string, fallback time.Duration) time.Duration {
 }
 
 func shouldRetryCodexRequest(err error) bool {
-	if err == nil {
-		return false
-	}
-	return strings.Contains(strings.ToLower(err.Error()), "timeout awaiting response headers")
+	return shared.IsResponseHeaderTimeout(err)
 }
 
 func doCodexRequestWithRetry(req *http.Request, retries int, delay time.Duration, do codexDoFunc) (*http.Response, error) {

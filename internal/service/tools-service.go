@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"github.com/dungnt/dntproxy/internal/adapter/storage"
@@ -155,6 +156,11 @@ func (s *ToolsService) getProxyEndpoint() (string, string, error) {
 		baseURL = cfg.Settings.TunnelURL
 	} else {
 		port := cfg.Settings.Port
+		if envPort := os.Getenv("PORT"); envPort != "" {
+			if p, err := strconv.Atoi(envPort); err == nil && p > 0 {
+				port = p
+			}
+		}
 		if port == 0 {
 			port = 20199
 		}

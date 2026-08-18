@@ -155,14 +155,20 @@ func (r *ModelResolver) ResolveRoutingForTenant(modelStr string, tenantID string
 	}, nil
 }
 
-// lookupComboForTenant returns the combo if it belongs to the tenant.
+// lookupComboForTenant returns the combo owned by the tenant.
+// Scans all combos so a later tenant is not hidden by an earlier same-name row.
 func (r *ModelResolver) lookupComboForTenant(name, tenantID string) (*domain.Combo, error) {
-	combo, err := r.store.GetComboByName(name)
-	if err != nil || combo == nil {
+	combos, err := r.store.GetCombos()
+	if err != nil {
 		return nil, err
 	}
-	if domain.SameTenant(combo.TenantID, tenantID) {
-		return combo, nil
+	for i := range combos {
+		if combos[i].Name != name {
+			continue
+		}
+		if domain.SameTenant(combos[i].TenantID, tenantID) {
+			return &combos[i], nil
+		}
 	}
 	return nil, nil
 }
@@ -303,7 +309,7 @@ func (r *ModelResolver) GetComboModels(modelStr string) ([]string, error) {
 		return nil, nil
 	}
 
-	combo, err := r.store.GetComboByName(modelStr)
+	combo, err := r.lookupComboForTenant(modelStr, "")
 	if err != nil {
 		return nil, err
 	}

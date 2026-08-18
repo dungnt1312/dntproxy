@@ -119,15 +119,27 @@ func TestRefreshXAITokenPreservesRefreshToken(t *testing.T) {
 	}))
 	defer server.Close()
 
-	tokens, err := RefreshXAIToken("old-refresh", server.URL)
+	form := url.Values{
+		"grant_type":    {"refresh_token"},
+		"client_id":     {XAIClientID},
+		"refresh_token": {"old-refresh"},
+	}
+	tokens, err := postXAITokenForm(server.URL, form, "old-refresh")
 	if err != nil {
-		t.Fatalf("RefreshXAIToken() error = %v", err)
+		t.Fatalf("postXAITokenForm() error = %v", err)
 	}
 	if tokens.AccessToken != "new-access" {
 		t.Fatalf("access token = %q", tokens.AccessToken)
 	}
 	if tokens.RefreshToken != "old-refresh" {
 		t.Fatalf("refresh token = %q, want old-refresh", tokens.RefreshToken)
+	}
+}
+
+func TestRefreshXAITokenRejectsForeignEndpoint(t *testing.T) {
+	_, err := RefreshXAIToken("old-refresh", "https://evil.example/oauth2/token")
+	if err == nil || !strings.Contains(err.Error(), "not on x.ai") {
+		t.Fatalf("error = %v, want x.ai validation error", err)
 	}
 }
 

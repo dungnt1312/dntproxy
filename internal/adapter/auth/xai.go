@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/dungnt/dntproxy/internal/adapter/shared"
 )
 
 const (
@@ -69,7 +71,7 @@ func DiscoverXAI() (*XAIDiscovery, error) {
 	}
 	req.Header.Set("Accept", "application/json")
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := shared.NewSafeHTTPClient(30 * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("xai discovery: request failed: %w", err)
@@ -163,6 +165,12 @@ func RefreshXAIToken(refreshToken, tokenEndpoint string) (*XAITokenResponse, err
 			return nil, err
 		}
 		tokenEndpoint = discovery.TokenEndpoint
+	} else {
+		validated, err := ValidateXAIEndpoint(tokenEndpoint, "token_endpoint")
+		if err != nil {
+			return nil, err
+		}
+		tokenEndpoint = validated
 	}
 
 	form := url.Values{
@@ -181,7 +189,7 @@ func postXAITokenForm(tokenEndpoint string, form url.Values, fallbackRefreshToke
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := shared.NewSafeHTTPClient(30 * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("xai token request failed: %w", err)

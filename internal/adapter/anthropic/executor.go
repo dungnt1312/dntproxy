@@ -3,6 +3,7 @@ package anthropic
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -124,7 +125,10 @@ type openaiToolFunction struct {
 }
 
 // Execute sends a request to Anthropic Messages API and returns a streaming reader.
-func (e *Executor) Execute(model string, body []byte, credentials *domain.Credentials, reqlog port.RequestLogger) (io.ReadCloser, int, error) {
+func (e *Executor) Execute(ctx context.Context, model string, body []byte, credentials *domain.Credentials, reqlog port.RequestLogger) (io.ReadCloser, int, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	// Parse OpenAI request
 	var openaiReq openaiChatRequest
 	if err := json.Unmarshal(body, &openaiReq); err != nil {
@@ -148,7 +152,7 @@ func (e *Executor) Execute(model string, body []byte, credentials *domain.Creden
 	cfg := domain.GetProviderConfig("anthropic")
 	url := baseURL + cfg.ChatPath
 
-	req, err := http.NewRequest("POST", url, bytes.NewReader(anthropicBody))
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(anthropicBody))
 	if err != nil {
 		return nil, 500, fmt.Errorf("create request: %w", err)
 	}
@@ -232,7 +236,6 @@ func (e *Executor) Execute(model string, body []byte, credentials *domain.Creden
 			return
 		}
 
-		// Send final DONE
 		if !state.FinishReasonSent {
 			finishReason := "stop"
 			if state.ToolCallIndex > 0 {
@@ -240,8 +243,8 @@ func (e *Executor) Execute(model string, body []byte, credentials *domain.Creden
 			}
 			chunk := formatOpenAIChunk(state, map[string]interface{}{}, &finishReason)
 			pw.Write([]byte(chunk))
-			pw.Write([]byte("data: [DONE]\n\n"))
 		}
+		pw.Write([]byte("data: [DONE]\n\n"))
 
 		// Log usage if available
 		if state.Usage.PromptTokens > 0 || state.Usage.CompletionTokens > 0 {
@@ -271,11 +274,11 @@ func translateToAnthropic(openaiReq openaiChatRequest, model string) (*anthropic
 	for _, msg := range openaiReq.Messages {
 		switch msg.Role {
 		case "system":
-			if str, ok := msg.Content.(string); ok {
+			if text := flattenMessageText(msg.Content); text != "" {
 				if systemMsg == "" {
-					systemMsg = str
+					systemMsg = text
 				} else {
-					systemMsg += "\n\n" + str
+					systemMsg += "\n\n" + text
 				}
 			}
 		case "user":
@@ -285,29 +288,34 @@ func translateToAnthropic(openaiReq openaiChatRequest, model string) (*anthropic
 				Content: content,
 			})
 		case "assistant":
-			if len(msg.ToolCalls) > 0 {
-				// Tool calls
-				var contentBlocks []anthropicContentBlock
-				for _, tc := range msg.ToolCalls {
-					var input map[string]interface{}
-					if tc.Function.Arguments != "" {
-						json.Unmarshal([]byte(tc.Function.Arguments), &input)
-					}
-					contentBlocks = append(contentBlocks, anthropicContentBlock{
-						Type:  "tool_use",
-						ID:    tc.ID,
-						Name:  tc.Function.Name,
-						Input: input,
-					})
+			var contentBlocks []anthropicContentBlock
+			if text := flattenMessageText(msg.Content); text != "" {
+				contentBlocks = append(contentBlocks, anthropicContentBlock{
+					Type: "text",
+					Text: text,
+				})
+			}
+			for _, tc := range msg.ToolCalls {
+				var input map[string]interface{}
+				if tc.Function.Arguments != "" {
+					json.Unmarshal([]byte(tc.Function.Arguments), &input)
 				}
+				contentBlocks = append(contentBlocks, anthropicContentBlock{
+					Type:  "tool_use",
+					ID:    tc.ID,
+					Name:  tc.Function.Name,
+					Input: input,
+				})
+			}
+			if len(contentBlocks) == 1 && contentBlocks[0].Type == "text" {
+				messages = append(messages, anthropicMessage{
+					Role:    "assistant",
+					Content: contentBlocks[0].Text,
+				})
+			} else if len(contentBlocks) > 0 {
 				messages = append(messages, anthropicMessage{
 					Role:    "assistant",
 					Content: contentBlocks,
-				})
-			} else if str, ok := msg.Content.(string); ok {
-				messages = append(messages, anthropicMessage{
-					Role:    "assistant",
-					Content: str,
 				})
 			}
 		case "tool":
@@ -378,6 +386,27 @@ func translateToAnthropic(openaiReq openaiChatRequest, model string) (*anthropic
 	}
 
 	return req, nil
+}
+
+func flattenMessageText(content interface{}) string {
+	switch c := content.(type) {
+	case string:
+		return c
+	case []interface{}:
+		var parts []string
+		for _, item := range c {
+			m, ok := item.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if text, ok := m["text"].(string); ok && text != "" {
+				parts = append(parts, text)
+			}
+		}
+		return strings.Join(parts, "\n")
+	default:
+		return ""
+	}
 }
 
 // translateContent converts OpenAI content to Anthropic content format.
@@ -461,14 +490,19 @@ func translateToolChoice(tc interface{}) map[string]interface{} {
 
 // NewAnthropicStreamState creates a new stream state.
 func NewAnthropicStreamState(model string) *AnthropicStreamState {
+	now := time.Now()
 	return &AnthropicStreamState{
-		Model: model,
+		Model:   model,
+		ID:      fmt.Sprintf("chatcmpl-%d", now.UnixNano()),
+		Created: now.Unix(),
 	}
 }
 
 // AnthropicStreamState tracks state during streaming.
 type AnthropicStreamState struct {
 	Model            string
+	ID               string
+	Created          int64
 	FinishReasonSent bool
 	ToolCallIndex    int
 	Usage            struct {
@@ -623,9 +657,9 @@ func formatSSEChunk(state *AnthropicStreamState, choice map[string]interface{}, 
 	choice["finish_reason"] = finishReason
 
 	payload := map[string]interface{}{
-		"id":                 fmt.Sprintf("chatcmpl-%d", time.Now().UnixMilli()),
+		"id":                 state.ID,
 		"object":             "chat.completion.chunk",
-		"created":            time.Now().Unix(),
+		"created":            state.Created,
 		"model":              state.Model,
 		"system_fingerprint": nil,
 		"choices":            []interface{}{choice},

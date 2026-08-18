@@ -1,6 +1,7 @@
 package port
 
 import (
+	"context"
 	"io"
 
 	"github.com/dungnt/dntproxy/internal/domain"
@@ -26,6 +27,7 @@ type APIKeyPolicy struct {
 type RequestMetadata struct {
 	Compression *domain.CompressionLogMetadata
 	TenantID    string // for multi-tenancy (SaaS). Empty = legacy single-tenant.
+	Context     context.Context
 }
 
 // ChatService defines the chat orchestration contract.

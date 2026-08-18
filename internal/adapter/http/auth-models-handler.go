@@ -8,6 +8,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/dungnt/dntproxy/internal/adapter/shared"
 	"github.com/dungnt/dntproxy/internal/domain"
 	"github.com/dungnt/dntproxy/internal/port"
 	"github.com/gin-gonic/gin"
@@ -48,6 +49,10 @@ func apiFetchConnectionModels(store port.CredentialStore) gin.HandlerFunc {
 			c.JSON(400, gin.H{"error": "No base URL configured for this connection"})
 			return
 		}
+		if err := shared.ValidateOutboundURL(baseURL, shared.AllowPrivateOutbound(conn.TenantID)); err != nil {
+			c.JSON(400, gin.H{"error": "invalid baseUrl: " + err.Error()})
+			return
+		}
 		baseURL = domain.StripVersionSuffix(baseURL)
 
 		var modelsURL string
@@ -65,7 +70,7 @@ func apiFetchConnectionModels(store port.CredentialStore) gin.HandlerFunc {
 			req.Header.Set("Authorization", "Bearer "+conn.AccessToken)
 		}
 
-		client := &http.Client{Timeout: 15 * time.Second}
+		client := shared.NewSafeHTTPClient(15 * time.Second)
 		resp, err := client.Do(req)
 		if err != nil {
 			c.JSON(502, gin.H{"error": "Failed to reach provider: " + err.Error()})

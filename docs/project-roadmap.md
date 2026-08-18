@@ -57,7 +57,7 @@ This roadmap captures the progress and next milestones for `dntproxy`.
 - [x] **Connection Execution Strategies**: Add weighted random, primary-first priority fallback, and round-robin account selection for chat execution.
 - [x] **MiniMax Image Generation MVP**: Route `minimax/image-01` text-to-image requests from `POST /v1/images/generations` to MiniMax `POST /v1/image_generation`, with URL/Base64 responses, request validation, and business-error handling.
 - [x] **MiniMax Image Editing**: Route JSON `POST /v1/images/edits` requests to MiniMax character-reference generation with exactly one PNG/JPEG HTTP(S) URL or Base64 data URL. Reject masks, multiple references, and multipart edits; constrain Playground uploads to one PNG/JPEG file up to 7 MB.
-- [x] **Telegram Bot Integration**: Embedded two-way Telegram bot for real-time alerts (quota exhausted, token expired, connection down, rate limited, combo exhausted) and interactive commands (/status, /usage, /connections, /mute, /unmute). Single-owner auth, start/stop from UI, 30-min alert deduplication with auto-recovery notifications.
+- [x] **Telegram Bot Integration**: Removed. Alerts and bot commands are no longer part of the product.
 - [ ] **Graceful Shutdown**: Listen for SIGTERM / SIGINT and handle open persistent SSE connections gracefully.
 - [ ] **Cross-Platform Delivery**: Enhance build configuration (Makefiles, CI, Goreleaser).
 - [ ] **Dockerization**: Provide an official `Dockerfile` and `docker-compose.yml` pattern.

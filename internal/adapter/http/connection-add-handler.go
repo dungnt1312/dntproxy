@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/dungnt/dntproxy/internal/adapter/auth"
+	"github.com/dungnt/dntproxy/internal/adapter/shared"
 	"github.com/dungnt/dntproxy/internal/domain"
 	"github.com/dungnt/dntproxy/internal/port"
 	"github.com/gin-gonic/gin"
@@ -42,6 +43,9 @@ func createAPIKeyConnection(c *gin.Context, store port.CredentialStore, provider
 	baseURL := req.BaseURL
 	if baseURL == "" {
 		baseURL = provCfg.DefaultBaseURL
+	}
+	if err := shared.ValidateOutboundURL(baseURL, shared.AllowPrivateOutbound(GetTenantID(c))); err != nil {
+		return nil, "invalid baseUrl: " + err.Error(), 400
 	}
 	supportedModels := req.SupportedModels
 	if len(supportedModels) == 0 {

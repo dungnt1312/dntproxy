@@ -8,13 +8,17 @@ type QueuedTurn = {
   params: ChatParams;
 };
 
+const MAX_PLAYGROUND_MESSAGES = 80;
+
 export function useChatQueue(onLog: (log: RequestLog) => void) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [sending, setSending] = useState(false);
   const [queuedCount, setQueuedCount] = useState(0);
+  const [streamingId, setStreamingId] = useState<string | undefined>(undefined);
   const messagesRef = useRef<Message[]>([]);
   const queueRef = useRef<QueuedTurn[]>([]);
   const processingRef = useRef(false);
+  const generationRef = useRef(0);
   const { sendTurn, abort } = useChatStream(onLog);
 
   useEffect(() => {
@@ -22,7 +26,7 @@ export function useChatQueue(onLog: (log: RequestLog) => void) {
   }, [messages]);
 
   const updateMessages = useCallback((updater: (current: Message[]) => Message[]) => {
-    const next = updater(messagesRef.current);
+    const next = updater(messagesRef.current).slice(-MAX_PLAYGROUND_MESSAGES);
     messagesRef.current = next;
     setMessages(next);
   }, []);
@@ -33,8 +37,11 @@ export function useChatQueue(onLog: (log: RequestLog) => void) {
     setQueuedCount(queueRef.current.length);
     if (!nextTurn) return;
 
+    const generation = generationRef.current;
     processingRef.current = true;
     setSending(true);
+    const assistantId = crypto.randomUUID();
+    setStreamingId(assistantId);
     try {
       await sendTurn({
         model: nextTurn.model,
@@ -42,10 +49,13 @@ export function useChatQueue(onLog: (log: RequestLog) => void) {
         userMessage: nextTurn.userMessage,
         messages: messagesRef.current,
         setMessages: updateMessages,
+        assistantId,
       });
     } finally {
+      if (generation !== generationRef.current) return;
       processingRef.current = false;
       setSending(false);
+      setStreamingId(undefined);
       void processQueue();
     }
   }, [sendTurn, updateMessages]);
@@ -65,19 +75,29 @@ export function useChatQueue(onLog: (log: RequestLog) => void) {
   );
 
   const clearQueue = useCallback(() => {
+    generationRef.current += 1;
     abort();
     queueRef.current = [];
     processingRef.current = false;
     setQueuedCount(0);
     setSending(false);
+    setStreamingId(undefined);
     setMessages([]);
     messagesRef.current = [];
+  }, [abort]);
+
+  useEffect(() => {
+    return () => {
+      generationRef.current += 1;
+      abort();
+    };
   }, [abort]);
 
   return {
     messages,
     sending,
     queuedCount,
+    streamingId,
     enqueueTurn,
     clearQueue,
   };

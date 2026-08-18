@@ -3,6 +3,7 @@ package backup
 import (
 	"fmt"
 
+	"github.com/dungnt/dntproxy/internal/adapter/shared"
 	"github.com/dungnt/dntproxy/internal/domain"
 	"github.com/dungnt/dntproxy/internal/port"
 )
@@ -77,6 +78,9 @@ func ImportConnection(store port.CredentialStore, data *ConnectionExportData, mo
 
 	case ImportModeReplace:
 		if existingIdx >= 0 {
+			if err := refuseCrossTenantReplace(cfg.ProviderConnections[existingIdx], data.Connection); err != nil {
+				return nil, err
+			}
 			cfg.ProviderConnections[existingIdx] = data.Connection
 			result.Updated = 1
 		} else {
@@ -152,6 +156,11 @@ func ImportConnections(store port.CredentialStore, data *BackupData, mode Import
 
 		case ImportModeReplace:
 			if exists {
+				if err := refuseCrossTenantReplace(cfg.ProviderConnections[existingIdx], conn); err != nil {
+					result.Errors = append(result.Errors, err.Error())
+					result.Skipped++
+					continue
+				}
 				cfg.ProviderConnections[existingIdx] = conn
 				result.Updated++
 			} else {
@@ -198,6 +207,18 @@ func validateConnection(conn *domain.ProviderConnection) error {
 	}
 	if conn.AuthType == "apikey" && conn.APIKey == "" {
 		return fmt.Errorf("apiKey is required for apikey connections")
+	}
+	if conn.BaseURL != "" {
+		if err := shared.ValidateOutboundURL(conn.BaseURL, shared.AllowPrivateOutbound(conn.TenantID)); err != nil {
+			return fmt.Errorf("invalid baseUrl: %w", err)
+		}
+	}
+	return nil
+}
+
+func refuseCrossTenantReplace(existing, incoming domain.ProviderConnection) error {
+	if existing.TenantID != "" && existing.TenantID != incoming.TenantID {
+		return fmt.Errorf("cannot replace connection %s owned by another tenant", existing.ID)
 	}
 	return nil
 }

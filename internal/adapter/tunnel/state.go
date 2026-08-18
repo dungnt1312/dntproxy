@@ -25,7 +25,10 @@ type StateManager struct {
 
 // NewStateManager creates a state manager using ~/.dntproxy/tunnel/ or %APPDATA%/dntproxy/tunnel/.
 func NewStateManager() (*StateManager, error) {
-	dir := tunnelDir()
+	return NewStateManagerIn(tunnelDir())
+}
+
+func NewStateManagerIn(dir string) (*StateManager, error) {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, fmt.Errorf("create tunnel state dir: %w", err)
 	}

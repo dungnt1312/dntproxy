@@ -26,9 +26,9 @@ func apiExportConnection(store port.CredentialStore) gin.HandlerFunc {
 		}
 
 		filename := fmt.Sprintf("dntproxy-connection-%s-%s.json",
-			data.Connection.Name,
+			sanitizeFilename(data.Connection.ID),
 			time.Now().Format("20060102-150405"))
-		c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", filename))
+		c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
 		c.JSON(200, data)
 	}
 }
@@ -42,6 +42,10 @@ func apiExportConnections(store port.CredentialStore) gin.HandlerFunc {
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(400, gin.H{"error": "Invalid request"})
+			return
+		}
+		if len(req.ConnectionIDs) == 0 {
+			c.JSON(400, gin.H{"error": "connectionIds required"})
 			return
 		}
 
@@ -144,4 +148,23 @@ func apiImportConnectionsFromFile(store port.CredentialStore) gin.HandlerFunc {
 			"errors":   result.Errors,
 		})
 	}
+}
+
+func sanitizeFilename(name string) string {
+	if name == "" {
+		return "connection"
+	}
+	out := make([]rune, 0, len(name))
+	for _, r := range name {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' || r == '.' {
+			out = append(out, r)
+		}
+		if len(out) >= 64 {
+			break
+		}
+	}
+	if len(out) == 0 {
+		return "connection"
+	}
+	return string(out)
 }

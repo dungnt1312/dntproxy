@@ -251,7 +251,9 @@ export function ImageGenerator() {
       a.click();
       URL.revokeObjectURL(url);
     } catch {
-      window.open(src, "_blank");
+      if (/^(https?:|data:image\/)/i.test(src)) {
+        window.open(src, "_blank", "noopener,noreferrer");
+      }
     }
   };
 

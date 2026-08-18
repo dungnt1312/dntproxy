@@ -92,8 +92,8 @@ var ProviderConfigs = map[string]ProviderConfig{
 		DefaultBaseURL: "https://codewhisperer.us-east-1.amazonaws.com",
 		ChatPath:       "", // Uses AWS EventStream, not HTTP
 		RecommendedModels: []string{
-			"claude-sonnet-4.6", "claude-sonnet-4.5", "claude-opus-4.6",
-			"claude-haiku-4.5", "deepseek-3.2", "qwen3-coder-next",
+			"claude-sonnet-5", "claude-opus-5", "claude-haiku-4.5",
+			"gpt-5.6-terra", "glm-5", "qwen3-coder-next",
 		},
 		Format:        FormatAWSKiro,
 		SupportsQuota: true,
@@ -108,7 +108,7 @@ var ProviderConfigs = map[string]ProviderConfig{
 				{Name: "name", Label: "Connection Name", Type: FieldTypeText, Required: false},
 			},
 			SupportsModelSelect: true,
-			DefaultTestModel:    "claude-sonnet-4.6",
+			DefaultTestModel:    "claude-sonnet-5",
 		},
 	},
 
@@ -121,8 +121,7 @@ var ProviderConfigs = map[string]ProviderConfig{
 		ChatPath:       "/v1/chat/completions",
 		// Chat models only; image models (gpt-image-2, gpt-image-1.5) stay in registry for detect
 		RecommendedModels: []string{
-			"gpt-5.4", "gpt-5.4-mini",
-			"gpt-4.1-mini", "gpt-4o", "o4-mini",
+			"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
 		},
 		Format:        FormatOpenAIChat,
 		SupportsQuota: true,
@@ -144,7 +143,7 @@ var ProviderConfigs = map[string]ProviderConfig{
 				{Name: "apiKey", Label: "API Key", Type: FieldTypePassword, Required: true, Secret: true},
 			},
 			SupportsModelSelect: true,
-			DefaultTestModel:    "gpt-4o",
+			DefaultTestModel:    "gpt-5.6-terra",
 		},
 	},
 
@@ -184,7 +183,7 @@ var ProviderConfigs = map[string]ProviderConfig{
 		AuthMethods:       []string{"apikey"},
 		DefaultBaseURL:    "https://api.z.ai",
 		ChatPath:          "/api/coding/paas/v4/chat/completions",
-		RecommendedModels: []string{"glm-5.1", "glm-5", "glm-4.7-flash"},
+		RecommendedModels: []string{"glm-5.2", "glm-5.1", "glm-5", "glm-4.7-flash"},
 		Format:            FormatOpenAIChat,
 		SupportsQuota:     false,
 		UI: ProviderUI{
@@ -212,12 +211,12 @@ var ProviderConfigs = map[string]ProviderConfig{
 		AuthMethods:       []string{"apikey"},
 		DefaultBaseURL:    "https://api.minimax.io",
 		ChatPath:          "/v1/chat/completions",
-		RecommendedModels: []string{"MiniMax-M2.7", "MiniMax-M2.7-highspeed", "MiniMax-M2.5", "image-01"},
+		RecommendedModels: []string{"MiniMax-M3", "MiniMax-M2.7", "MiniMax-M2.7-highspeed", "image-01"},
 		Format:            FormatOpenAIChat,
 		SupportsQuota:     true,
 		UI: ProviderUI{
 			Category:            "cloud",
-			Description:         "MiniMax M2 series models",
+			Description:         "MiniMax M3 / M2 series models",
 			ShowBaseURLField:    true,
 			BaseURLLabel:        "Base URL",
 			BaseURLPlaceholder:  "https://api.minimax.io",
@@ -229,7 +228,7 @@ var ProviderConfigs = map[string]ProviderConfig{
 				{Name: "baseUrl", Label: "Base URL", Type: FieldTypeURL, Required: false},
 			},
 			SupportsModelSelect: true,
-			DefaultTestModel:    "MiniMax-M2.7",
+			DefaultTestModel:    "MiniMax-M3",
 		},
 	},
 
@@ -240,7 +239,7 @@ var ProviderConfigs = map[string]ProviderConfig{
 		AuthMethods:       []string{"apikey", "oauth"},
 		DefaultBaseURL:    "https://portal.qwen.ai",
 		ChatPath:          "/v1/chat/completions",
-		RecommendedModels: []string{"qwen3-coder-plus", "qwen3-coder", "qwen-turbo"},
+		RecommendedModels: []string{"qwen3.8-max", "qwen3.7-plus", "qwen3-coder-plus"},
 		Format:            FormatOpenAIChat,
 		SupportsQuota:     false,
 		OAuth: &OAuthConfig{
@@ -263,7 +262,7 @@ var ProviderConfigs = map[string]ProviderConfig{
 				{Name: "baseUrl", Label: "Base URL", Type: FieldTypeURL, Required: false},
 			},
 			SupportsModelSelect: true,
-			DefaultTestModel:    "qwen3-coder-plus",
+			DefaultTestModel:    "qwen3.8-max",
 		},
 	},
 
@@ -275,7 +274,7 @@ var ProviderConfigs = map[string]ProviderConfig{
 		AuthMethods:       []string{"apikey"},
 		DefaultBaseURL:    "https://api.anthropic.com",
 		ChatPath:          "/v1/messages",
-		RecommendedModels: []string{"claude-sonnet", "claude-opus", "claude-haiku"},
+		RecommendedModels: []string{"claude-sonnet-5", "claude-opus-5", "claude-haiku-4-5", "claude-fable-5"},
 		Format:            FormatAnthropicMsg,
 		SupportsQuota:     false,
 		UI: ProviderUI{
@@ -292,7 +291,7 @@ var ProviderConfigs = map[string]ProviderConfig{
 				{Name: "baseUrl", Label: "Base URL", Type: FieldTypeURL, Required: false},
 			},
 			SupportsModelSelect: true,
-			DefaultTestModel:    "claude-sonnet",
+			DefaultTestModel:    "claude-sonnet-5",
 		},
 	},
 
@@ -305,10 +304,10 @@ var ProviderConfigs = map[string]ProviderConfig{
 		DefaultBaseURL: "https://api.cline.bot",
 		ChatPath:       "/api/v1/chat/completions",
 		RecommendedModels: []string{
-			"cline-pass/glm-5.2", "cline-pass/kimi-k2.7-code", "cline-pass/kimi-k2.6",
+			"cline-pass/glm-5.2", "cline-pass/kimi-k3", "cline-pass/kimi-k2.7-code",
 			"cline-pass/deepseek-v4-pro", "cline-pass/deepseek-v4-flash",
-			"cline-pass/mimo-v2.5", "cline-pass/mimo-v2.5-pro", "cline-pass/minimax-m3",
-			"cline-pass/qwen3.7-max", "cline-pass/qwen3.7-plus",
+			"cline-pass/mimo-v2.5-pro", "cline-pass/minimax-m3",
+			"cline-pass/qwen3.8-max", "cline-pass/qwen3.7-plus",
 		},
 		Format:        FormatOpenAIChat,
 		SupportsQuota: false,
@@ -338,10 +337,10 @@ var ProviderConfigs = map[string]ProviderConfig{
 		DefaultBaseURL: "https://generativelanguage.googleapis.com",
 		ChatPath:       "/v1beta/openai/chat/completions",
 		RecommendedModels: []string{
-			"gemini-2.5-flash",
+			"gemini-3.7-flash",
+			"gemini-3.6-flash",
+			"gemini-3.5-flash",
 			"gemini-3.1-flash-image",
-			"gemini-3.1-flash-lite-image",
-			"gemini-3-pro-image",
 		},
 		Format:        FormatOpenAIChat,
 		SupportsQuota: false,
@@ -359,7 +358,7 @@ var ProviderConfigs = map[string]ProviderConfig{
 				{Name: "baseUrl", Label: "Base URL", Type: FieldTypeURL, Required: false},
 			},
 			SupportsModelSelect: true,
-			DefaultTestModel:    "gemini-2.5-flash",
+			DefaultTestModel:    "gemini-3.7-flash",
 		},
 	},
 
@@ -404,7 +403,7 @@ var ProviderConfigs = map[string]ProviderConfig{
 		DefaultBaseURL: "https://api.x.ai/v1",
 		ChatPath:       "/responses",
 		RecommendedModels: []string{
-			"grok-4.20-0309-reasoning", "grok-4.3", "grok-4.20-0309-non-reasoning",
+			"grok-4.6", "grok-4.5", "grok-4.3",
 		},
 		Format:        FormatOpenAIChat,
 		SupportsQuota: false,
@@ -418,7 +417,7 @@ var ProviderConfigs = map[string]ProviderConfig{
 				{Name: "name", Label: "Connection Name", Type: FieldTypeText, Required: false},
 			},
 			SupportsModelSelect: true,
-			DefaultTestModel:    "grok-4.20-0309-reasoning",
+			DefaultTestModel:    "grok-4.6",
 		},
 	},
 }

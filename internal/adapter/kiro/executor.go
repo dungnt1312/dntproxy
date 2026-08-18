@@ -2,9 +2,11 @@ package kiro
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"time"
 
@@ -16,6 +18,8 @@ import (
 
 const (
 	kiroBaseURL = "https://codewhisperer.us-east-1.amazonaws.com/generateAssistantResponse"
+	// kiroMaxAttempts is 1 initial attempt + 1 retry on response-header timeout.
+	kiroMaxAttempts = 2
 )
 
 // Executor handles making requests to Kiro (AWS CodeWhisperer) API.
@@ -26,9 +30,38 @@ func NewExecutor() *Executor {
 	return &Executor{}
 }
 
+// buildKiroRequest creates the upstream request with AWS-style SDK headers.
+// attempt (1-based) is echoed in Amz-Sdk-Request for server-side diagnostics.
+func buildKiroRequest(ctx context.Context, payloadBytes []byte, credentials *domain.Credentials, attempt int) (*http.Request, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	req, err := http.NewRequestWithContext(ctx, "POST", kiroBaseURL, bytes.NewReader(payloadBytes))
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/vnd.amazon.eventstream")
+	req.Header.Set("X-Amz-Target", "AmazonCodeWhispererStreamingService.GenerateAssistantResponse")
+	req.Header.Set("User-Agent", "AWS-SDK-JS/3.0.0 kiro-ide/1.0.0")
+	req.Header.Set("X-Amz-User-Agent", "aws-sdk-js/3.0.0 kiro-ide/1.0.0")
+	req.Header.Set("Amz-Sdk-Request", fmt.Sprintf("attempt=%d; max=%d", attempt, kiroMaxAttempts))
+	req.Header.Set("Amz-Sdk-Invocation-Id", uuid.New().String())
+
+	if credentials.AccessToken != "" {
+		req.Header.Set("Authorization", "Bearer "+credentials.AccessToken)
+	}
+
+	return req, nil
+}
+
 // Execute sends a translated request to Kiro and returns a streaming reader
 // that emits OpenAI-compatible SSE data.
-func (e *Executor) Execute(model string, body []byte, credentials *domain.Credentials, reqlog port.RequestLogger) (io.ReadCloser, int, error) {
+func (e *Executor) Execute(ctx context.Context, model string, body []byte, credentials *domain.Credentials, reqlog port.RequestLogger) (io.ReadCloser, int, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	// Parse the OpenAI request
 	var openaiReq OpenAIRequest
 	if err := json.Unmarshal(body, &openaiReq); err != nil {
@@ -46,23 +79,9 @@ func (e *Executor) Execute(model string, body []byte, credentials *domain.Creden
 		return nil, 500, fmt.Errorf("marshal kiro payload: %w", err)
 	}
 
-	// Build HTTP request
-	req, err := http.NewRequest("POST", kiroBaseURL, bytes.NewReader(payloadBytes))
+	req, err := buildKiroRequest(ctx, payloadBytes, credentials, 1)
 	if err != nil {
 		return nil, 500, fmt.Errorf("create request: %w", err)
-	}
-
-	// Set headers
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/vnd.amazon.eventstream")
-	req.Header.Set("X-Amz-Target", "AmazonCodeWhispererStreamingService.GenerateAssistantResponse")
-	req.Header.Set("User-Agent", "AWS-SDK-JS/3.0.0 kiro-ide/1.0.0")
-	req.Header.Set("X-Amz-User-Agent", "aws-sdk-js/3.0.0 kiro-ide/1.0.0")
-	req.Header.Set("Amz-Sdk-Request", "attempt=1; max=3")
-	req.Header.Set("Amz-Sdk-Invocation-Id", uuid.New().String())
-
-	if credentials.AccessToken != "" {
-		req.Header.Set("Authorization", "Bearer "+credentials.AccessToken)
 	}
 
 	reqlog.SetBodies(shared.PrepareLoggedBody(payloadBytes), "")
@@ -72,6 +91,20 @@ func (e *Executor) Execute(model string, body []byte, credentials *domain.Creden
 	// Execute request using shared client (connection reuse, no stream timeout)
 	resp, err := shared.StreamingHTTPClient.Do(req)
 	duration := time.Since(start)
+
+	// Kiro occasionally stalls before sending headers (HTTP/2 header timeout).
+	// This is transient upstream slowness, not an account failure — retry once
+	// on the same connection. The chat service does not penalize accounts for
+	// these errors.
+	if err != nil && shared.IsResponseHeaderTimeout(err) {
+		reqlog.Upstream(kiroBaseURL, "POST", 502, duration, err)
+		log.Printf("[KIRO] response-header timeout, retrying once: %v", err)
+		if retryReq, retryErr := buildKiroRequest(ctx, payloadBytes, credentials, 2); retryErr == nil {
+			start = time.Now()
+			resp, err = shared.StreamingHTTPClient.Do(retryReq)
+			duration = time.Since(start)
+		}
+	}
 
 	if err != nil {
 		reqlog.Upstream(kiroBaseURL, "POST", 502, duration, err)
@@ -121,9 +154,16 @@ func (e *Executor) Execute(model string, body []byte, credentials *domain.Creden
 			n, err := resp.Body.Read(readBuf)
 			if n > 0 {
 				buf = append(buf, readBuf[:n]...)
+				if len(buf) > maxEventStreamFrame {
+					pw.CloseWithError(fmt.Errorf("eventstream buffer exceeded"))
+					return
+				}
 
-				// Parse complete frames from buffer
-				frames, remaining := ParseEventFrames(buf)
+				frames, remaining, parseErr := ParseEventFrames(buf)
+				if parseErr != nil {
+					pw.CloseWithError(parseErr)
+					return
+				}
 				buf = remaining
 
 				for _, frame := range frames {

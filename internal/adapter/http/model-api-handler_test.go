@@ -66,3 +66,53 @@ func TestAPIListModelsOmitsInactiveConnections(t *testing.T) {
 		t.Fatalf("inactive-only model was listed: %#v", models)
 	}
 }
+
+func TestAPIListModelsHidesForeignCombos(t *testing.T) {
+	store, err := storage.NewJsonDB(filepath.Join(t.TempDir(), "db.json"))
+	if err != nil {
+		t.Fatalf("new db: %v", err)
+	}
+	cfg := domain.DefaultConfig()
+	cfg.ProviderConnections = []domain.ProviderConnection{
+		{ID: "acme-openai", Provider: "openai", Name: "Acme", AuthType: "apikey", IsActive: true, Weight: 100, TenantID: "acme", SupportedModels: []string{"gpt-4o"}},
+	}
+	cfg.Combos = []domain.Combo{
+		{Name: "acme-combo", Models: []string{"openai/gpt-4o"}, TenantID: "acme"},
+		{Name: "globex-combo", Models: []string{"openai/gpt-4o"}, TenantID: "globex"},
+	}
+	if err := store.Save(&cfg); err != nil {
+		t.Fatalf("save db: %v", err)
+	}
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.GET("/models", func(c *gin.Context) {
+		c.Set(tenantIDKey, "acme")
+		apiListModels(store)(c)
+	})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/models", nil)
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+	}
+
+	var body []struct {
+		ID       string `json:"id"`
+		Provider string `json:"provider"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	seen := map[string]bool{}
+	for _, m := range body {
+		seen[m.ID] = true
+	}
+	if !seen["acme-combo"] {
+		t.Fatalf("missing acme combo: %#v", seen)
+	}
+	if seen["globex-combo"] {
+		t.Fatalf("leaked globex combo: %#v", seen)
+	}
+}

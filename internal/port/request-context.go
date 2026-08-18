@@ -1,6 +1,8 @@
 package port
 
-import "github.com/dungnt/dntproxy/internal/domain"
+import (
+	"github.com/dungnt/dntproxy/internal/domain"
+)
 
 // RequestContext carries tenant, authentication, and observability data
 // through the request processing pipeline. This is the primary mechanism
@@ -59,5 +61,6 @@ func (c *RequestContext) ToMetadata() RequestMetadata {
 	return RequestMetadata{
 		Compression: c.Metadata.Compression,
 		TenantID:    c.TenantID,
+		Context:     c.Metadata.Context,
 	}
 }

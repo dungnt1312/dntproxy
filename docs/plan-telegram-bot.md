@@ -1,5 +1,7 @@
 # Plan: Telegram Bot Integration
 
+> Removed. This plan is historical only — the bot, `/api/telegram/*`, and Settings card are gone.
+
 **Status:** completed  
 **Created:** 2026-05-15  
 **Priority:** high

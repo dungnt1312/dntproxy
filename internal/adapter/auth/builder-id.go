@@ -6,21 +6,25 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
+	"strings"
 	"time"
+
+	"github.com/dungnt/dntproxy/internal/adapter/shared"
 )
 
 // KiroConfig holds Kiro OAuth constants.
 var KiroConfig = struct {
-	SSOOIDCEndpoint string
-	StartURL        string
-	ClientName      string
-	ClientType      string
-	Scopes          []string
-	GrantTypes      []string
-	IssuerURL       string
-	SocialAuthURL   string
-	SocialTokenURL  string
-	SocialRefreshURL string
+	SSOOIDCEndpoint   string
+	StartURL          string
+	ClientName        string
+	ClientType        string
+	Scopes            []string
+	GrantTypes        []string
+	IssuerURL         string
+	SocialAuthURL     string
+	SocialTokenURL    string
+	SocialRefreshURL  string
 	SocialRedirectURI string
 }{
 	SSOOIDCEndpoint:   "https://oidc.us-east-1.amazonaws.com",
@@ -76,14 +80,31 @@ type PollResult struct {
 	Pending          bool
 }
 
-var httpClient = &http.Client{Timeout: 30 * time.Second}
+var httpClient = shared.NewSafeHTTPClient(30 * time.Second)
+
+var awsRegionPattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$`)
+
+// NormalizeAWSRegion accepts empty (defaults to us-east-1) or a simple
+// AWS-style region label. Dots and slashes are rejected so the value cannot
+// change the OIDC hostname.
+func NormalizeAWSRegion(region string) (string, error) {
+	region = strings.ToLower(strings.TrimSpace(region))
+	if region == "" {
+		return "us-east-1", nil
+	}
+	if strings.ContainsAny(region, "./:@") || !awsRegionPattern.MatchString(region) {
+		return "", fmt.Errorf("invalid AWS region")
+	}
+	return region, nil
+}
 
 // RegisterClient registers an OIDC client with AWS SSO.
 func RegisterClient(region string) (*RegisterClientResult, error) {
-	if region == "" {
-		region = "us-east-1"
+	normalized, err := NormalizeAWSRegion(region)
+	if err != nil {
+		return nil, err
 	}
-	endpoint := fmt.Sprintf("https://oidc.%s.amazonaws.com/client/register", region)
+	endpoint := fmt.Sprintf("https://oidc.%s.amazonaws.com/client/register", normalized)
 
 	body := map[string]interface{}{
 		"clientName": KiroConfig.ClientName,
@@ -107,10 +128,11 @@ func RegisterClient(region string) (*RegisterClientResult, error) {
 
 // StartDeviceAuthorization begins the device code flow.
 func StartDeviceAuthorization(clientID, clientSecret, startURL, region string) (*DeviceAuthResult, error) {
-	if region == "" {
-		region = "us-east-1"
+	normalized, err := NormalizeAWSRegion(region)
+	if err != nil {
+		return nil, err
 	}
-	endpoint := fmt.Sprintf("https://oidc.%s.amazonaws.com/device_authorization", region)
+	endpoint := fmt.Sprintf("https://oidc.%s.amazonaws.com/device_authorization", normalized)
 
 	body := map[string]interface{}{
 		"clientId":     clientID,
@@ -135,10 +157,11 @@ func StartDeviceAuthorization(clientID, clientSecret, startURL, region string) (
 
 // PollDeviceToken polls for token using device code.
 func PollDeviceToken(clientID, clientSecret, deviceCode, region string) (*PollResult, error) {
-	if region == "" {
-		region = "us-east-1"
+	normalized, err := NormalizeAWSRegion(region)
+	if err != nil {
+		return nil, err
 	}
-	endpoint := fmt.Sprintf("https://oidc.%s.amazonaws.com/token", region)
+	endpoint := fmt.Sprintf("https://oidc.%s.amazonaws.com/token", normalized)
 
 	body := map[string]interface{}{
 		"clientId":     clientID,
@@ -187,10 +210,11 @@ func PollDeviceToken(clientID, clientSecret, deviceCode, region string) (*PollRe
 
 // RefreshTokenSSO refreshes a token using AWS SSO OIDC (Builder ID / IDC).
 func RefreshTokenSSO(refreshToken, clientID, clientSecret, region string) (*TokenResult, error) {
-	if region == "" {
-		region = "us-east-1"
+	normalized, err := NormalizeAWSRegion(region)
+	if err != nil {
+		return nil, err
 	}
-	endpoint := fmt.Sprintf("https://oidc.%s.amazonaws.com/token", region)
+	endpoint := fmt.Sprintf("https://oidc.%s.amazonaws.com/token", normalized)
 
 	body := map[string]interface{}{
 		"clientId":     clientID,

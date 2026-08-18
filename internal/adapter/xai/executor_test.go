@@ -1,6 +1,7 @@
 package xai
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -54,7 +55,7 @@ func TestExecutorExecuteStreamsResponsesAsOpenAIChunks(t *testing.T) {
 	defer server.Close()
 
 	logger := &testRequestLogger{}
-	reader, status, err := NewExecutor().Execute("grok-4.3", []byte(`{"model":"grok/grok-4.3","stream":true,"messages":[{"role":"user","content":"hello"}]}`), &domain.Credentials{
+	reader, status, err := NewExecutor().Execute(context.Background(), "grok-4.3", []byte(`{"model":"grok/grok-4.3","stream":true,"messages":[{"role":"user","content":"hello"}]}`), &domain.Credentials{
 		Provider:    "xai",
 		AccessToken: "access-token",
 		BaseURL:     server.URL,
@@ -82,7 +83,7 @@ func TestExecutorExecuteStreamsResponsesAsOpenAIChunks(t *testing.T) {
 }
 
 func TestExecutorRejectsUnsupportedTool(t *testing.T) {
-	reader, status, err := NewExecutor().Execute("grok-4.3", []byte(`{"model":"grok/grok-4.3","messages":[{"role":"user","content":"hi"}],"tools":[{"type":"web_search"}]}`), &domain.Credentials{}, &testRequestLogger{})
+	reader, status, err := NewExecutor().Execute(context.Background(), "grok-4.3", []byte(`{"model":"grok/grok-4.3","messages":[{"role":"user","content":"hi"}],"tools":[{"type":"web_search"}]}`), &domain.Credentials{}, &testRequestLogger{})
 	if reader != nil {
 		reader.Close()
 	}

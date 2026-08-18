@@ -1,33 +1,80 @@
 package shared
 
 import (
+	"context"
+	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
 	"github.com/dungnt/dntproxy/internal/domain"
 )
 
+// IsResponseHeaderTimeout reports whether err is Go's HTTP/2 response-header
+// timeout ("http2: timeout awaiting response headers") — the server accepted
+// the connection but sent no headers in time. This is a transient upstream
+// stall, not an account failure.
+func IsResponseHeaderTimeout(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "timeout awaiting response headers")
+}
+
 // StreamingHTTPClient is a shared HTTP client configured for streaming responses.
 // It reuses TCP connections across requests and has no client-level timeout
 // (which would kill long-running streams). Timeouts are:
-//   - ResponseHeaderTimeout: 30s (time to first byte)
+//   - ResponseHeaderTimeout: 90s (time to first byte; large image payloads and
+//     slower models can take >30s before headers arrive)
 //   - IdleConnTimeout: 90s (keep-alive connection reuse)
 //   - No overall Timeout (streaming can take minutes)
 var StreamingHTTPClient = &http.Client{
-	Transport: &http.Transport{
+	Transport:     newStreamingTransport(true),
+	CheckRedirect: CheckRedirectSafe,
+	// No Timeout — streaming responses can take minutes.
+	// ResponseHeaderTimeout guards against unresponsive servers.
+}
+
+// HTTP1StreamingClient is for upstreams whose HTTP/2 streams reset mid-SSE
+// (commonly "http2: response body closed").
+var HTTP1StreamingClient = &http.Client{
+	Transport:     newStreamingTransport(false),
+	CheckRedirect: CheckRedirectSafe,
+}
+
+func newStreamingTransport(http2 bool) *http.Transport {
+	t := &http.Transport{
 		MaxIdleConns:          100,
 		MaxIdleConnsPerHost:   10,
 		IdleConnTimeout:       90 * time.Second,
-		ResponseHeaderTimeout: 30 * time.Second, // Time to first byte
-		ForceAttemptHTTP2:     true,
-	},
-	// No Timeout — streaming responses can take minutes.
-	// ResponseHeaderTimeout guards against unresponsive servers.
+		ResponseHeaderTimeout: 90 * time.Second,
+		ForceAttemptHTTP2:     http2,
+	}
+	if !http2 {
+		t.TLSNextProto = map[string]func(string, *tls.Conn) http.RoundTripper{}
+	}
+	return t
+}
+
+// IsCanceledOrClosedStream reports a client abort or an upstream HTTP/2 RST
+// that should not cool down an account.
+func IsCanceledOrClosedStream(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	lower := strings.ToLower(err.Error())
+	return strings.Contains(lower, "response body closed") ||
+		strings.Contains(lower, "context canceled") ||
+		strings.Contains(lower, "canceled")
 }
 
 // MaskedToken masks a token string for logging, showing first 4 and last 4 chars.
@@ -114,41 +161,35 @@ func SanitizeBody(b []byte) []byte {
 		return b // not valid JSON, return as-is
 	}
 
-	// Mask sensitive fields in root
-	maskFields(raw, []string{
-		"api_key", "apiKey", "api-key",
-		"access_token", "accessToken", "access-token",
-		"refresh_token", "refreshToken", "refresh-token",
-		"secret_key", "secretKey", "secret-key",
-		"session_token", "sessionToken", "session-token",
-		"sessionToken", "SessionToken",
-		"authorization", "Authorization",
-		"image", "images", "mask", "subject_reference", "image_file",
-	})
-
-	// Mask sensitive fields in headers (if present)
-	if headers, ok := raw["headers"].(map[string]interface{}); ok {
-		maskFields(headers, []string{
-			"Authorization", "authorization", "X-Api-Key", "x-api-key",
-			"Cookie", "cookie", "X-Amz-Security-Token", "x-amz-security-token",
-		})
-	}
-
-	// Mask in messages array (common in chat completions)
-	if messages, ok := raw["messages"].([]interface{}); ok {
-		for _, msg := range messages {
-			if m, ok := msg.(map[string]interface{}); ok {
-				// Don't mask content, only mask if there are tool_calls with sensitive data
-				_ = m
-			}
-		}
-	}
+	sanitizeJSONValue(raw)
 
 	sanitized, err := json.Marshal(raw)
 	if err != nil {
 		return b // marshaling failed, return original
 	}
 	return sanitized
+}
+
+func sanitizeJSONValue(v interface{}) {
+	switch t := v.(type) {
+	case map[string]interface{}:
+		for k, val := range t {
+			lk := strings.ToLower(strings.ReplaceAll(k, "-", ""))
+			lk = strings.ReplaceAll(lk, "_", "")
+			switch lk {
+			case "apikey", "accesstoken", "refreshtoken", "secretkey", "sessiontoken",
+				"authorization", "xapikey", "cookie", "xamzsecuritytoken",
+				"image", "images", "mask", "subjectreference", "imagefile", "imageurl":
+				t[k] = "***REDACTED***"
+				continue
+			}
+			sanitizeJSONValue(val)
+		}
+	case []interface{}:
+		for _, item := range t {
+			sanitizeJSONValue(item)
+		}
+	}
 }
 
 // maskFields sets each key in the map to "***REDACTED***" if it exists.
@@ -179,6 +220,7 @@ func ConnectionToCredentials(conn *domain.ProviderConnection) *domain.Credential
 		APIKey:               conn.APIKey,
 		BaseURL:              conn.BaseURL,
 		ModelPrefix:          conn.ModelPrefix,
+		TenantID:             conn.TenantID,
 		ProviderSpecificData: conn.ProviderSpecificData,
 	}
 

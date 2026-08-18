@@ -1,8 +1,7 @@
-import { Edit3, Eye, EyeOff, Trash2 } from 'lucide-react'
+import { Edit3, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
-import { CopyButton } from './copy-button'
 import { PermissionSummary } from './permission-summary'
 import type { ApiKey } from './types'
 
@@ -28,7 +27,6 @@ export function KeysMobile({
   return (
     <div className="space-y-3 p-4 md:hidden">
       {keys.map((apiKey) => {
-        const isRevealed = revealedKeys.has(apiKey.id)
         return (
           <div key={apiKey.id} className="rounded-lg border bg-card p-4 space-y-3">
             <div className="flex items-start justify-between gap-3">
@@ -67,17 +65,8 @@ export function KeysMobile({
 
             <div className="flex items-center gap-1.5">
               <code className="min-w-0 flex-1 truncate rounded bg-muted px-2 py-1.5 font-mono text-xs select-all">
-                {isRevealed ? apiKey.key : maskKey(apiKey.key)}
+                {maskKey(apiKey.key)}
               </code>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="size-7 shrink-0"
-                onClick={() => onToggleReveal(apiKey.id)}
-              >
-                {isRevealed ? <EyeOff className="size-3" /> : <Eye className="size-3" />}
-              </Button>
-              <CopyButton text={apiKey.key} label="Key" />
             </div>
 
             <div className="flex items-center justify-between gap-2 text-xs">

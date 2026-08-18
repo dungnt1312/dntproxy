@@ -90,9 +90,13 @@ const navItems: NavItem[] = [
   // { path: "/profiles", label: "Profiles", icon: UserCircle, group: "Management" },
   // { path: "/tools", label: "AI Tools", icon: Wrench, group: "Management" },
   { path: "/api-keys", label: "API Keys", icon: Key, group: "Security" },
+  { path: "/logs", label: "Logs", icon: ScrollText, group: "Monitoring" },
+];
+
+const adminNavItems: NavItem[] = [
+  { path: "/tenants", label: "Tenants", icon: Building2, group: "Management" },
   { path: "/tunnel", label: "Tunnel", icon: Globe, group: "Network" },
   { path: "/usage", label: "Usage", icon: BarChart2, group: "Monitoring" },
-  { path: "/logs", label: "Logs", icon: ScrollText, group: "Monitoring" },
   { path: "/settings", label: "Settings", icon: SettingsIcon, group: "System" },
   {
     path: "/backup",
@@ -100,12 +104,6 @@ const navItems: NavItem[] = [
     icon: HardDriveDownload,
     group: "System",
   },
-];
-
-// Admin-only navigation item. Appended to the Management group only when the
-// current session is an admin (global/legacy key).
-const adminNavItems: NavItem[] = [
-  { path: "/tenants", label: "Tenants", icon: Building2, group: "Management" },
 ];
 
 const emptySubscribe = () => () => {};
@@ -199,7 +197,7 @@ export default function App() {
     return <LoginScreen onSuccess={() => setAuthenticated(true)} />;
   }
 
-  const currentNavItem = navItems.find((item) =>
+  const currentNavItem = [...navItems, ...adminNavItems].find((item) =>
     item.path === "/"
       ? location.pathname === "/"
       : location.pathname.startsWith(item.path),
@@ -307,13 +305,13 @@ export default function App() {
 	            <Route path="/profiles" element={<ProfilesScreen />} />
 	            <Route path="/tools" element={<ToolsScreen />} />
 	            <Route path="/playground" element={<PlaygroundScreen />} />
-	            <Route path="/usage" element={<UsageScreen />} />
+	            <Route path="/usage" element={session?.isAdmin ? <UsageScreen /> : <Navigate to="/" replace />} />
 	            <Route path="/logs" element={<LogsScreen />} />
-	            <Route path="/settings" element={<SettingsScreen />} />
+	            <Route path="/settings" element={session?.isAdmin ? <SettingsScreen /> : <Navigate to="/" replace />} />
 	            <Route path="/api-keys" element={<ApiKeysScreen />} />
-	            <Route path="/tenants" element={<TenantsScreen />} />
-	            <Route path="/tunnel" element={<TunnelScreen />} />
-	            <Route path="/backup" element={<BackupScreen />} />
+	            <Route path="/tenants" element={session?.isAdmin ? <TenantsScreen /> : <Navigate to="/" replace />} />
+	            <Route path="/tunnel" element={session?.isAdmin ? <TunnelScreen /> : <Navigate to="/" replace />} />
+	            <Route path="/backup" element={session?.isAdmin ? <BackupScreen /> : <Navigate to="/" replace />} />
 	            <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </div>

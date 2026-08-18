@@ -2,6 +2,9 @@ package backup
 
 import (
 	"fmt"
+
+	"github.com/dungnt/dntproxy/internal/adapter/shared"
+	"github.com/dungnt/dntproxy/internal/domain"
 )
 
 // ValidateBackup checks backup data for correctness before import.
@@ -34,6 +37,11 @@ func ValidateBackup(b *BackupData) error {
 		if conn.Weight < 0 {
 			return fmt.Errorf("providerConnections[%d]: negative weight", i)
 		}
+		if conn.BaseURL != "" {
+			if err := shared.ValidateOutboundURL(conn.BaseURL, shared.AllowPrivateOutbound(conn.TenantID)); err != nil {
+				return fmt.Errorf("providerConnections[%d]: invalid baseUrl: %w", i, err)
+			}
+		}
 	}
 
 	// Validate combos
@@ -54,9 +62,14 @@ func ValidateBackup(b *BackupData) error {
 		seenComboNames[combo.Name] = i
 	}
 
+	if len(b.APIKeys) == 0 {
+		return fmt.Errorf("apiKeys: backup must include at least one API key")
+	}
+
 	// Validate API keys
 	seenKeyValues := make(map[string]int) // key → index
 	seenKeyNames := make(map[string]int)  // name → index
+	hasAdminKey := false
 	for i, k := range b.APIKeys {
 		if k.ID == "" {
 			return fmt.Errorf("apiKeys[%d]: missing id", i)
@@ -75,6 +88,12 @@ func ValidateBackup(b *BackupData) error {
 			return fmt.Errorf("apiKeys[%d]: duplicate name %q (also at index %d)", i, k.Name, prev)
 		}
 		seenKeyNames[k.Name] = i
+		if k.IsActive && domain.IsLegacyTenant(k.TenantID) {
+			hasAdminKey = true
+		}
+	}
+	if !hasAdminKey {
+		return fmt.Errorf("apiKeys: backup must include at least one active admin (legacy/global) key")
 	}
 
 	// Validate settings
@@ -99,5 +118,3 @@ func ValidateBackup(b *BackupData) error {
 
 	return nil
 }
-
-

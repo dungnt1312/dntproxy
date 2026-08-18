@@ -1,13 +1,15 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
-	"strings"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
+	"github.com/dungnt/dntproxy/internal/adapter/shared"
 	"github.com/dungnt/dntproxy/internal/logger"
 	"github.com/dungnt/dntproxy/internal/port"
 )
@@ -110,7 +112,7 @@ func (s *ChatService) HandleChat(body []byte, modelStr string, requestID string,
 
 	// Unified: every request goes through comboHandler.
 	// For single models, this is just a loop of 1.
-	result, err := s.comboHandler.HandleCombo(models, comboName, strategy, func(qualifiedModel string) (*ComboResult, error) {
+	result, err := s.comboHandler.HandleCombo(extractContext(metadata), models, comboName, strategy, func(qualifiedModel string) (*ComboResult, error) {
 		return s.executeOnProvider(body, qualifiedModel, requestID, attemptConnIDs[qualifiedModel], tenantID, metadata...)
 	})
 
@@ -202,11 +204,30 @@ func (s *ChatService) executeOnProvider(body []byte, qualifiedModel string, requ
 	// Try connections with weighted random + fallback on failure
 	// If model has @connectionId, SelectCredentialsForModel will pin to that connection
 	excludeIDs := make(map[string]bool)
+	var lastExecStatus int
+	var lastExecErr string
+	ctx := extractContext(metadata)
 
 	for {
+		if err := ctx.Err(); err != nil {
+			msg := "client disconnected"
+			reqlog.End(499, msg)
+			return &ComboResult{OK: false, StatusCode: 499, Error: msg}, err
+		}
+
 		// Use new method that handles @connectionId pinning
 		creds, err := s.accountSelector.SelectCredentialsForModel(qualifiedModel, excludeIDs, allowedConnectionIDs, tenantID)
 		if err != nil {
+			if lastExecErr != "" {
+				statusCode, message := normalizeExecutorFailure(lastExecStatus, lastExecErr)
+				reqlog.End(statusCode, message)
+				return &ComboResult{
+					OK:            false,
+					StatusCode:    statusCode,
+					Error:         message,
+					AllowFallback: shouldFallbackToNextAccount(lastExecStatus, lastExecErr),
+				}, nil
+			}
 			// Map selection errors to appropriate combo results
 			if mapped := mapSelectionErrorToComboResult(err); mapped != nil {
 				reqlog.End(mapped.StatusCode, mapped.Error)
@@ -219,15 +240,23 @@ func (s *ChatService) executeOnProvider(body []byte, qualifiedModel string, requ
 
 		reqlog.SelectAccount(creds.ConnectionID, creds.ConnectionName)
 
+		if creds.BaseURL != "" {
+			if err := shared.ValidateOutboundURL(creds.BaseURL, shared.AllowPrivateOutbound(creds.TenantID)); err != nil {
+				msg := "unsafe connection base URL: " + err.Error()
+				reqlog.End(http.StatusBadRequest, msg)
+				return &ComboResult{OK: false, StatusCode: http.StatusBadRequest, Error: msg, Terminal: true}, nil
+			}
+		}
+
 		start := time.Now()
-		stream, status, execErr := executor.Execute(model, updatedBody, creds, reqlog)
+		stream, status, execErr := executor.Execute(ctx, model, updatedBody, creds, reqlog)
 		duration := time.Since(start)
 
 		if status == http.StatusUnauthorized && strings.TrimSpace(creds.RefreshToken) != "" {
 			if refreshedCreds, refErr := s.accountSelector.RefreshCredentialsForOAuth(creds.ConnectionID); refErr == nil && refreshedCreds != nil {
 				creds = refreshedCreds
 				start = time.Now()
-				stream, status, execErr = executor.Execute(model, updatedBody, creds, reqlog)
+				stream, status, execErr = executor.Execute(ctx, model, updatedBody, creds, reqlog)
 				duration = time.Since(start)
 			}
 		}
@@ -249,6 +278,11 @@ func (s *ChatService) executeOnProvider(body []byte, qualifiedModel string, requ
 
 		reqlog.Upstream("", "", status, duration, execErr)
 
+		if shared.IsCanceledOrClosedStream(execErr) {
+			reqlog.End(499, errMsg)
+			return &ComboResult{OK: false, StatusCode: 499, Error: "client disconnected"}, execErr
+		}
+
 		if !shouldFallbackToNextAccount(status, errMsg) {
 			statusCode, message := normalizeExecutorFailure(status, errMsg)
 			reqlog.End(statusCode, message)
@@ -262,12 +296,19 @@ func (s *ChatService) executeOnProvider(body []byte, qualifiedModel string, requ
 			}
 		}
 		excludeIDs[creds.ConnectionID] = true
+		lastExecStatus = status
+		lastExecErr = errMsg
 
 		// If this was a pinned connection, don't retry (no other connections to try)
 		if parsed.ConnectionID != "" {
-			msg := fmt.Sprintf("Pinned connection failed: %s", errMsg)
-			reqlog.End(http.StatusServiceUnavailable, msg)
-			return &ComboResult{OK: false, StatusCode: http.StatusServiceUnavailable, Error: msg}, nil
+			statusCode, message := normalizeExecutorFailure(status, errMsg)
+			reqlog.End(statusCode, message)
+			return &ComboResult{
+				OK:            false,
+				StatusCode:    statusCode,
+				Error:         message,
+				AllowFallback: shouldFallbackToNextAccount(status, errMsg),
+			}, nil
 		}
 	}
 }
@@ -286,7 +327,7 @@ func mapSelectionErrorToComboResult(err error) *ComboResult {
 	case SelectionErrNoAllowedConnection:
 		return &ComboResult{OK: false, StatusCode: http.StatusForbidden, Error: selErr.Error(), AllowFallback: true}
 	case SelectionErrUnsupportedModel:
-		return &ComboResult{OK: false, StatusCode: http.StatusBadRequest, Error: selErr.Error()}
+		return &ComboResult{OK: false, StatusCode: http.StatusBadRequest, Error: selErr.Error(), AllowFallback: true}
 	case SelectionErrRateLimited, SelectionErrModelLocked:
 		return &ComboResult{OK: false, StatusCode: http.StatusTooManyRequests, Error: selErr.Error()}
 	default:
@@ -307,4 +348,13 @@ func extractTenantID(metadata []port.RequestMetadata) string {
 		}
 	}
 	return ""
+}
+
+func extractContext(metadata []port.RequestMetadata) context.Context {
+	for _, m := range metadata {
+		if m.Context != nil {
+			return m.Context
+		}
+	}
+	return context.Background()
 }

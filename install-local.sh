@@ -41,6 +41,8 @@ require_command() {
 
 parse_args() {
     SKIP_UI_INSTALL=0
+    RESTART_PM2=0
+    PM2_PROCESS_NAME="dntproxy"
 
     while [ $# -gt 0 ]; do
         case "$1" in
@@ -55,6 +57,18 @@ parse_args() {
             --skip-ui-install)
                 SKIP_UI_INSTALL=1
                 shift
+                ;;
+            --restart)
+                RESTART_PM2=1
+                shift
+                ;;
+            --pm2-name)
+                if [ $# -lt 2 ]; then
+                    log_err "Missing value for --pm2-name"
+                    exit 1
+                fi
+                PM2_PROCESS_NAME="$2"
+                shift 2
                 ;;
             -h|--help)
                 usage
@@ -106,6 +120,18 @@ main() {
         log_info "Add this path to your shell profile if needed:"
         printf '  export PATH="%s:$PATH"\n' "$INSTALL_DIR"
     fi
+
+    if [ "$RESTART_PM2" -eq 1 ]; then
+        if command -v pm2 >/dev/null 2>&1; then
+            log_info "Restarting pm2 process: ${PM2_PROCESS_NAME}"
+            pm2 restart "$PM2_PROCESS_NAME" --update-env
+            log_ok "pm2 restarted"
+        else
+            log_err "pm2 not found in PATH, cannot restart"
+            exit 1
+        fi
+    fi
+
     log_info "Try: ${APP_NAME} --help"
 }
 

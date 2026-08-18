@@ -27,7 +27,11 @@ func extractUsage(body []byte) *openAIUsage {
 		var chunk struct {
 			Usage *openAIUsage `json:"usage"`
 		}
-		if err := json.Unmarshal([]byte(payload), &chunk); err == nil && chunk.Usage != nil && chunk.Usage.TotalTokens > 0 {
+		if err := json.Unmarshal([]byte(payload), &chunk); err == nil && chunk.Usage != nil &&
+			(chunk.Usage.TotalTokens > 0 || chunk.Usage.PromptTokens > 0 || chunk.Usage.CompletionTokens > 0) {
+			if chunk.Usage.TotalTokens == 0 {
+				chunk.Usage.TotalTokens = chunk.Usage.PromptTokens + chunk.Usage.CompletionTokens
+			}
 			return chunk.Usage
 		}
 	}

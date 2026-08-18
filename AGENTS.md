@@ -86,6 +86,10 @@ internal/logger/                → Structured logging (ring buffer + SQLite)
 | MiniMax | `minimax` | apikey | api.minimax.io | openai-chat |
 | Qwen (Alibaba) | `qwen` | apikey, oauth | portal.qwen.ai | openai-chat |
 | Anthropic | `anthropic` | apikey | api.anthropic.com | anthropic-msg |
+| Gemini | `gemini` | apikey | generativelanguage.googleapis.com | openai-chat |
+| Cline | `cline` | apikey | api.cline.bot | openai-chat |
+| xAI / Grok | `xai` | oauth | api.x.ai | openai-chat (`/responses`) |
+| BytePlus (image) | `byteplus` | apikey | ark.ap-southeast.bytepluses.com | image-only |
 
 ### Adding a New Provider
 1. Add provider config in `internal/domain/provider-config.go`
@@ -218,6 +222,7 @@ OpenAI request → model resolve → combo expand → account select →
 
 ### Auth
 - Dashboard (`/api/*`) and proxy (`/v1/*`) always require API keys (middleware ignores `settings.requireApiKey`)
+- `GET /api/settings` is bootstrap-exempt and returns `{}` without a key; authenticated GET omits listen `port` and `requireApiKey`
 - OAuth connection enrollment (`/api/auth/*`) and `fetch-models` require a dashboard-capable API key
 - New connections inherit the creating key's `TenantID`
 - UI login uses `localStorage` key + `POST /api/auth/validate-key` / `GET /api/auth/session`
@@ -292,7 +297,7 @@ OpenAI request → model resolve → combo expand → account select →
 - [ ] Graceful shutdown (SIGTERM/SIGINT handling)
 - [ ] Cross-platform builds (Makefile/Goreleaser)
 - [ ] Dockerization (Dockerfile + docker-compose)
-- [ ] Anthropic adapter implementation
+- [x] Anthropic adapter implementation (SSE [DONE] + system/tool translation remaining polish as needed)
 - [ ] Metrics validation and monitoring
 
 ### Phase 7: Message Compressor — DONE

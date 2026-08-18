@@ -2,6 +2,7 @@ package storage
 
 import (
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -119,7 +120,7 @@ func (db *JsonDB) readFromDisk() (*domain.AppConfig, error) {
 
 	var cfg domain.AppConfig
 	if err := json.Unmarshal(data, &cfg); err != nil {
-		cfg = domain.DefaultConfig()
+		return nil, fmt.Errorf("parse db file: %w", err)
 	}
 
 	// Migrate: ensure all connections have a valid weight.
@@ -136,53 +137,53 @@ func (db *JsonDB) readFromDisk() (*domain.AppConfig, error) {
 		cfg.Settings.ConnectionStrategy = "weighted-random"
 	}
 
-		// Migrate: existing keys without dashboardAccess field get it set to true
-		// (backward compat — all pre-existing keys were implicitly admin).
-		// Only runs once; flag is persisted on next Save/Update call.
-		if !cfg.Settings.DashboardAccessMigrated {
-			for i := range cfg.APIKeys {
-				if cfg.APIKeys[i].IsActive {
-					cfg.APIKeys[i].DashboardAccess = true
-				}
-			}
-			cfg.Settings.DashboardAccessMigrated = true
-		}
-
-		// Ensure default model registry is always populated (merge missing models).
-		if cfg.ModelRegistry == nil {
-			cfg.ModelRegistry = domain.DefaultModelRegistry()
-		} else {
-			defaultReg := domain.DefaultModelRegistry()
-			for key, model := range defaultReg.Models {
-				if _, exists := cfg.ModelRegistry.Models[key]; !exists {
-					cfg.ModelRegistry.Models[key] = model
-				}
+	// Migrate: existing keys without dashboardAccess field get it set to true
+	// (backward compat — all pre-existing keys were implicitly admin).
+	// Only runs once; flag is persisted on next Save/Update call.
+	if !cfg.Settings.DashboardAccessMigrated {
+		for i := range cfg.APIKeys {
+			if cfg.APIKeys[i].IsActive {
+				cfg.APIKeys[i].DashboardAccess = true
 			}
 		}
+		cfg.Settings.DashboardAccessMigrated = true
+	}
 
-		// Bootstrap: if this is a fresh install (no API keys, no tenants, not
-		// yet bootstrapped), auto-create a default admin key so the operator
-		// can log in. The key is printed to stdout once and never again.
-		if !cfg.Settings.AdminKeyBootstrapped && len(cfg.APIKeys) == 0 && len(cfg.Tenants) == 0 {
-			key := bootstrapAdminKey()
-			cfg.APIKeys = append(cfg.APIKeys, domain.APIKey{
-				ID:              uuid.NewString(),
-				Name:            "Default Admin Key",
-				Key:             key,
-				IsActive:        true,
-				DashboardAccess: true,
-				CreatedAt:       time.Now().UTC().Format(time.RFC3339),
-			})
-			cfg.Settings.AdminKeyBootstrapped = true
-			// Best-effort persist so the key survives even if the first request
-			// never triggers a Save.
-			_ = db.writeToDisk(&cfg)
-			log.Printf("[dntproxy] ============================================================")
-			log.Printf("[dntproxy]  Created default admin key (SAVE THIS NOW, shown only once):")
-			log.Printf("[dntproxy]    %s", key)
-			log.Printf("[dntproxy]  Use it to log into the dashboard at /dashboard")
-			log.Printf("[dntproxy] ============================================================")
+	// Ensure default model registry is always populated (merge missing models).
+	if cfg.ModelRegistry == nil {
+		cfg.ModelRegistry = domain.DefaultModelRegistry()
+	} else {
+		defaultReg := domain.DefaultModelRegistry()
+		for key, model := range defaultReg.Models {
+			if _, exists := cfg.ModelRegistry.Models[key]; !exists {
+				cfg.ModelRegistry.Models[key] = model
+			}
 		}
+	}
+
+	// Bootstrap: if this is a fresh install (no API keys, no tenants, not
+	// yet bootstrapped), auto-create a default admin key so the operator
+	// can log in. The key is printed to stdout once and never again.
+	if !cfg.Settings.AdminKeyBootstrapped && len(cfg.APIKeys) == 0 && len(cfg.Tenants) == 0 {
+		key := bootstrapAdminKey()
+		cfg.APIKeys = append(cfg.APIKeys, domain.APIKey{
+			ID:              uuid.NewString(),
+			Name:            "Default Admin Key",
+			Key:             key,
+			IsActive:        true,
+			DashboardAccess: true,
+			CreatedAt:       time.Now().UTC().Format(time.RFC3339),
+		})
+		cfg.Settings.AdminKeyBootstrapped = true
+		// Best-effort persist so the key survives even if the first request
+		// never triggers a Save.
+		_ = db.writeToDisk(&cfg)
+		log.Printf("[dntproxy] ============================================================")
+		log.Printf("[dntproxy]  Created default admin key (SAVE THIS NOW, shown only once):")
+		log.Printf("[dntproxy]    %s", key)
+		log.Printf("[dntproxy]  Use it to log into the dashboard at /dashboard")
+		log.Printf("[dntproxy] ============================================================")
+	}
 
 	db.cache = &cfg
 	return &cfg, nil
@@ -390,7 +391,7 @@ func (db *JsonDB) ValidateAPIKey(key string) bool {
 		return false
 	}
 	for _, k := range cfg.APIKeys {
-		if k.Key == key && k.IsActive {
+		if apiKeyMatches(k.Key, key) && k.IsActive {
 			return true
 		}
 	}
@@ -405,11 +406,18 @@ func (db *JsonDB) GetAPIKeyByValue(key string) (*domain.APIKey, bool) {
 		return nil, false
 	}
 	for i, k := range cfg.APIKeys {
-		if k.Key == key && k.IsActive {
+		if apiKeyMatches(k.Key, key) && k.IsActive {
 			return &cfg.APIKeys[i], true
 		}
 	}
 	return nil, false
+}
+
+func apiKeyMatches(stored, provided string) bool {
+	if subtle.ConstantTimeCompare([]byte(stored), []byte(provided)) == 1 {
+		return true
+	}
+	return false
 }
 
 // GetSettings returns app settings.

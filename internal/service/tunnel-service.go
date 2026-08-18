@@ -6,6 +6,7 @@ import (
 	"log"
 	"math/rand"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -34,7 +35,17 @@ type TunnelService struct {
 
 // NewTunnelService creates a new tunnel service.
 func NewTunnelService(store TunnelStore) (*TunnelService, error) {
-	state, err := tunnel.NewStateManager()
+	dir := ""
+	if d, ok := store.(interface{ DataDir() string }); ok && d.DataDir() != "" {
+		dir = filepath.Join(d.DataDir(), "tunnel")
+	}
+	var state *tunnel.StateManager
+	var err error
+	if dir != "" {
+		state, err = tunnel.NewStateManagerIn(dir)
+	} else {
+		state, err = tunnel.NewStateManager()
+	}
 	if err != nil {
 		return nil, fmt.Errorf("init tunnel state: %w", err)
 	}

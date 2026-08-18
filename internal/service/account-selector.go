@@ -40,6 +40,7 @@ const (
 	ConnectionStrategyWeightedRandom   = "weighted-random"
 	ConnectionStrategyPriorityFallback = "priority-fallback"
 	ConnectionStrategyRoundRobin       = "round-robin"
+	ConnectionStrategyFillFirst        = "fill-first"
 )
 
 type AccountSelectionError struct {
@@ -313,14 +314,35 @@ func (s *AccountSelector) SelectCredentials(
 }
 
 func (s *AccountSelector) selectConnection(available []domain.ProviderConnection, provider string, model string, allowedConnectionIDs []string) *domain.ProviderConnection {
-	switch s.connectionStrategy() {
-	case ConnectionStrategyPriorityFallback:
-		return priorityFallbackSelect(available)
-	case ConnectionStrategyRoundRobin:
-		return s.roundRobinSelect(available, provider, model, allowedConnectionIDs)
-	default:
-		return weightedRandomSelect(available)
+	strategy := s.connectionStrategyFor(provider)
+	pool := available
+	switch strategy {
+	case ConnectionStrategyPriorityFallback, ConnectionStrategyFillFirst:
+		pool = filterByLowestPriority(available)
 	}
+	switch strategy {
+	case ConnectionStrategyPriorityFallback:
+		return priorityFallbackSelect(pool)
+	case ConnectionStrategyRoundRobin:
+		return s.roundRobinSelect(pool, provider, model, allowedConnectionIDs)
+	case ConnectionStrategyFillFirst:
+		return fillFirstSelect(pool)
+	default:
+		return weightedRandomSelect(pool)
+	}
+}
+
+func (s *AccountSelector) connectionStrategyFor(provider string) string {
+	settings, err := s.store.GetSettings()
+	if err != nil || settings == nil {
+		return ConnectionStrategyWeightedRandom
+	}
+	if m := settings.ConnectionStrategies; m != nil {
+		if v, ok := m[provider]; ok && v != "" {
+			return v
+		}
+	}
+	return s.connectionStrategy()
 }
 
 func (s *AccountSelector) connectionStrategy() string {
@@ -329,7 +351,7 @@ func (s *AccountSelector) connectionStrategy() string {
 		return ConnectionStrategyWeightedRandom
 	}
 	switch settings.ConnectionStrategy {
-	case ConnectionStrategyWeightedRandom, ConnectionStrategyPriorityFallback, ConnectionStrategyRoundRobin:
+	case ConnectionStrategyWeightedRandom, ConnectionStrategyPriorityFallback, ConnectionStrategyRoundRobin, ConnectionStrategyFillFirst:
 		return settings.ConnectionStrategy
 	default:
 		return ConnectionStrategyWeightedRandom
@@ -342,13 +364,7 @@ func priorityFallbackSelect(available []domain.ProviderConnection) *domain.Provi
 	}
 	sorted := append([]domain.ProviderConnection(nil), available...)
 	sort.SliceStable(sorted, func(i, j int) bool {
-		if sorted[i].Priority != sorted[j].Priority {
-			return sorted[i].Priority < sorted[j].Priority
-		}
-		if normalizedWeight(sorted[i].Weight) != normalizedWeight(sorted[j].Weight) {
-			return normalizedWeight(sorted[i].Weight) > normalizedWeight(sorted[j].Weight)
-		}
-		return false
+		return normalizedWeight(sorted[i].Weight) > normalizedWeight(sorted[j].Weight)
 	})
 	return &sorted[0]
 }
@@ -359,10 +375,7 @@ func (s *AccountSelector) roundRobinSelect(available []domain.ProviderConnection
 	}
 	sorted := append([]domain.ProviderConnection(nil), available...)
 	sort.SliceStable(sorted, func(i, j int) bool {
-		if sorted[i].Priority != sorted[j].Priority {
-			return sorted[i].Priority < sorted[j].Priority
-		}
-		return false
+		return normalizedWeight(sorted[i].Weight) > normalizedWeight(sorted[j].Weight)
 	})
 
 	key := connectionRotationKey(provider, model, allowedConnectionIDs)
@@ -376,7 +389,7 @@ func (s *AccountSelector) roundRobinSelect(available []domain.ProviderConnection
 }
 
 func (s *AccountSelector) AdvanceConnectionRotation(provider string, model string, allowedConnectionIDs []string) {
-	if s.connectionStrategy() != ConnectionStrategyRoundRobin {
+	if s.connectionStrategyFor(provider) != ConnectionStrategyRoundRobin {
 		return
 	}
 	key := connectionRotationKey(provider, model, allowedConnectionIDs)
@@ -395,6 +408,50 @@ func connectionRotationKey(provider string, model string, allowedConnectionIDs [
 		return provider + "/" + model + "|all"
 	}
 	return provider + "/" + model + "|" + strings.Join(ids, ",")
+}
+
+// filterByLowestPriority returns connections from the lowest priority group only.
+// Lower Priority value = higher precedence. When all remaining connections are
+// in the same priority, this is a pass-through. When there are multiple priority
+// levels, only the lowest-numbered connections survive — higher-priority-number
+// (lower precedence) connections are only used as fallback after all lower-priority
+// connections have been excluded, rate-limited, or locked.
+func filterByLowestPriority(conns []domain.ProviderConnection) []domain.ProviderConnection {
+	if len(conns) <= 1 {
+		return conns
+	}
+	minPriority := conns[0].Priority
+	for _, c := range conns[1:] {
+		if c.Priority < minPriority {
+			minPriority = c.Priority
+		}
+	}
+	filtered := make([]domain.ProviderConnection, 0, len(conns))
+	for _, c := range conns {
+		if c.Priority == minPriority {
+			filtered = append(filtered, c)
+		}
+	}
+	return filtered
+}
+
+// fillFirstSelect picks the single best candidate deterministically.
+// Sort order: weight DESC → ID ASC for stability.
+// This strategy is "sticky" — it always returns the same connection from the
+// available pool (same priority level after pre-filter), maximizing provider-side
+// cache hit rate.
+func fillFirstSelect(available []domain.ProviderConnection) *domain.ProviderConnection {
+	if len(available) == 1 {
+		return &available[0]
+	}
+	sorted := append([]domain.ProviderConnection(nil), available...)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		if normalizedWeight(sorted[i].Weight) != normalizedWeight(sorted[j].Weight) {
+			return normalizedWeight(sorted[i].Weight) > normalizedWeight(sorted[j].Weight)
+		}
+		return sorted[i].ID < sorted[j].ID
+	})
+	return &sorted[0]
 }
 
 // weightedRandomSelect picks a connection from the available list using weighted random.
@@ -522,11 +579,15 @@ func (s *AccountSelector) RefreshCredentialsForOAuth(connectionID string) (*doma
 	if conn == nil {
 		return nil, fmt.Errorf("connection not found: %s", connectionID)
 	}
-	updated, err := s.ensureFreshOAuth(conn)
-	if err != nil {
-		return nil, err
+	if conn.AuthType != "oauth" || strings.TrimSpace(conn.RefreshToken) == "" {
+		return shared.ConnectionToCredentials(conn), nil
 	}
-	return shared.ConnectionToCredentials(updated), nil
+	log.Printf("[AUTH] Force-refreshing OAuth token for %s after upstream 401", conn.Name)
+	refreshed, err := s.tokenRefresh.ForceRefresh(conn)
+	if err != nil {
+		return nil, fmt.Errorf("token refresh failed for %s: %w", conn.Name, err)
+	}
+	return shared.ConnectionToCredentials(refreshed), nil
 }
 
 func (s *AccountSelector) ensureFreshOAuth(conn *domain.ProviderConnection) (*domain.ProviderConnection, error) {
@@ -536,24 +597,25 @@ func (s *AccountSelector) ensureFreshOAuth(conn *domain.ProviderConnection) (*do
 	if conn.AuthType != "oauth" || strings.TrimSpace(conn.RefreshToken) == "" {
 		return conn, nil
 	}
-	if s.tokenRefresh.ShouldProactivelyRefresh(conn) {
-		log.Printf("[AUTH] Token expiring soon for %s, refreshing...", conn.Name)
-		refreshed, err := s.tokenRefresh.CheckAndRefresh(conn)
+	expired := auth.IsAccessTokenExpired(conn.ExpiresAt) || strings.TrimSpace(conn.ExpiresAt) == ""
+	if expired {
+		log.Printf("[AUTH] Refreshing expired OAuth token for %s", conn.Name)
+		refreshed, err := s.tokenRefresh.ForceRefresh(conn)
 		if err != nil {
-			log.Printf("[AUTH] Proactive token refresh failed for %s: %s (using current token)", conn.Name, err)
+			return nil, fmt.Errorf("token refresh failed for %s: %w", conn.Name, err)
+		}
+		log.Printf("[AUTH] Token refreshed successfully for %s", conn.Name)
+		return refreshed, nil
+	}
+	if s.tokenRefresh.ShouldProactivelyRefresh(conn) {
+		log.Printf("[AUTH] Proactively refreshing OAuth token for %s", conn.Name)
+		refreshed, err := s.tokenRefresh.ForceRefresh(conn)
+		if err != nil {
+			log.Printf("[AUTH] Proactive refresh failed for %s, using current token: %v", conn.Name, err)
 			return conn, nil
 		}
 		log.Printf("[AUTH] Token refreshed successfully for %s", conn.Name)
 		return refreshed, nil
 	}
-	if auth.IsAccessTokenExpired(conn.ExpiresAt) {
-		log.Printf("[AUTH] Access token expired for %s, forcing refresh...", conn.Name)
-		refreshed, err := s.tokenRefresh.ForceRefresh(conn)
-		if err != nil {
-			return nil, fmt.Errorf("token refresh failed for %s: %w", conn.Name, err)
-		}
-		return refreshed, nil
-	}
 	return conn, nil
 }
-

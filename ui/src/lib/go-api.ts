@@ -140,6 +140,34 @@ export async function goStreamFetch(
   return res;
 }
 
+export async function consumeSSE(
+  path: string,
+  onMessage: (data: string) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const res = await goStreamFetch(path, { method: "GET", signal });
+  if (!res.ok || !res.body) {
+    throw new Error(`SSE ${res.status}`);
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const parts = buf.split("\n\n");
+    buf = parts.pop() ?? "";
+    for (const part of parts) {
+      for (const line of part.split("\n")) {
+        if (line.startsWith("data: ")) {
+          onMessage(line.slice(6));
+        }
+      }
+    }
+  }
+}
+
 function toSearchParams(filters?: Record<string, unknown>) {
   const params = new URLSearchParams();
   if (!filters) return params;
@@ -248,18 +276,15 @@ function mapSettings(go: any) {
   return {
     ...go,
     id: 'default',
-    serverPort: Number(go.port ?? 20199),
-    apiKeyAuthEnabled: Boolean(go.requireApiKey),
     defaultRoutingStrategy: String(go.comboStrategy || "fallback"),
-    connectionStrategy: String(go.connectionStrategy || "weighted-random"),
+    connectionStrategy: String(go.connectionStrategy || "fill-first"),
+    connectionStrategies: go.connectionStrategies || {},
     compressionEnabled: Boolean(go?.compression?.enabled),
     compressionMinLength: Number(go?.compression?.minContentLength ?? 500),
     compressionLogSavings: go?.compression?.logSavings !== false,
     logBodies: Boolean(go.logBodies),
-    telegramEnabled: Boolean(go?.telegram?.enabled),
-    telegramBotToken: String(go?.telegram?.botToken || ""),
-    telegramOwnerID: Number(go?.telegram?.ownerId || 0),
     defaultModels: go.defaultModels || {},
+    disableImageGeneration: Boolean(go.disableImageGeneration),
   };
 }
 
@@ -434,19 +459,11 @@ export const goApi: any = {
 
   updateSettings: (data: Record<string, unknown>) => {
     const payload: Record<string, unknown> = {
-      port: data.serverPort ?? data.port ?? 20199,
-      // Auth is always enforced server-side; only include requireApiKey when
-      // the caller explicitly sets it (legacy callers). Do not default to false.
-      ...(data.apiKeyAuthEnabled !== undefined || data.requireApiKey !== undefined
-        ? {
-            requireApiKey:
-              data.apiKeyAuthEnabled ?? data.requireApiKey ?? true,
-          }
-        : {}),
       comboStrategy:
         data.defaultRoutingStrategy ?? data.comboStrategy ?? "fallback",
       connectionStrategy:
-        data.connectionStrategy ?? "weighted-random",
+        data.connectionStrategy ?? "fill-first",
+      connectionStrategies: data.connectionStrategies || {},
       compression: {
         enabled: Boolean(data.compressionEnabled ?? false),
         minContentLength: Number(data.compressionMinLength ?? 500),
@@ -454,11 +471,7 @@ export const goApi: any = {
       },
       logBodies: Boolean(data.logBodies ?? false),
       defaultModels: data.defaultModels || {},
-      telegram: {
-        enabled: Boolean(data.telegramEnabled ?? false),
-        botToken: String(data.telegramBotToken || ""),
-        ownerId: Number(data.telegramOwnerID || 0),
-      },
+      disableImageGeneration: Boolean(data.disableImageGeneration ?? false),
     };
     return goRequest("/settings", {
       method: "PUT",
@@ -652,12 +665,6 @@ export const goApi: any = {
     goRequest("/tools/configure-all", { method: "POST" }),
   resetAllTools: () =>
     goRequest("/tools/reset-all", { method: "POST" }),
-
-  // Telegram
-  getTelegramStatus: () => goRequest<any>("/telegram/status"),
-  startTelegram: () => goRequest("/telegram/start", { method: "POST" }),
-  stopTelegram: () => goRequest("/telegram/stop", { method: "POST" }),
-	testTelegram: () => goRequest("/telegram/test", { method: "POST" }),
 
   // Image generation
   getImageModels: async () => {

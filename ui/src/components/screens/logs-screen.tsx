@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, useMemo } from "react";
+import { useSearchParams } from "react-router-dom";
 import { FileWarning, RefreshCw, Radio, Terminal, Table2, Eye } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -29,12 +30,23 @@ export default function LogsScreen({
   embedded = false,
   allowedProviders,
 }: LogsScreenProps = {}) {
+  const [searchParams] = useSearchParams();
+  const queryProvider = searchParams.get("provider") || undefined;
+  const queryConnectionId = searchParams.get("connectionId") || undefined;
+  const urlInitialFilters = useMemo(
+    () => ({
+      ...(queryProvider ? { provider: queryProvider } : {}),
+      ...(queryConnectionId ? { connectionId: queryConnectionId } : {}),
+    }),
+    [queryProvider, queryConnectionId]
+  );
   const [viewTab, setViewTab] = useState<ViewTab>("table");
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [connections, setConnections] = useState<LogConnectionSummary[]>([]);
   const [filters, setFilters] = useState<LogFilters>(() => ({
     ...DEFAULT_FILTERS,
     ...initialFilters,
+    ...urlInitialFilters,
   }));
   const [live, setLive] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -42,6 +54,7 @@ export default function LogsScreen({
   const [debouncedFilters, setDebouncedFilters] = useState<LogFilters>(() => ({
     ...DEFAULT_FILTERS,
     ...initialFilters,
+    ...urlInitialFilters,
   }));
 
   // Sync initial filters if they change from parent
@@ -66,7 +79,26 @@ export default function LogsScreen({
     initialFilters?.provider,
     initialFilters?.level,
     initialFilters?.q,
+    queryProvider,
+    queryConnectionId,
   ]);
+
+  // Apply provider / connectionId filters from the URL on navigation
+  useEffect(() => {
+    setFilters((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      if (queryProvider !== undefined && queryProvider !== prev.provider) {
+        next.provider = queryProvider;
+        changed = true;
+      }
+      if (queryConnectionId !== undefined && queryConnectionId !== prev.connectionId) {
+        next.connectionId = queryConnectionId;
+        changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [queryProvider, queryConnectionId]);
 
   useEffect(() => {
     if (filters.q === debouncedFilters.q) {

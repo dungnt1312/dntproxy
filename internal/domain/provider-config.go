@@ -420,7 +420,7 @@ var ProviderConfigs = map[string]ProviderConfig{
 			"xiaomi/mimo-v2.5-pro",
 		},
 		Format:        FormatCommandCode,
-		SupportsQuota: false,
+		SupportsQuota: true,
 		UI: ProviderUI{
 			Category:            "cloud",
 			Description:         "Command Code models via CLI generate API (works on Go plan)",

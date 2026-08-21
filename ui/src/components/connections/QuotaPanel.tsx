@@ -11,6 +11,8 @@ export interface QuotaBucket {
   pct: number;
   resetAt?: string;
   unlimited: boolean;
+  unit?: string;
+  scale?: number;
 }
 
 export interface BillingHistoryEntry {
@@ -55,6 +57,13 @@ function monthLabel(year: number, month: number): string {
   // month from API is 1-12
   const d = new Date(Date.UTC(year, month - 1, 1));
   return d.toLocaleString(undefined, { month: "short", year: "numeric", timeZone: "UTC" });
+}
+
+function formatQuotaValue(bucket: QuotaBucket, value: number): string {
+  if (bucket.unit === "credits" && bucket.scale) {
+    return `$${(value / bucket.scale).toFixed(3)}`;
+  }
+  return String(value);
 }
 
 interface QuotaPanelProps {
@@ -195,10 +204,10 @@ export default function QuotaPanel({
                 ) : (
                   <span
                     className="font-mono text-[11px] text-foreground/80 font-medium"
-                    title={`${b.used} / ${b.total} (${b.pct}%) · remaining ${b.remaining}`}
+                    title={`${formatQuotaValue(b, b.used)} / ${formatQuotaValue(b, b.total)} (${b.pct}%) · remaining ${formatQuotaValue(b, b.remaining)}`}
                   >
-                    {b.used}
-                    <span className="text-muted-foreground/50 text-[10px]"> / {b.total}</span>
+                    {formatQuotaValue(b, b.used)}
+                    <span className="text-muted-foreground/50 text-[10px]"> / {formatQuotaValue(b, b.total)}</span>
                   </span>
                 )}
                 {b.resetAt && (

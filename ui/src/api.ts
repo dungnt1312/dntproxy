@@ -64,6 +64,14 @@ function logQuery(filters: Partial<LogFilters> = {}) {
 
 import type { CreateConnectionPayload } from './types/provider-metadata';
 
+export type ConnectionImportResult = {
+  ok: boolean;
+  imported: number;
+  updated: number;
+  skipped: number;
+  errors?: string[];
+};
+
 export const api = {
   // Provider catalog (dynamic add-connection UI)
   getProviders: () => request('/providers'),
@@ -100,6 +108,16 @@ export const api = {
   resetCooldown: (id: string) => request(`/connections/${id}/reset-cooldown`, { method: 'POST' }),
   clearConnectionError: (id: string, model?: string) =>
     request(`/connections/${id}/clear-error`, { method: 'POST', body: JSON.stringify(model ? { model } : {}) }),
+  importConnectionFile: (data: object, mode: 'add' | 'replace' | 'merge' = 'merge') =>
+    request('/connections/import-file', {
+      method: 'POST',
+      body: JSON.stringify({ ...data, mode }),
+    }) as Promise<ConnectionImportResult>,
+  importConnectionsFile: (data: object, mode: 'add' | 'replace' | 'merge' = 'merge') =>
+    request('/connections/import-multiple', {
+      method: 'POST',
+      body: JSON.stringify({ ...data, mode }),
+    }) as Promise<ConnectionImportResult>,
 
   // Kiro Auth Flows
   startBuilderID: () => request('/auth/kiro/start-builderid', { method: 'POST' }),

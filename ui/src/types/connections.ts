@@ -36,6 +36,8 @@ export interface QuotaBucket {
   pct: number;
   resetAt?: string;
   unlimited: boolean;
+  unit?: string;
+  scale?: number;
 }
 
 export interface BillingHistoryEntry {

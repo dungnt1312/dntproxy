@@ -1,4 +1,4 @@
-import { Check, ChevronDown, RefreshCw, Zap } from 'lucide-react';
+import { Check, ChevronDown, Plus, RefreshCw, Zap } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
@@ -13,6 +13,7 @@ interface ConnectionGroupProps {
     quotaResult: Record<string, UsageData>;
     onToggle: () => void;
     onFetchQuota: () => void;
+    onAddConnection: () => void;
     onReload: () => void;
     onDelete: (id: string, name: string) => void;
     onEditModels: (conn: Connection) => void;
@@ -35,6 +36,7 @@ export function ConnectionGroup({
     quotaResult,
     onToggle,
     onFetchQuota,
+    onAddConnection,
     onReload,
     onDelete,
     onEditModels,
@@ -124,6 +126,20 @@ export function ConnectionGroup({
                         className={`h-4 w-4 text-muted-foreground transition-transform ${isCollapsed ? '-rotate-90' : ''}`}
                     />
                 </button>
+
+                <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={(event) => {
+                        event.stopPropagation();
+                        onAddConnection();
+                    }}
+                    className="h-7 w-7 shrink-0"
+                    title={`Add ${group.label} connection`}
+                    aria-label={`Add ${group.label} connection`}
+                >
+                    <Plus className="h-4 w-4" />
+                </Button>
 
                 {/* Check quota button — only for groups with active connections */}
                 {hasActiveItems && !isFetching && (

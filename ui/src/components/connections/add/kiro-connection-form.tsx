@@ -17,6 +17,8 @@ type Props = {
     onSuccess: (message: string) => void;
     onError: (message: string) => void;
     onBusyChange: (busy: boolean) => void;
+    initialMethod?: string;
+    onMethodChange?: (method: string) => void;
 };
 
 const PRIMARY_MODES = [
@@ -31,8 +33,12 @@ const MORE_MODES = [
     { id: 'manual' as const, label: 'Manual', description: 'Paste tokens', icon: <Play size={13} /> },
 ];
 
-export function KiroConnectionForm({ onSuccess, onError, onBusyChange }: Props) {
-    const [mode, setMode] = useState<ImportMode>('detect');
+export function KiroConnectionForm({ onSuccess, onError, onBusyChange, initialMethod, onMethodChange }: Props) {
+    const [mode, setMode] = useState<ImportMode>(() =>
+        initialMethod && [...PRIMARY_MODES, ...MORE_MODES].some(({ id }) => id === initialMethod)
+            ? initialMethod as ImportMode
+            : 'detect',
+    );
     const [loading, setLoading] = useState(false);
     const [form, setForm] = useState({
         refreshToken: '',
@@ -61,6 +67,12 @@ export function KiroConnectionForm({ onSuccess, onError, onBusyChange }: Props) 
     useEffect(() => () => {
         if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
     }, []);
+
+    useEffect(() => {
+        if (initialMethod && [...PRIMARY_MODES, ...MORE_MODES].some(({ id }) => id === initialMethod)) {
+            setMode(initialMethod as ImportMode);
+        }
+    }, [initialMethod]);
 
     const formDirty =
         Boolean(form.refreshToken.trim()) ||
@@ -133,6 +145,7 @@ export function KiroConnectionForm({ onSuccess, onError, onBusyChange }: Props) 
                     setSocialLogin(null);
                     setSocialCallbackUrl('');
                     setMode(next);
+                    onMethodChange?.(next);
                     onError('');
                 }}
                 primary={PRIMARY_MODES}

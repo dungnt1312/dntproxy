@@ -1,5 +1,6 @@
 import { useId } from 'react';
 import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import type { FormFieldMeta } from '@/types/provider-metadata';
@@ -38,6 +39,25 @@ export function DynamicFormField({ field, value, onChange, className }: Props) {
           rows={3}
           className={className ?? 'text-xs font-mono'}
         />
+      </div>
+    );
+  }
+
+  if (field.type === 'select') {
+    return (
+      <div className="space-y-1">
+        {label}
+        <Select value={value} onValueChange={onChange}>
+          <SelectTrigger id={id} className={className ?? 'w-full text-xs'}>
+            <SelectValue placeholder={field.placeholder} />
+          </SelectTrigger>
+          <SelectContent>
+            {(field.options ?? []).map((option) => (
+              <SelectItem key={option} value={option}>{option}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {field.helpText ? <p className="text-[11px] text-muted-foreground">{field.helpText}</p> : null}
       </div>
     );
   }

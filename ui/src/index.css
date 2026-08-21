@@ -19,6 +19,18 @@
   animation: blink 1s step-start infinite;
 }
 
+@keyframes dashboard-flow {
+  to { stroke-dashoffset: -11; }
+}
+
+.dashboard-flow {
+  animation: dashboard-flow 0.9s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dashboard-flow { animation: none; }
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);

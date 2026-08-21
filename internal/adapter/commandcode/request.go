@@ -101,7 +101,7 @@ func newUpstreamRequest(ctx context.Context, baseURL, apiKey string, ccBody ccRe
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Accept", "text/event-stream")
-	req.Header.Set("x-command-code-version", commandCodeVersion())
+	req.Header.Set("x-command-code-version", CommandCodeVersion())
 	req.Header.Set("x-cli-environment", "production")
 	return req, payload, nil
 }

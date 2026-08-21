@@ -1,20 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
-import { ExternalLink, Globe, Shield } from 'lucide-react';
+import { ExternalLink } from 'lucide-react';
 import { api } from '../../../api';
 import { ApiKeyConnectionForm } from '../ApiKeyConnectionForm';
 import { Button } from '@/components/ui/button';
 import type { CreateConnectionPayload, ProviderConfigMeta } from '@/types/provider-metadata';
-import { AuthMethodSelector } from './auth-method-selector';
 import { errorMessage } from './helpers';
 import { OAuthWaitingPanel } from './oauth-waiting-panel';
 import { SetupIntro } from './setup-intro';
 
 const OPENAI_POLL_INTERVAL_MS = 2000;
 
-type Mode = 'oauth' | 'apikey';
-
 type Props = {
     provider: ProviderConfigMeta;
+    mode: string;
     loading: boolean;
     onCreate: (payload: CreateConnectionPayload) => Promise<void>;
     onSuccess: (message: string) => void;
@@ -24,13 +22,13 @@ type Props = {
 
 export function OpenAIConnectionForm({
     provider,
+    mode,
     loading,
     onCreate,
     onSuccess,
     onError,
     onBusyChange,
 }: Props) {
-    const [mode, setMode] = useState<Mode>('oauth');
     const [session, setSession] = useState<{ sessionId: string; authUrl: string } | null>(null);
     const [callback, setCallback] = useState('');
     const [starting, setStarting] = useState(false);
@@ -108,19 +106,6 @@ export function OpenAIConnectionForm({
 
     return (
         <div className="mx-auto max-w-lg space-y-5">
-            <AuthMethodSelector
-                value={mode}
-                onChange={(next) => {
-                    clearSession();
-                    setMode(next);
-                    onError('');
-                }}
-                primary={[
-                    { id: 'oauth', label: 'OAuth', description: 'PKCE, no API key', icon: <Globe size={13} />, recommended: true },
-                    { id: 'apikey', label: 'API Key', description: 'Paste a secret key', icon: <Shield size={13} /> },
-                ]}
-            />
-
             {mode === 'oauth' && !session && (
                 <div className="space-y-4 text-center">
                     <SetupIntro

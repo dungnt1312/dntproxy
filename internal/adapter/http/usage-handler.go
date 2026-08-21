@@ -7,11 +7,16 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
+	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/dungnt/dntproxy/internal/adapter/auth"
+	"github.com/dungnt/dntproxy/internal/adapter/commandcode"
+	"github.com/dungnt/dntproxy/internal/adapter/shared"
 	"github.com/dungnt/dntproxy/internal/domain"
 	"github.com/dungnt/dntproxy/internal/port"
 	"github.com/gin-gonic/gin"
@@ -29,6 +34,8 @@ type QuotaBucket struct {
 	Pct       int    `json:"pct"` // 0-100, percent USED
 	ResetAt   string `json:"resetAt,omitempty"`
 	Unlimited bool   `json:"unlimited"`
+	Unit      string `json:"unit,omitempty"`
+	Scale     int    `json:"scale,omitempty"`
 }
 
 // UsageResponse is the single, canonical response shape for GET /api/usage/:id.
@@ -40,6 +47,7 @@ type UsageResponse struct {
 	Quotas       []QuotaBucket         `json:"quotas"`
 	Overages     *OverageInfo          `json:"overages,omitempty"`
 	History      []BillingHistoryEntry `json:"history,omitempty"`
+	Extras       map[string]any        `json:"extras,omitempty"`
 }
 
 // OverageInfo contains overage / on-demand usage when the plan exposes a cap.
@@ -62,6 +70,10 @@ type BillingHistoryEntry struct {
 }
 
 func (r *UsageResponse) addBucket(key, label string, used, total int, resetAt string, unlimited bool) {
+	r.addBucketWithUnit(key, label, used, total, resetAt, unlimited, "", 0)
+}
+
+func (r *UsageResponse) addBucketWithUnit(key, label string, used, total int, resetAt string, unlimited bool, unit string, scale int) {
 	remaining := total - used
 	if remaining < 0 {
 		remaining = 0
@@ -76,7 +88,7 @@ func (r *UsageResponse) addBucket(key, label string, used, total int, resetAt st
 	r.Quotas = append(r.Quotas, QuotaBucket{
 		Key: key, Label: label,
 		Used: used, Total: total, Remaining: remaining,
-		Pct: pct, ResetAt: resetAt, Unlimited: unlimited,
+		Pct: pct, ResetAt: resetAt, Unlimited: unlimited, Unit: unit, Scale: scale,
 	})
 }
 
@@ -155,6 +167,8 @@ func (h *UsageHandler) fetchUsage(conn *domain.ProviderConnection) (*UsageRespon
 		return fetchMiniMaxUsage(conn)
 	case "xai":
 		return fetchXAIGrokChatUsage(conn)
+	case "commandcode":
+		return fetchCommandCodeUsage(conn)
 	default:
 		return &UsageResponse{
 			Provider: conn.Provider,
@@ -507,6 +521,203 @@ func fetchMiniMaxUsage(conn *domain.ProviderConnection) (*UsageResponse, error) 
 	}
 
 	return result, nil
+}
+
+// ─── Command Code ───────────────────────────────────────────────────────────
+
+type commandCodeWhoAmI struct {
+	Org *struct {
+		ID string `json:"id"`
+	} `json:"org"`
+}
+
+type commandCodeSubscription struct {
+	Success bool `json:"success"`
+	Data    struct {
+		Status             string `json:"status"`
+		PlanID             string `json:"planId"`
+		CurrentPeriodStart string `json:"currentPeriodStart"`
+		CurrentPeriodEnd   string `json:"currentPeriodEnd"`
+	} `json:"data"`
+}
+
+type commandCodeUsageSummary struct {
+	TotalCount     int     `json:"totalCount"`
+	TotalCost      float64 `json:"totalCost"`
+	SuccessRate    float64 `json:"successRate"`
+	CompletedCount int     `json:"completedCount"`
+	FailedCount    int     `json:"failedCount"`
+	TotalTokensIn  int     `json:"totalTokensIn"`
+	TotalTokensOut int     `json:"totalTokensOut"`
+	TotalTokens    int     `json:"totalTokens"`
+	TotalCredits   float64 `json:"totalCredits"`
+	PeriodBasis    string  `json:"periodBasis"`
+}
+
+type commandCodeCredits struct {
+	Credits struct {
+		BelowThreshold bool    `json:"belowThreshold"`
+		MonthlyCredits float64 `json:"monthlyCredits"`
+	} `json:"credits"`
+	WindowLimits struct {
+		Exceeded bool `json:"exceeded"`
+		FiveHour struct {
+			Used     float64 `json:"used"`
+			Cap      float64 `json:"cap"`
+			Exceeded bool    `json:"exceeded"`
+			ResetAt  int64   `json:"resetAt"`
+		} `json:"fiveHour"`
+		Weekly struct {
+			Used     float64 `json:"used"`
+			Cap      float64 `json:"cap"`
+			Exceeded bool    `json:"exceeded"`
+			ResetAt  int64   `json:"resetAt"`
+		} `json:"weekly"`
+	} `json:"windowLimits"`
+}
+
+func fetchCommandCodeUsage(conn *domain.ProviderConnection) (*UsageResponse, error) {
+	apiKey := conn.APIKey
+	if apiKey == "" {
+		apiKey = conn.AccessToken
+	}
+	if apiKey == "" {
+		return &UsageResponse{
+			Provider: "commandcode",
+			Message:  "No API key configured for Command Code",
+			Quotas:   []QuotaBucket{},
+		}, nil
+	}
+
+	baseURL := strings.TrimRight(strings.TrimSpace(conn.BaseURL), "/")
+	if baseURL == "" {
+		baseURL = "https://api.commandcode.ai"
+	}
+	if err := shared.ValidateOutboundURL(baseURL, shared.AllowPrivateOutbound(conn.TenantID)); err != nil {
+		return nil, fmt.Errorf("invalid Command Code base URL: %w", err)
+	}
+
+	client := shared.NewSafeHTTPClient(12 * time.Second)
+	var whoami commandCodeWhoAmI
+	if err := commandCodeGet(client, baseURL, apiKey, "/alpha/whoami", nil, &whoami); err != nil {
+		return nil, err
+	}
+	params := url.Values{}
+	if whoami.Org != nil && strings.TrimSpace(whoami.Org.ID) != "" {
+		params.Set("orgId", whoami.Org.ID)
+	}
+	var subscription commandCodeSubscription
+	if err := commandCodeGet(client, baseURL, apiKey, "/alpha/billing/subscriptions", params, &subscription); err != nil {
+		return nil, err
+	}
+
+	var credits commandCodeCredits
+	var summary commandCodeUsageSummary
+	var creditsErr, summaryErr error
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		creditsErr = commandCodeGet(client, baseURL, apiKey, "/alpha/billing/credits", params, &credits)
+	}()
+	go func() {
+		defer wg.Done()
+		summaryParams := url.Values{}
+		for key, values := range params {
+			summaryParams[key] = append([]string(nil), values...)
+		}
+		if subscription.Data.CurrentPeriodStart != "" {
+			summaryParams.Set("since", subscription.Data.CurrentPeriodStart)
+		}
+		summaryErr = commandCodeGet(client, baseURL, apiKey, "/alpha/usage/summary", summaryParams, &summary)
+	}()
+	wg.Wait()
+	if creditsErr != nil {
+		return nil, creditsErr
+	}
+	if summaryErr != nil {
+		return nil, summaryErr
+	}
+
+	result := &UsageResponse{
+		Provider:     "commandcode",
+		Plan:         subscription.Data.PlanID,
+		LimitReached: credits.WindowLimits.Exceeded || credits.WindowLimits.FiveHour.Exceeded || credits.WindowLimits.Weekly.Exceeded,
+		Quotas:       []QuotaBucket{},
+		Extras: map[string]any{
+			"subscriptionStatus": subscription.Data.Status,
+			"currentPeriodStart": subscription.Data.CurrentPeriodStart,
+			"currentPeriodEnd":   subscription.Data.CurrentPeriodEnd,
+			"totalCount":         summary.TotalCount,
+			"totalCost":          summary.TotalCost,
+			"successRate":        summary.SuccessRate,
+			"completedCount":     summary.CompletedCount,
+			"failedCount":        summary.FailedCount,
+			"totalTokensIn":      summary.TotalTokensIn,
+			"totalTokensOut":     summary.TotalTokensOut,
+			"totalTokens":        summary.TotalTokens,
+			"totalCredits":       summary.TotalCredits,
+			"periodBasis":        summary.PeriodBasis,
+		},
+	}
+	const creditScale = 1000
+	monthlyUsed := int(math.Round(summary.TotalCredits * creditScale))
+	monthlyRemaining := int(math.Round(credits.Credits.MonthlyCredits * creditScale))
+	if monthlyUsed > 0 || monthlyRemaining > 0 {
+		result.addBucketWithUnit("monthly-credits", "Monthly credits", monthlyUsed, monthlyUsed+monthlyRemaining, subscription.Data.CurrentPeriodEnd, false, "credits", creditScale)
+	}
+	if credits.WindowLimits.FiveHour.Cap > 0 {
+		result.addBucketWithUnit("five-hour", "5-hour", int(math.Round(credits.WindowLimits.FiveHour.Used*creditScale)), int(math.Round(credits.WindowLimits.FiveHour.Cap*creditScale)), commandCodeResetAt(credits.WindowLimits.FiveHour.ResetAt), false, "credits", creditScale)
+	}
+	if credits.WindowLimits.Weekly.Cap > 0 {
+		result.addBucketWithUnit("weekly", "Weekly", int(math.Round(credits.WindowLimits.Weekly.Used*creditScale)), int(math.Round(credits.WindowLimits.Weekly.Cap*creditScale)), commandCodeResetAt(credits.WindowLimits.Weekly.ResetAt), false, "credits", creditScale)
+	}
+	if credits.Credits.BelowThreshold {
+		result.Message = "Command Code credits are below the configured threshold."
+	} else if subscription.Data.Status != "" && subscription.Data.Status != "active" {
+		result.Message = fmt.Sprintf("Command Code subscription status: %s", subscription.Data.Status)
+	}
+	return result, nil
+}
+
+func commandCodeGet(client *http.Client, baseURL, apiKey, path string, params url.Values, target any) error {
+	endpoint := baseURL + path
+	if len(params) > 0 {
+		endpoint += "?" + params.Encode()
+	}
+	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
+	if err != nil {
+		return fmt.Errorf("create Command Code request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("x-command-code-version", commandcode.CommandCodeVersion())
+	req.Header.Set("x-cli-environment", "production")
+	req.Header.Set("User-Agent", "command-code/"+commandcode.CommandCodeVersion())
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("Command Code %s: %w", path, err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return fmt.Errorf("read Command Code %s response: %w", path, err)
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("Command Code %s returned HTTP %d: %s", path, resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	if err := json.Unmarshal(body, target); err != nil {
+		return fmt.Errorf("parse Command Code %s response: %w", path, err)
+	}
+	return nil
+}
+
+func commandCodeResetAt(millis int64) string {
+	if millis <= 0 {
+		return ""
+	}
+	return time.UnixMilli(millis).UTC().Format(time.RFC3339)
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────

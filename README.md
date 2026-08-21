@@ -8,6 +8,7 @@
 - [Code Standards](docs/code-standards.md)
 - [System Architecture](docs/system-architecture.md)
 - [Project Roadmap](docs/project-roadmap.md)
+- [Command Code API Usage Check](docs/commandcode-usage-check.md)
 
 ## Supported Providers
 

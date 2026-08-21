@@ -8,9 +8,10 @@ import { goApi } from '@/lib/go-api'
 import { StatCard } from './dashboard/stat-card'
 import { RoutingTopology } from './dashboard/routing-topology'
 import { RecentRequests } from './dashboard/recent-requests'
+import { RequestOutcomeChart } from './dashboard/request-outcome-chart'
 import { formatCost, formatRelativeTime, formatTokens } from './dashboard/helpers'
 import type { Connection } from '@/types/connections'
-import type { LogConnectionSummary, LogEntry } from '@/types/logs'
+import type { DailyUsageStat, LogConnectionSummary, LogEntry } from '@/types/logs'
 
 type DashboardRange = '24h' | '7d' | '30d' | '60d'
 type DashboardTab = 'overview' | 'details'
@@ -32,22 +33,25 @@ export default function DashboardScreen() {
   const [connections, setConnections] = useState<Connection[]>([])
   const [connectionSummaries, setConnectionSummaries] = useState<LogConnectionSummary[]>([])
   const [requests, setRequests] = useState<LogEntry[]>([])
+  const [dailyStats, setDailyStats] = useState<DailyUsageStat[]>([])
   const [loading, setLoading] = useState(true)
   const [lastRefreshed, setLastRefreshed] = useState(Date.now())
   const intervalRef = useRef<ReturnType<typeof setInterval>>(undefined)
   const apiRange = RANGES.find(item => item.value === range)?.apiRange ?? '24h'
 
   const fetchData = useCallback(async () => {
-    const [nextSummary, nextConnections, nextConnectionSummaries, nextRequests] = await Promise.all([
+    const [nextSummary, nextConnections, nextConnectionSummaries, nextRequests, nextDailyStats] = await Promise.all([
       goApi.getLogSummary({ range: apiRange }).catch(() => null),
       goApi.getConnections().catch(() => []),
       goApi.getLogConnections({ range: apiRange }).catch(() => []),
       goApi.getLogs({ range: '24h', limit: 18 }).catch(() => []),
+      goApi.getLogDaily(apiRange).catch(() => []),
     ])
     if (nextSummary) setSummary({ totalRequests: nextSummary.totalRequests ?? 0, inputTokens: nextSummary.inputTokens ?? 0, outputTokens: nextSummary.outputTokens ?? 0, costTotal: nextSummary.costTotal ?? 0, errorRequests: nextSummary.errorRequests ?? 0 })
     setConnections(Array.isArray(nextConnections) ? nextConnections : [])
     setConnectionSummaries(Array.isArray(nextConnectionSummaries) ? nextConnectionSummaries : [])
     setRequests(Array.isArray(nextRequests) ? nextRequests : [])
+    setDailyStats(Array.isArray(nextDailyStats) ? nextDailyStats : [])
     setLastRefreshed(Date.now())
     setLoading(false)
   }, [apiRange])
@@ -84,7 +88,10 @@ export default function DashboardScreen() {
           </>}
         </div>
         <div className="grid gap-3 lg:grid-cols-[minmax(0,1.9fr)_minmax(320px,0.95fr)]">
-          <RoutingTopology connections={connections} summaries={connectionSummaries} requests={requests} onNavigate={navigate} />
+          <div className="space-y-3">
+            <RoutingTopology connections={connections} summaries={connectionSummaries} requests={requests} onNavigate={navigate} />
+            <RequestOutcomeChart data={dailyStats} loading={loading} />
+          </div>
           <RecentRequests requests={requests} loading={loading} onViewAll={() => navigate('/logs')} />
         </div>
       </> : <Details summary={summary} connections={connections} requests={requests} loading={loading} lastRefreshed={lastRefreshed} onPlayground={() => navigate('/playground')} />}

@@ -1,20 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Globe, KeyRound, Play } from 'lucide-react';
+import { Play } from 'lucide-react';
 import { api } from '../../../api';
 import { DeviceCodePanel } from '../DeviceCodePanel';
 import { ProviderLogoIcon } from '../helpers';
 import { ApiKeyConnectionForm } from '../ApiKeyConnectionForm';
 import { Button } from '@/components/ui/button';
 import type { CreateConnectionPayload, ProviderConfigMeta } from '@/types/provider-metadata';
-import { AuthMethodSelector } from './auth-method-selector';
 import { errorMessage } from './helpers';
 import { SetupIntro } from './setup-intro';
 import type { DeviceCodeState } from '../helpers';
 
-type Mode = 'oauth' | 'apikey';
-
 type Props = {
     provider: ProviderConfigMeta;
+    mode: string;
     loading: boolean;
     onCreate: (payload: CreateConnectionPayload) => Promise<void>;
     onSuccess: (message: string) => void;
@@ -24,13 +22,13 @@ type Props = {
 
 export function QwenConnectionForm({
     provider,
+    mode,
     loading,
     onCreate,
     onSuccess,
     onError,
     onBusyChange,
 }: Props) {
-    const [mode, setMode] = useState<Mode>('oauth');
     const [starting, setStarting] = useState(false);
     const [deviceCode, setDeviceCode] = useState<DeviceCodeState | null>(null);
     const [polling, setPolling] = useState(false);
@@ -94,19 +92,6 @@ export function QwenConnectionForm({
                     </>
                 }
             />
-            <AuthMethodSelector
-                value={mode}
-                onChange={(next) => {
-                    clearPolling();
-                    setMode(next);
-                    onError('');
-                }}
-                primary={[
-                    { id: 'oauth', label: 'OAuth (Free)', description: 'Device code login', icon: <Globe size={13} />, recommended: true },
-                    { id: 'apikey', label: 'API Key', description: 'Paid portal key', icon: <KeyRound size={13} /> },
-                ]}
-            />
-
             {mode === 'oauth' && !deviceCode && (
                 <div className="space-y-4 text-center">
                     <Button

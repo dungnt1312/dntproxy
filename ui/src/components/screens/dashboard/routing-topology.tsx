@@ -70,7 +70,7 @@ export function RoutingTopology({ connections, summaries, requests, onNavigate }
   const visibleHubs = hubs.slice(0, 6)
   const hiddenCount = hubs.length - visibleHubs.length
   const selectedHub = hubs.find(hub => hub.id === selectedProvider)
-  const activeProviders = hubs.filter(hub => hub.status === 'active').length
+  const activeProviders = hubs.filter(hub => hub.lastUsedMs > Date.now() - 5 * 60_000).length
 
   return <section className="overflow-hidden rounded-xl border border-border/80 bg-card shadow-sm">
     <div className="flex items-center justify-between border-b border-border/70 px-4 py-3">
@@ -82,9 +82,9 @@ export function RoutingTopology({ connections, summaries, requests, onNavigate }
         <div className="absolute inset-0 origin-center transition-transform duration-200" style={{ transform: `scale(${scale})` }}>
           <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox="0 0 800 390" preserveAspectRatio="none" aria-hidden="true">
             {visibleHubs.map((hub, index) => {
+              if (hub.lastUsedMs <= Date.now() - 5 * 60_000) return null
               const position = hubPosition(index, visibleHubs.length)
-              const stroke = hub.status === 'active' ? 'stroke-emerald-400/75' : hub.status === 'attention' ? 'stroke-orange-400/70' : 'stroke-muted-foreground/30'
-              return <path key={hub.id} d={`M400 195 C${400 + (position.x - 400) * 0.42} ${195 + (position.y - 195) * 0.35}, ${400 + (position.x - 400) * 0.72} ${195 + (position.y - 195) * 0.72}, ${position.x} ${position.y}`} className={cn('fill-none', stroke)} strokeWidth={hub.status === 'active' ? 2 : 1.4} strokeDasharray={hub.status === 'active' ? '6 5' : undefined} />
+              return <path key={hub.id} d={`M400 195 C${400 + (position.x - 400) * 0.42} ${195 + (position.y - 195) * 0.35}, ${400 + (position.x - 400) * 0.72} ${195 + (position.y - 195) * 0.72}, ${position.x} ${position.y}`} className="dashboard-flow fill-none stroke-emerald-400/75" strokeWidth={2} strokeDasharray="6 5" />
             })}
           </svg>
           <div className="absolute left-1/2 top-1/2 z-10 -translate-x-1/2 -translate-y-1/2"><DntproxyNode providers={hubs.length} connections={connections.length} active={activeProviders} onClick={() => onNavigate('/logs')} /></div>

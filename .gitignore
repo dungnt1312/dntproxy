@@ -32,3 +32,10 @@ rewrite
 
 .claude/worktrees
 $cover
+
+# Tool state / scratch
+.commandcode/
+.zcode/
+plans/
+scratch-*
+providers_response.json

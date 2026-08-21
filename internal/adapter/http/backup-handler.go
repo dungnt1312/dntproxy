@@ -1,11 +1,11 @@
 package http
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"time"
 
-	"github.com/dungnt/dntproxy/internal/domain"
 	"github.com/dungnt/dntproxy/internal/port"
 	"github.com/dungnt/dntproxy/internal/service/backup"
 	"github.com/gin-gonic/gin"
@@ -37,33 +37,58 @@ func apiImportBackup(store port.CredentialStore) gin.HandlerFunc {
 		if !requireAdmin(c) {
 			return
 		}
-		var req struct {
-			Version             string                      `json:"version"`
-			ExportedAt          string                      `json:"exportedAt"`
-			ProviderConnections []domain.ProviderConnection `json:"providerConnections"`
-			Combos              []domain.Combo              `json:"combos"`
-			ModelAliases        domain.AliasMap             `json:"modelAliases"`
-			APIKeys             []domain.APIKey             `json:"apiKeys"`
-			Settings            domain.Settings             `json:"settings"`
-			ModelRegistry       *domain.ModelRegistry       `json:"modelRegistry"`
-		}
-		if err := c.ShouldBindJSON(&req); err != nil {
+		body, err := c.GetRawData()
+		if err != nil {
 			c.JSON(400, gin.H{"error": "Invalid backup data: " + err.Error()})
 			return
 		}
 
-		backupData := backup.BackupData{
-			Version:             req.Version,
-			ExportedAt:          req.ExportedAt,
-			ProviderConnections: req.ProviderConnections,
-			Combos:              req.Combos,
-			ModelAliases:        req.ModelAliases,
-			APIKeys:             req.APIKeys,
-			Settings:            req.Settings,
-			ModelRegistry:       req.ModelRegistry,
+		var probe struct {
+			Version string `json:"version"`
+			Mode    string `json:"mode"`
+		}
+		if err := json.Unmarshal(body, &probe); err != nil {
+			c.JSON(400, gin.H{"error": "Invalid backup data: " + err.Error()})
+			return
 		}
 
-		result, err := backup.Import(store, &backupData)
+		// Version-less backups come from other tools (e.g. 9router): import
+		// connections only and never touch combos, aliases, keys or settings.
+		if probe.Version == "" {
+			converted, err := backup.Parse9RouterBackup(body)
+			if err != nil {
+				c.JSON(400, gin.H{"error": "9router import failed: " + err.Error()})
+				return
+			}
+			mode := backup.ImportModeMerge
+			if probe.Mode != "" {
+				mode = backup.ImportConnectionMode(probe.Mode)
+			}
+			result, err := backup.ImportConnections(store, converted.Data, mode)
+			if err != nil {
+				c.JSON(400, gin.H{"error": "Import failed: " + err.Error()})
+				return
+			}
+			result.Errors = append(converted.Skipped, result.Errors...)
+			log.Printf("[CONNECTION] Imported %d connections from foreign backup (updated: %d, skipped: %d)",
+				result.Imported, result.Updated, result.Skipped)
+			c.JSON(200, gin.H{
+				"ok":       true,
+				"imported": result.Imported,
+				"updated":  result.Updated,
+				"skipped":  result.Skipped,
+				"errors":   result.Errors,
+			})
+			return
+		}
+
+		backupData, err := backup.ParseBackup(body)
+		if err != nil {
+			c.JSON(400, gin.H{"error": "Invalid backup data: " + err.Error()})
+			return
+		}
+
+		result, err := backup.Import(store, backupData)
 		if err != nil {
 			c.JSON(400, gin.H{"error": "Import failed: " + err.Error()})
 			return

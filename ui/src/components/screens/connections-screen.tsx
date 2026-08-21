@@ -1,7 +1,7 @@
-import { useEffect, useState, useMemo, useCallback } from 'react';
+import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../api';
-import { Plus, Search, Link2, AlertTriangle, RefreshCw, Loader2, ListChecks } from 'lucide-react';
+import { Plus, Search, Link2, AlertTriangle, RefreshCw, Loader2, ListChecks, Upload } from 'lucide-react';
 import EditModelsModal from '../connections/EditModelsModal';
 import EditConnectionModal from '../connections/EditConnectionModal';
 import DeleteDialog from '../connections/DeleteDialog';
@@ -57,6 +57,8 @@ export default function ConnectionsScreen() {
     const [bulkBusy, setBulkBusy] = useState<string | null>(null);
     const [bulkModelsOpen, setBulkModelsOpen] = useState(false);
     const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+    const [isImporting, setIsImporting] = useState(false);
+    const importInputRef = useRef<HTMLInputElement>(null);
 
     const toggleSelect = useCallback((id: string) => {
         setSelectedIds((prev) => {
@@ -218,6 +220,50 @@ export default function ConnectionsScreen() {
         load();
     }, [load]);
 
+    const handleImportFile = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        event.target.value = '';
+        if (!file) return;
+
+        setIsImporting(true);
+        try {
+            let data: unknown;
+            try {
+                data = JSON.parse(await file.text());
+            } catch {
+                throw new Error('The selected file is not valid JSON.');
+            }
+
+            if (!data || typeof data !== 'object' || Array.isArray(data)) {
+                throw new Error('Choose a dntproxy connection export JSON file.');
+            }
+
+            const payload = data as Record<string, unknown>;
+            const result = Object.prototype.hasOwnProperty.call(payload, 'connection')
+                ? await api.importConnectionFile(payload)
+                : Array.isArray(payload.providerConnections)
+                    ? await api.importConnectionsFile(payload)
+                    : (() => { throw new Error('This JSON is not a dntproxy connection export.'); })();
+
+            const details = [
+                result.imported > 0 && `${result.imported} imported`,
+                result.updated > 0 && `${result.updated} updated`,
+                result.skipped > 0 && `${result.skipped} skipped`,
+            ].filter(Boolean).join(', ');
+            const firstError = result.errors?.[0];
+            if (firstError) {
+                toast.warning(`Import completed: ${details || 'no connections changed'}. ${firstError}`);
+            } else {
+                toast.success(`Import completed: ${details || 'no connections changed'}.`);
+            }
+            await load();
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : 'Could not import connection JSON.');
+        } finally {
+            setIsImporting(false);
+        }
+    }, [load]);
+
     // ── Bulk actions (declared after load/filteredConns to avoid TDZ) ──────────
     const toggleSelectAllVisible = useCallback(() => {
         const visibleIds = filteredConns.map((c) => c.id);
@@ -294,13 +340,31 @@ export default function ConnectionsScreen() {
                     <div>
                         <h1 className="text-2xl font-bold tracking-tight">Connections</h1>
                         <p className="text-sm text-muted-foreground">
-                            Manage your AI provider accounts. Connect Kiro, OpenAI or any compatible endpoints.
+                            Manage your AI provider accounts. Import only trusted dntproxy exports or supported 9router Codex backups because they may contain tokens or API keys.
                         </p>
                     </div>
                 </div>
-                <Button onClick={() => navigate('/connections/add')} className="gap-2 self-start sm:self-auto">
-                    <Plus className="h-4 w-4" /> Add Connection
-                </Button>
+                <div className="flex flex-wrap gap-2 self-start sm:self-auto">
+                    <input
+                        ref={importInputRef}
+                        type="file"
+                        accept="application/json,.json"
+                        className="sr-only"
+                        onChange={handleImportFile}
+                    />
+                    <Button
+                        variant="outline"
+                        onClick={() => importInputRef.current?.click()}
+                        disabled={isImporting}
+                        className="gap-2"
+                    >
+                        {isImporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                        {isImporting ? 'Importing…' : 'Import JSON'}
+                    </Button>
+                    <Button onClick={() => navigate('/connections/add')} className="gap-2">
+                        <Plus className="h-4 w-4" /> Add Connection
+                    </Button>
+                </div>
             </div>
 
             {/* Health Dashboard */}
@@ -432,6 +496,7 @@ export default function ConnectionsScreen() {
                             quotaResult={quotaResult}
                             onToggle={() => toggleGroup(group.id)}
                             onFetchQuota={() => handleFetchGroupQuota(group.id)}
+                            onAddConnection={() => navigate(`/connections/add?provider=${encodeURIComponent(group.id)}`)}
                             onReload={load}
                             onDelete={(id, name) => setDeleteTarget({ id, name })}
                             onEditModels={setEditModelsConn}

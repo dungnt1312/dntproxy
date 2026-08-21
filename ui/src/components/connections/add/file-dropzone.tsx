@@ -24,33 +24,40 @@ export function FileDropzone({
     const [dragActive, setDragActive] = useState(false);
 
     const takeFiles = (list: FileList | null) => {
-        if (!list || list.length === 0) return;
+        if (disabled || !list || list.length === 0) return;
         onFiles(Array.from(list));
     };
 
     return (
         <label
-            tabIndex={0}
+            tabIndex={disabled ? -1 : 0}
             role="button"
             aria-label={ariaLabel}
+            aria-disabled={disabled}
             onKeyDown={(event) => {
-                if (event.key !== 'Enter' && event.key !== ' ') return;
+                if (disabled || (event.key !== 'Enter' && event.key !== ' ')) return;
                 event.preventDefault();
                 (event.currentTarget.querySelector('input[type="file"]') as HTMLInputElement | null)?.click();
             }}
             onDragOver={(event) => {
+                if (disabled) return;
                 event.preventDefault();
                 setDragActive(true);
             }}
             onDragLeave={() => setDragActive(false)}
             onDrop={(event) => {
+                if (disabled) {
+                    setDragActive(false);
+                    return;
+                }
                 event.preventDefault();
                 setDragActive(false);
                 takeFiles(event.dataTransfer.files);
             }}
             className={cn(
-                'flex cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed p-8 outline-none transition hover:border-primary hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-primary/40',
-                dragActive && 'border-primary bg-muted/40',
+                'flex flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed p-8 outline-none transition focus-visible:ring-2 focus-visible:ring-primary/40',
+                disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer hover:border-primary hover:bg-muted/40',
+                !disabled && dragActive && 'border-primary bg-muted/40',
             )}
         >
             <Upload size={24} className="text-muted-foreground" />

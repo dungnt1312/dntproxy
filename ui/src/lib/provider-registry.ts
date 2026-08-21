@@ -132,17 +132,17 @@ const PROVIDER_PUBLIC_PREFIX: Record<string, string> = {
 };
 
 export function canonicalProviderId(provider: string): string {
-  return PROVIDER_ALIASES[provider] ?? provider;
+  const id = provider.trim().toLowerCase();
+  return PROVIDER_ALIASES[id] ?? id;
 }
 
 export function publicProviderPrefix(provider: string): string {
   const id = canonicalProviderId(provider);
-  return PROVIDER_PUBLIC_PREFIX[id] ?? provider;
+  return PROVIDER_PUBLIC_PREFIX[id] ?? id;
 }
 
 export function providersMatch(a?: string, b?: string): boolean {
   if (!a || !b) return false;
-  if (a === b) return true;
   return canonicalProviderId(a) === canonicalProviderId(b) || publicProviderPrefix(a) === publicProviderPrefix(b);
 }
 

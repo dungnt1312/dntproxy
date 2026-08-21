@@ -24,7 +24,8 @@ type versionCache struct {
 
 var cliVersionCache versionCache
 
-func commandCodeVersion() string {
+// CommandCodeVersion returns the current CLI version required by Command Code APIs.
+func CommandCodeVersion() string {
 	cliVersionCache.mu.RLock()
 	if cliVersionCache.version != "" && time.Since(cliVersionCache.fetched) < versionCacheTTL {
 		v := cliVersionCache.version

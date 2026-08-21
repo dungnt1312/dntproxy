@@ -3,7 +3,15 @@
     "allow": [
       "mcp__plugin_claude-mem_mcp-search__search",
       "mcp__plugin_claude-mem_mcp-search__timeline",
-      "mcp__plugin_claude-mem_mcp-search__get_observations"
+      "mcp__plugin_claude-mem_mcp-search__get_observations",
+      "Skill(code-review)",
+      "Skill(code-review:*)",
+      "Bash(ls -la ~/.dntproxy/ 2>/dev/null || echo \"Not found at ~/.dntproxy\")",
+      "Bash(go build *)",
+      "Bash(go test *)",
+      "Bash(awk 'NR==76||NR==80||NR==81||NR==85||NR==86||NR==87||NR==88||NR==89||NR==122' internal/adapter/http/models-handler_test.go)",
+      "Bash(bash install-local.sh)",
+      "Bash(pm2 restart *)"
     ]
   }
 }

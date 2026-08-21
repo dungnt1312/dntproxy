@@ -1,6 +1,7 @@
 package http
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"time"
@@ -116,26 +117,52 @@ func apiImportConnectionsFromFile(store port.CredentialStore) gin.HandlerFunc {
 		if !requireAdmin(c) {
 			return
 		}
-		var req struct {
-			backup.BackupData
-			Mode string `json:"mode"` // "add", "replace", "merge"
-		}
-		if err := c.ShouldBindJSON(&req); err != nil {
+		body, err := c.GetRawData()
+		if err != nil {
 			c.JSON(400, gin.H{"error": "Invalid backup data: " + err.Error()})
 			return
 		}
 
-		// Default mode is "add"
-		mode := backup.ImportModeAdd
-		if req.Mode != "" {
-			mode = backup.ImportConnectionMode(req.Mode)
+		var probe struct {
+			Version string `json:"version"`
+			Mode    string `json:"mode"` // "add", "replace", "merge"
+		}
+		if err := json.Unmarshal(body, &probe); err != nil {
+			c.JSON(400, gin.H{"error": "Invalid backup data: " + err.Error()})
+			return
 		}
 
-		result, err := backup.ImportConnections(store, &req.BackupData, mode)
+		data := &backup.BackupData{}
+		skipped := []string{}
+		if probe.Version == "" {
+			converted, parseErr := backup.Parse9RouterBackup(body)
+			if parseErr != nil {
+				c.JSON(400, gin.H{"error": "9router import failed: " + parseErr.Error()})
+				return
+			}
+			data = converted.Data
+			skipped = converted.Skipped
+		} else {
+			parsed, parseErr := backup.ParseBackup(body)
+			if parseErr != nil {
+				c.JSON(400, gin.H{"error": "Invalid backup data: " + parseErr.Error()})
+				return
+			}
+			data = parsed
+		}
+
+		// Default mode is "add"
+		mode := backup.ImportModeAdd
+		if probe.Mode != "" {
+			mode = backup.ImportConnectionMode(probe.Mode)
+		}
+
+		result, err := backup.ImportConnections(store, data, mode)
 		if err != nil {
 			c.JSON(400, gin.H{"error": "Import failed: " + err.Error()})
 			return
 		}
+		result.Errors = append(skipped, result.Errors...)
 
 		log.Printf("[CONNECTION] Imported %d connections (mode: %s, updated: %d, skipped: %d)",
 			result.Imported, mode, result.Updated, result.Skipped)

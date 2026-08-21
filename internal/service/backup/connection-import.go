@@ -1,7 +1,9 @@
 package backup
 
 import (
+	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/dungnt/dntproxy/internal/adapter/shared"
 	"github.com/dungnt/dntproxy/internal/domain"
@@ -40,22 +42,12 @@ func ImportConnection(store port.CredentialStore, data *ConnectionExportData, mo
 		return nil, fmt.Errorf("invalid connection data: %w", err)
 	}
 
-	// If imported connection has no SupportedModels, fill with default models for the provider
-	if len(data.Connection.SupportedModels) == 0 && store != nil {
-		cfg, _ := store.Load()
-		var settings *domain.Settings
-		if cfg != nil {
-			settings = &cfg.Settings
-		}
-		if models := domain.GetDefaultConnectionModels(settings, data.Connection.Provider); len(models) > 0 {
-			data.Connection.SupportedModels = models
-		}
-	}
-
 	cfg, err := store.Load()
 	if err != nil {
 		return nil, err
 	}
+
+	normalizeImportedConnection(&data.Connection, &cfg.Settings)
 
 	result := &ConnectionImportResult{}
 
@@ -108,6 +100,146 @@ func ImportConnection(store port.CredentialStore, data *ConnectionExportData, mo
 	return result, nil
 }
 
+// NineRouterImportResult carries the converted connections and the entries
+// that were skipped because dntproxy has no compatible target for them.
+type NineRouterImportResult struct {
+	Data    *BackupData
+	Skipped []string
+}
+
+// supported9RouterMappings maps 9router provider IDs to dntproxy provider IDs.
+var supported9RouterMappings = map[string]string{
+	"codex":       "openai",
+	"glm":         "glm",
+	"xai":         "xai",
+	"kiro":        "kiro",
+	"commandcode": "commandcode",
+}
+
+// Convert9RouterBackup converts the supported 9router backup shape into a
+// dntproxy connection import. Unsupported entries are skipped with a reason
+// instead of failing the whole backup.
+func Convert9RouterBackup(data *BackupData) (*NineRouterImportResult, error) {
+	if data.Version != "" {
+		return nil, fmt.Errorf("9router backup must not include a version")
+	}
+	if len(data.ProviderConnections) == 0 {
+		return nil, fmt.Errorf("no connections to import")
+	}
+
+	result := &NineRouterImportResult{
+		Data: &BackupData{
+			Version:    CurrentBackupVersion,
+			ExportedAt: data.ExportedAt,
+		},
+	}
+	for _, source := range data.ProviderConnections {
+		target, ok := supported9RouterMappings[source.Provider]
+		if !ok {
+			result.Skipped = append(result.Skipped, fmt.Sprintf("connection %q skipped: unsupported provider %q", source.Name, source.Provider))
+			continue
+		}
+		conn, err := convert9RouterConnection(target, source)
+		if err != nil {
+			result.Skipped = append(result.Skipped, fmt.Sprintf("connection %q skipped: %v", source.Name, err))
+			continue
+		}
+		result.Data.ProviderConnections = append(result.Data.ProviderConnections, conn)
+	}
+	if len(result.Data.ProviderConnections) == 0 {
+		return nil, fmt.Errorf("no importable connections in 9router backup")
+	}
+	return result, nil
+}
+
+func convert9RouterConnection(target string, source domain.ProviderConnection) (domain.ProviderConnection, error) {
+	conn := domain.ProviderConnection{
+		ID:              source.ID,
+		Provider:        target,
+		AuthType:        source.AuthType,
+		Name:            source.Name,
+		Priority:        source.Priority,
+		Weight:          source.Weight,
+		IsActive:        source.IsActive,
+		AccessToken:     source.AccessToken,
+		RefreshToken:    source.RefreshToken,
+		ExpiresAt:       source.ExpiresAt,
+		ExpiresIn:       source.ExpiresIn,
+		Email:           source.Email,
+		SupportedModels: source.SupportedModels,
+		CreatedAt:       source.CreatedAt,
+	}
+
+	switch target {
+	case "openai", "xai":
+		if source.AuthType != "oauth" {
+			return domain.ProviderConnection{}, fmt.Errorf("%s requires oauth, got %s", source.Provider, source.AuthType)
+		}
+		providerData := map[string]interface{}{"authMethod": "oauth"}
+		if target == "xai" {
+			providerData["authMethod"] = "xai-oauth"
+		}
+		if idToken, ok := source.ProviderSpecificData["idToken"].(string); ok && idToken != "" {
+			providerData["idToken"] = idToken
+		}
+		conn.ProviderSpecificData = providerData
+
+	case "kiro":
+		if source.AuthType != "oauth" {
+			return domain.ProviderConnection{}, fmt.Errorf("kiro requires oauth, got %s", source.AuthType)
+		}
+		providerData := map[string]interface{}{}
+		for _, key := range []string{"authMethod", "clientId", "clientSecret", "provider", "region", "profileArn"} {
+			if value, ok := source.ProviderSpecificData[key]; ok {
+				providerData[key] = value
+			}
+		}
+		conn.ProviderSpecificData = providerData
+
+	case "glm", "commandcode":
+		if source.AuthType != "apikey" {
+			return domain.ProviderConnection{}, fmt.Errorf("%s requires apikey, got %s", source.Provider, source.AuthType)
+		}
+		conn.APIKey = source.APIKey
+
+	default:
+		return domain.ProviderConnection{}, fmt.Errorf("unsupported provider %q", source.Provider)
+	}
+	return conn, nil
+}
+
+// Parse9RouterBackup parses and converts a version-less 9router backup.
+func Parse9RouterBackup(body []byte) (*NineRouterImportResult, error) {
+	var raw struct {
+		ProviderConnections []json.RawMessage `json:"providerConnections"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil, err
+	}
+
+	data := &BackupData{ProviderConnections: make([]domain.ProviderConnection, 0, len(raw.ProviderConnections))}
+	for i, item := range raw.ProviderConnections {
+		var conn domain.ProviderConnection
+		var metadata struct {
+			IDToken string `json:"idToken"`
+		}
+		if err := json.Unmarshal(item, &conn); err != nil {
+			return nil, fmt.Errorf("invalid 9router connection at index %d: %w", i, err)
+		}
+		if err := json.Unmarshal(item, &metadata); err != nil {
+			return nil, fmt.Errorf("invalid 9router connection metadata at index %d: %w", i, err)
+		}
+		if conn.ProviderSpecificData == nil {
+			conn.ProviderSpecificData = map[string]interface{}{}
+		}
+		if metadata.IDToken != "" {
+			conn.ProviderSpecificData["idToken"] = metadata.IDToken
+		}
+		data.ProviderConnections = append(data.ProviderConnections, conn)
+	}
+	return Convert9RouterBackup(data)
+}
+
 // ImportConnections imports multiple connections from a backup.
 func ImportConnections(store port.CredentialStore, data *BackupData, mode ImportConnectionMode) (*ConnectionImportResult, error) {
 	// Validate version
@@ -119,16 +251,26 @@ func ImportConnections(store port.CredentialStore, data *BackupData, mode Import
 		return nil, fmt.Errorf("no connections to import")
 	}
 
-	// Validate all connections first
+	// Validate all connections first, including duplicate IDs in the uploaded file.
+	seenIDs := make(map[string]struct{}, len(data.ProviderConnections))
 	for i := range data.ProviderConnections {
-		if err := validateConnection(&data.ProviderConnections[i]); err != nil {
+		conn := &data.ProviderConnections[i]
+		if err := validateConnection(conn); err != nil {
 			return nil, fmt.Errorf("invalid connection at index %d: %w", i, err)
 		}
+		if _, exists := seenIDs[conn.ID]; exists {
+			return nil, fmt.Errorf("duplicate connection ID in import file: %s", conn.ID)
+		}
+		seenIDs[conn.ID] = struct{}{}
 	}
 
 	cfg, err := store.Load()
 	if err != nil {
 		return nil, err
+	}
+
+	for i := range data.ProviderConnections {
+		normalizeImportedConnection(&data.ProviderConnections[i], &cfg.Settings)
 	}
 
 	result := &ConnectionImportResult{}
@@ -214,6 +356,20 @@ func validateConnection(conn *domain.ProviderConnection) error {
 		}
 	}
 	return nil
+}
+
+func normalizeImportedConnection(conn *domain.ProviderConnection, settings *domain.Settings) {
+	if len(conn.SupportedModels) == 0 {
+		conn.SupportedModels = domain.GetDefaultConnectionModels(settings, conn.Provider)
+	}
+	conn.TestStatus = ""
+	conn.LastError = ""
+	conn.LastErrorAt = ""
+	conn.RateLimitedUntil = ""
+	conn.BackoffLevel = 0
+	conn.ConsecutiveUseCount = 0
+	conn.ModelLocks = nil
+	conn.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 }
 
 func refuseCrossTenantReplace(existing, incoming domain.ProviderConnection) error {

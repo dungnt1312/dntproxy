@@ -1,24 +1,21 @@
 import { useEffect, useState } from 'react';
-import { ExternalLink, Upload } from 'lucide-react';
+import { ExternalLink } from 'lucide-react';
 import { api } from '../../../api';
 import { ProviderLogoIcon } from '../helpers';
 import { Button } from '@/components/ui/button';
-import { AuthMethodSelector } from './auth-method-selector';
 import { FileDropzone } from './file-dropzone';
 import { errorMessage } from './helpers';
 import { OAuthWaitingPanel } from './oauth-waiting-panel';
 import { SetupIntro } from './setup-intro';
 
-type Mode = 'oauth' | 'file';
-
 type Props = {
+    mode: string;
     onSuccess: (message: string) => void;
     onError: (message: string) => void;
     onBusyChange: (busy: boolean) => void;
 };
 
-export function XaiConnectionForm({ onSuccess, onError, onBusyChange }: Props) {
-    const [mode, setMode] = useState<Mode>('oauth');
+export function XaiConnectionForm({ mode, onSuccess, onError, onBusyChange }: Props) {
     const [loading, setLoading] = useState(false);
     const [session, setSession] = useState<{ sessionId: string; authUrl: string; redirectUri?: string } | null>(null);
     const [callback, setCallback] = useState('');
@@ -81,20 +78,6 @@ export function XaiConnectionForm({ onSuccess, onError, onBusyChange }: Props) {
                     </>
                 }
             />
-            <AuthMethodSelector
-                value={mode}
-                onChange={(next) => {
-                    setSession(null);
-                    setCallback('');
-                    setMode(next);
-                    onError('');
-                }}
-                primary={[
-                    { id: 'oauth', label: 'OAuth', description: 'Browser login', icon: <ExternalLink size={13} />, recommended: true },
-                    { id: 'file', label: 'Import File', description: 'Upload auth JSON', icon: <Upload size={13} /> },
-                ]}
-            />
-
             {mode === 'oauth' && !session && (
                 <div className="space-y-4 text-center">
                     <Button

@@ -189,8 +189,14 @@ func (s *AccountSelector) SelectCredentials(
 	excludeIDs map[string]bool,
 	model string,
 	allowedConnectionIDs []string,
-	tenantID string,
+	tenantIDs ...string,
 ) (*domain.Credentials, error) {
+	// Keep the pre-multi-tenant call shape compatible for internal callers and
+	// tests while applying a tenant filter when supplied.
+	tenantID := ""
+	if len(tenantIDs) > 0 {
+		tenantID = tenantIDs[0]
+	}
 	connections, err := s.getActiveConnectionsForTenant(provider, tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("get connections: %w", err)
@@ -488,6 +494,21 @@ func normalizedWeight(weight int) int {
 	return weight
 }
 
+func connectionDisableCooling(conn *domain.ProviderConnection) bool {
+	if conn == nil || conn.ProviderSpecificData == nil {
+		return false
+	}
+	v, ok := conn.ProviderSpecificData["disableCooling"].(bool)
+	return ok && v
+}
+
+func clampCooldownMs(ms int, maxSeconds int) int {
+	if maxSeconds <= 0 || ms <= 0 {
+		return ms
+	}
+	return min(ms, maxSeconds*1000)
+}
+
 // MarkUnavailable marks a connection as unavailable with cooldown.
 func (s *AccountSelector) MarkUnavailable(connectionID string, status int, errorText string, model string) error {
 	return s.store.Update(func(cfg *domain.AppConfig) {
@@ -502,10 +523,23 @@ func (s *AccountSelector) MarkUnavailable(connectionID string, status int, error
 			return
 		}
 
+		settings := cfg.Settings
+		if !settings.CooldownOn() || connectionDisableCooling(conn) {
+			conn.LastError = errorText
+			conn.LastErrorAt = time.Now().UTC().Format(time.RFC3339)
+			return
+		}
+
 		fb := domain.CheckFallbackError(status, errorText, conn.BackoffLevel)
 		if !fb.ShouldFallback {
 			return
 		}
+		if domain.ClassifyUpstream(status, errorText) == domain.UpstreamTransient && settings.TransientCooldownSeconds > 0 {
+			fb.CooldownMs = settings.TransientCooldownSeconds * 1000
+			// An explicit operator override is an account-level circuit breaker.
+			fb.ModelOnly = false
+		}
+		fb.CooldownMs = clampCooldownMs(fb.CooldownMs, settings.MaxCooldownSeconds)
 
 		if fb.CooldownMs > 0 {
 			until := domain.CooldownUntil(fb.CooldownMs)
@@ -516,7 +550,7 @@ func (s *AccountSelector) MarkUnavailable(connectionID string, status int, error
 			conn.LastError = errorText
 			conn.LastErrorAt = time.Now().UTC().Format(time.RFC3339)
 
-			if model != "" {
+			if settings.ModelLockOn() && model != "" {
 				if conn.ModelLocks == nil {
 					conn.ModelLocks = make(map[string]string)
 				}

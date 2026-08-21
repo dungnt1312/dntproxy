@@ -3,34 +3,19 @@ package service
 import (
 	"errors"
 	"net/http"
-	"strings"
 
 	"github.com/dungnt/dntproxy/internal/domain"
 	"github.com/dungnt/dntproxy/internal/port"
 )
 
 func shouldFallbackToNextAccount(status int, errorText string) bool {
-	if domain.IsNonFallbackStatus(status) {
-		return false
-	}
+	return domain.IsRetryableUpstream(status, errorText)
+}
 
-	lower := strings.ToLower(errorText)
-	clientErrorHints := []string{
-		"invalid request",
-		"improperly formed request",
-		"malformed",
-		"invalid json",
-		"missing required",
-		"unsupported parameter",
-		"tool schema",
-	}
-	for _, hint := range clientErrorHints {
-		if strings.Contains(lower, hint) {
-			return false
-		}
-	}
-
-	return true
+// shouldStopCredentialRetry reports whether the per-model credential retry budget
+// is exhausted. max==0 means unlimited; max==N stops after N distinct connections.
+func shouldStopCredentialRetry(attempted int, max int) bool {
+	return max > 0 && attempted >= max
 }
 
 func normalizeExecutorFailure(status int, errMsg string) (int, string) {

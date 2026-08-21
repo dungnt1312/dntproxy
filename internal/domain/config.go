@@ -64,6 +64,24 @@ type Settings struct {
 	// DefaultModels overrides the built-in RecommendedModels when creating connections.
 	// Keyed by provider ID (e.g. "xai", "openai"), value is the model list to use.
 	DefaultModels map[string][]string `json:"defaultModels,omitempty"`
+
+	// MaxRetryCredentials caps distinct connections attempted per model.
+	// 0 means unlimited (legacy behavior).
+	MaxRetryCredentials int `json:"maxRetryCredentials,omitempty"`
+	// CooldownEnabled nil/true = on; pointer so JSON omit keeps default-on.
+	CooldownEnabled *bool `json:"cooldownEnabled,omitempty"`
+	// TransientCooldownSeconds overrides CooldownTransient when > 0.
+	TransientCooldownSeconds int `json:"transientCooldownSeconds,omitempty"`
+	// MaxCooldownSeconds clamps any computed cooldown when > 0.
+	MaxCooldownSeconds int `json:"maxCooldownSeconds,omitempty"`
+	// ModelLockEnabled nil/true = on.
+	ModelLockEnabled *bool `json:"modelLockEnabled,omitempty"`
+
+	SessionAffinityEnabled    bool `json:"sessionAffinityEnabled,omitempty"`
+	SessionAffinityTTLSeconds int  `json:"sessionAffinityTTLSeconds,omitempty"`
+
+	// QuotaModelFallback used in P1 Task 13; add field now so JSON shape is stable.
+	QuotaModelFallback map[string]string `json:"quotaModelFallback,omitempty"`
 }
 
 // APIKey represents a generated API key.

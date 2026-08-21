@@ -62,14 +62,17 @@ func chatHandler(chatService port.ChatService, store port.CredentialStore, comp 
 
 		log.Printf("[CHAT] POST /v1/chat/completions | model=%s | stream=%v", partial.Model, partial.Stream)
 
-		// Extract API key policy from context (set by apiKeyMiddleware)
+		// Extract API key policy and tenant from context (set by apiKeyMiddleware).
 		policy := extractAPIKeyPolicy(c)
-		tenantID := GetTenantID(c)
-
-		// Build metadata including tenant for downstream propagation
 		meta := compressionMetadata(stats)
-		meta.TenantID = tenantID
+		meta.TenantID = GetTenantID(c)
 		meta.Context = c.Request.Context()
+		meta.SessionKey = sessionHeader(c)
+		if v, ok := c.Get("apiKeyID"); ok {
+			if id, ok := v.(string); ok {
+				meta.APIKeyID = id
+			}
+		}
 
 		result := chatService.HandleChat(body, partial.Model, requestID, policy, meta)
 
@@ -158,6 +161,14 @@ func chatHandler(chatService port.ChatService, store port.CredentialStore, comp 
 			"error": gin.H{"message": result.Error},
 		})
 	}
+}
+
+// sessionHeader returns the first non-empty client session header.
+func sessionHeader(c *gin.Context) string {
+	if v := strings.TrimSpace(c.GetHeader("X-Session-Id")); v != "" {
+		return v
+	}
+	return strings.TrimSpace(c.GetHeader("X-Dntproxy-Session"))
 }
 
 func compressionMetadata(stats compressor.Stats) port.RequestMetadata {

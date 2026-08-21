@@ -28,6 +28,8 @@ type RequestMetadata struct {
 	Compression *domain.CompressionLogMetadata
 	TenantID    string // for multi-tenancy (SaaS). Empty = legacy single-tenant.
 	Context     context.Context
+	SessionKey  string // raw client session header value (optional)
+	APIKeyID    string // authenticated API key ID, if any
 }
 
 // ChatService defines the chat orchestration contract.

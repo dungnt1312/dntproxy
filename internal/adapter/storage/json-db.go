@@ -136,6 +136,7 @@ func (db *JsonDB) readFromDisk() (*domain.AppConfig, error) {
 	if cfg.Settings.ConnectionStrategy == "" {
 		cfg.Settings.ConnectionStrategy = "weighted-random"
 	}
+	cfg.Settings.NormalizeRouting()
 
 	// Migrate: existing keys without dashboardAccess field get it set to true
 	// (backward compat — all pre-existing keys were implicitly admin).
@@ -426,6 +427,7 @@ func (db *JsonDB) GetSettings() (*domain.Settings, error) {
 	if err != nil {
 		return nil, err
 	}
+	cfg.Settings.NormalizeRouting()
 	return &cfg.Settings, nil
 }
 

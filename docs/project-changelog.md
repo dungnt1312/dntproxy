@@ -1,5 +1,14 @@
 # Project Changelog
 
+## 2026-07-09
+
+- P0 multi-account reliability: unified upstream failure taxonomy (`IsRetryableUpstream`) so account fallback and combo routing agree (e.g. “improperly formed request” is non-fallback).
+- Per-model credential retry budget (`maxRetryCredentials`): counts distinct connections only; OAuth re-exec on the same connection is not double-counted; `0` keeps unlimited legacy behavior.
+- Configurable cooldowns (`cooldownEnabled`, `transientCooldownSeconds`, `maxCooldownSeconds`) plus per-connection `providerSpecificData.disableCooling` to skip `RateLimitedUntil`.
+- New `connectionStrategy=fill-first`: always pick the lowest Priority available connection (Settings UI dropdown option added).
+- Optional session affinity (`sessionAffinityEnabled`, `sessionAffinityTTLSeconds`) with locked keys (`h:` from `X-Session-Id` / `X-Dntproxy-Session`, or `k:apiKey|provider|model`); hard `@connectionId` pin still wins.
+- Defaults remain backward compatible when new settings are omitted/zero.
+
 ## 2026-05-13
 
 - Added connection execution strategy setting: weighted random, primary-first priority fallback, and round-robin account rotation.

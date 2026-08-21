@@ -161,11 +161,11 @@ func (s *ModelAccessService) buildDirectModels(cfg *domain.AppConfig, conns []do
 						ref.ConnectionIDs = appendUnique(ref.ConnectionIDs, conn.ID)
 					} else {
 						seen[publicKey] = &ModelRef{
-							QualifiedID:    publicKey,
-							Provider:       m.Provider,
+							QualifiedID:     publicKey,
+							Provider:        m.Provider,
 							DisplayProvider: modelProvider,
-							Model:          publicModel,
-							ConnectionIDs:  []string{conn.ID},
+							Model:           publicModel,
+							ConnectionIDs:   []string{conn.ID},
 						}
 						order = append(order, publicKey)
 					}
@@ -181,11 +181,11 @@ func (s *ModelAccessService) buildDirectModels(cfg *domain.AppConfig, conns []do
 					ref.ConnectionIDs = appendUnique(ref.ConnectionIDs, conn.ID)
 				} else {
 					seen[key] = &ModelRef{
-						QualifiedID:    key,
-						Provider:       conn.Provider,
+						QualifiedID:     key,
+						Provider:        conn.Provider,
 						DisplayProvider: modelProvider,
-						Model:          modelID,
-						ConnectionIDs:  []string{conn.ID},
+						Model:           modelID,
+						ConnectionIDs:   []string{conn.ID},
 					}
 					order = append(order, key)
 				}
@@ -377,7 +377,7 @@ func publicModelProvider(conn domain.ProviderConnection) string {
 			return prefix
 		}
 	}
-	return conn.Provider
+	return domain.PublicProviderPrefix(conn.Provider)
 }
 
 func resolveOpenAICompatibleKey(qualifiedModel string, models []ModelRef) (string, bool) {

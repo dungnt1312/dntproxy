@@ -18,6 +18,7 @@ export const PROVIDER_ORDER = [
   'minimax',
   'anthropic',
   'cline',
+  'commandcode',
   'gemini',
   'openai-compatible',
 ] as const;
@@ -91,6 +92,15 @@ export const PROVIDER_META: Record<string, ProviderMeta> = {
     accentClass: 'bg-rose-600 hover:bg-rose-700',
     canAdd: true,
   },
+  commandcode: {
+    id: 'commandcode',
+    label: 'Command Code',
+    shortLabel: 'Cmc',
+    description: 'Command Code generate API',
+    colorClass: 'bg-teal-500/10 border-teal-500/20 text-teal-600',
+    accentClass: 'bg-teal-600 hover:bg-teal-700',
+    canAdd: true,
+  },
   gemini: {
     id: 'gemini',
     label: 'Gemini',
@@ -111,8 +121,34 @@ export const PROVIDER_META: Record<string, ProviderMeta> = {
   },
 };
 
+const PROVIDER_ALIASES: Record<string, string> = {
+  cmc: 'commandcode',
+  cmd: 'commandcode',
+  grok: 'xai',
+};
+
+const PROVIDER_PUBLIC_PREFIX: Record<string, string> = {
+  commandcode: 'cmc',
+};
+
+export function canonicalProviderId(provider: string): string {
+  return PROVIDER_ALIASES[provider] ?? provider;
+}
+
+export function publicProviderPrefix(provider: string): string {
+  const id = canonicalProviderId(provider);
+  return PROVIDER_PUBLIC_PREFIX[id] ?? provider;
+}
+
+export function providersMatch(a?: string, b?: string): boolean {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  return canonicalProviderId(a) === canonicalProviderId(b) || publicProviderPrefix(a) === publicProviderPrefix(b);
+}
+
 export function getProviderMeta(provider: string): ProviderMeta {
-  return PROVIDER_META[provider] ?? {
+  const id = canonicalProviderId(provider);
+  return PROVIDER_META[id] ?? PROVIDER_META[provider] ?? {
     id: provider || 'unknown',
     label: provider || 'Unknown Provider',
     colorClass: 'bg-gray-500/10 border-gray-500/20 text-gray-400',
@@ -125,4 +161,21 @@ export function getProviderLabel(provider: string): string {
 
 export function getModelProviderId(provider: string): string {
   return getProviderMeta(provider).modelProviderId ?? provider;
+}
+
+/** Providers with a dedicated add-connection flow (OAuth, device code, file import). */
+export const CUSTOM_ADD_CONNECTION_PROVIDERS = ['kiro', 'openai', 'xai', 'qwen', 'commandcode'] as const;
+
+export function usesGenericApiKeyForm(provider: {
+  id: string;
+  ui?: { authFlows?: string[]; formFields?: { name: string }[] };
+}): boolean {
+  if ((CUSTOM_ADD_CONNECTION_PROVIDERS as readonly string[]).includes(provider.id)) {
+    return false;
+  }
+  const flows = provider.ui?.authFlows ?? [];
+  if (flows.includes('apikey')) {
+    return true;
+  }
+  return (provider.ui?.formFields ?? []).some((field) => field.name === 'apiKey');
 }

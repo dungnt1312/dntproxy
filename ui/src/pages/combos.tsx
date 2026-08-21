@@ -5,6 +5,7 @@ import { Plus, Trash2, Users, Layers, Pencil, Check, Loader2, X, ChevronRight, L
 import ModelSelector from '../components/ModelSelector'
 import { getModelName } from '../models-config'
 import { getProviderLabel } from '../components/connections/helpers'
+import { publicProviderPrefix } from '@/lib/provider-registry'
 
 export default function Combos() {
   const navigate = useNavigate()
@@ -35,7 +36,7 @@ export default function Combos() {
       const conn = conns.find(c => c.id === id)
       if (conn?.supportedModels?.length > 0) {
         conn.supportedModels.forEach((m: string) => {
-          union.add(m.includes('/') ? m : `${conn.provider}/${m}`)
+          union.add(m.includes('/') ? m : `${publicProviderPrefix(conn.provider)}/${m}`)
         })
       }
     }

@@ -4,17 +4,21 @@ package domain
 type RequestFormat string
 
 const (
-	FormatOpenAIChat   RequestFormat = "openai-chat"     // POST /v1/chat/completions, SSE stream
-	FormatAnthropicMsg RequestFormat = "anthropic-msg"   // POST /v1/messages, SSE + event types
-	FormatAWSKiro      RequestFormat = "aws-eventstream" // AWS EventStream binary
-	FormatImageAPI     RequestFormat = "image-api"       // Image-only provider; no chat executor
+	FormatOpenAIChat   RequestFormat = "openai-chat"        // POST /v1/chat/completions, SSE stream
+	FormatAnthropicMsg RequestFormat = "anthropic-msg"      // POST /v1/messages, SSE + event types
+	FormatAWSKiro      RequestFormat = "aws-eventstream"    // AWS EventStream binary
+	FormatImageAPI     RequestFormat = "image-api"          // Image-only provider; no chat executor
+	FormatCommandCode  RequestFormat = "commandcode-ndjson" // POST /alpha/generate, NDJSON stream
 )
 
 // ProviderConfig defines all static configuration for a provider.
 type ProviderConfig struct {
-	ID                string        `json:"id"`
-	Name              string        `json:"name"`
-	Icon              string        `json:"icon"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Icon string `json:"icon"`
+	// PublicPrefix is the short model-id prefix shown in playground, /v1/models, and combos.
+	// Empty means the provider ID is used as-is.
+	PublicPrefix      string        `json:"publicPrefix,omitempty"`
 	AuthMethods       []string      `json:"authMethods"`
 	DefaultBaseURL    string        `json:"defaultBaseUrl"`
 	ChatPath          string        `json:"chatPath,omitempty"`
@@ -395,6 +399,47 @@ var ProviderConfigs = map[string]ProviderConfig{
 		},
 	},
 
+	"commandcode": {
+		ID:             "commandcode",
+		Name:           "Command Code",
+		Icon:           "cmc",
+		PublicPrefix:   "cmc",
+		AuthMethods:    []string{"apikey"},
+		DefaultBaseURL: "https://api.commandcode.ai",
+		ChatPath:       "/alpha/generate",
+		RecommendedModels: []string{
+			"deepseek/deepseek-v4-pro",
+			"deepseek/deepseek-v4-flash",
+			"MiniMaxAI/MiniMax-M3",
+			"MiniMaxAI/MiniMax-M2.7",
+			"zai-org/GLM-5.1",
+			"moonshotai/Kimi-K2.6",
+			"Qwen/Qwen3.7-Max",
+			"Qwen/Qwen3.7-Max-Free",
+			"stepfun/Step-3.7-Flash",
+			"xiaomi/mimo-v2.5-pro",
+		},
+		Format:        FormatCommandCode,
+		SupportsQuota: false,
+		UI: ProviderUI{
+			Category:            "cloud",
+			Description:         "Command Code models via CLI generate API (works on Go plan)",
+			DocsURL:             "https://commandcode.ai/docs/provider",
+			ShowBaseURLField:    true,
+			BaseURLLabel:        "Base URL",
+			BaseURLPlaceholder:  "https://api.commandcode.ai",
+			PreferredAuthMethod: "import",
+			AuthFlows:           []string{"import", "apikey"},
+			FormFields: []FormField{
+				{Name: "name", Label: "Connection Name", Type: FieldTypeText, Required: false},
+				{Name: "apiKey", Label: "API Key", Type: FieldTypePassword, Required: true, Secret: true, Placeholder: "user_...", HelpText: "From ~/.commandcode/auth.json or Studio API keys"},
+				{Name: "baseUrl", Label: "Base URL", Type: FieldTypeURL, Required: false},
+			},
+			SupportsModelSelect: true,
+			DefaultTestModel:    "deepseek/deepseek-v4-pro",
+		},
+	},
+
 	"xai": {
 		ID:             "xai",
 		Name:           "Grok Build (xAI)",
@@ -420,6 +465,15 @@ var ProviderConfigs = map[string]ProviderConfig{
 			DefaultTestModel:    "grok-4.6",
 		},
 	},
+}
+
+// PublicProviderPrefix returns the short prefix used in model IDs and UI.
+// Unknown providers keep their raw ID.
+func PublicProviderPrefix(providerID string) string {
+	if cfg, ok := ProviderConfigs[providerID]; ok && cfg.PublicPrefix != "" {
+		return cfg.PublicPrefix
+	}
+	return providerID
 }
 
 // GetProviderConfig returns the config for a provider ID.

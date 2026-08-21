@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useCallback, useSyncExternalStore } from "react";
 import {
-  Routes,
-  Route,
+  Outlet,
   useNavigate,
   useLocation,
   Navigate,
+  type RouteObject,
 } from "react-router-dom";
 import {
   LayoutDashboard,
@@ -115,6 +115,32 @@ function useIsMounted() {
     () => false,
   );
 }
+
+// Route-level admin gate (session lives in the zustand store, so this works
+// outside the App component render where routes are now declared).
+function RequireAdmin({ children }: { children: React.ReactNode }) {
+  const isAdmin = useAppStore((s) => s.session?.isAdmin);
+  return isAdmin ? <>{children}</> : <Navigate to="/" replace />;
+}
+
+export const appRoutes: RouteObject[] = [
+  { path: "/", element: <DashboardScreen /> },
+  { path: "/connections", element: <ConnectionsScreen /> },
+  { path: "/connections/add", element: <AddConnectionPage /> },
+  { path: "/models", element: <ModelsScreen /> },
+  { path: "/combos", element: <CombosScreen /> },
+  { path: "/profiles", element: <ProfilesScreen /> },
+  { path: "/tools", element: <ToolsScreen /> },
+  { path: "/playground", element: <PlaygroundScreen /> },
+  { path: "/usage", element: <RequireAdmin><UsageScreen /></RequireAdmin> },
+  { path: "/logs", element: <LogsScreen /> },
+  { path: "/settings", element: <RequireAdmin><SettingsScreen /></RequireAdmin> },
+  { path: "/api-keys", element: <ApiKeysScreen /> },
+  { path: "/tenants", element: <RequireAdmin><TenantsScreen /></RequireAdmin> },
+  { path: "/tunnel", element: <RequireAdmin><TunnelScreen /></RequireAdmin> },
+  { path: "/backup", element: <RequireAdmin><BackupScreen /></RequireAdmin> },
+  { path: "*", element: <Navigate to="/" replace /> },
+];
 
 export default function App() {
   const { sidebarOpen, toggleSidebar, session, setSession, clearSession } = useAppStore();
@@ -296,24 +322,7 @@ export default function App() {
         </header>
 
         <div className="w-full p-4 md:p-6">
-          <Routes>
-	            <Route path="/" element={<DashboardScreen />} />
-	            <Route path="/connections" element={<ConnectionsScreen />} />
-	            <Route path="/connections/add" element={<AddConnectionPage />} />
-	            <Route path="/models" element={<ModelsScreen />} />
-	            <Route path="/combos" element={<CombosScreen />} />
-	            <Route path="/profiles" element={<ProfilesScreen />} />
-	            <Route path="/tools" element={<ToolsScreen />} />
-	            <Route path="/playground" element={<PlaygroundScreen />} />
-	            <Route path="/usage" element={session?.isAdmin ? <UsageScreen /> : <Navigate to="/" replace />} />
-	            <Route path="/logs" element={<LogsScreen />} />
-	            <Route path="/settings" element={session?.isAdmin ? <SettingsScreen /> : <Navigate to="/" replace />} />
-	            <Route path="/api-keys" element={<ApiKeysScreen />} />
-	            <Route path="/tenants" element={session?.isAdmin ? <TenantsScreen /> : <Navigate to="/" replace />} />
-	            <Route path="/tunnel" element={session?.isAdmin ? <TunnelScreen /> : <Navigate to="/" replace />} />
-	            <Route path="/backup" element={session?.isAdmin ? <BackupScreen /> : <Navigate to="/" replace />} />
-	            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
+          <Outlet />
         </div>
       </main>
     </div>

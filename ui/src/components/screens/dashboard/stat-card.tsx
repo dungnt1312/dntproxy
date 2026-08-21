@@ -1,29 +1,20 @@
 import { Card, CardContent } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
-import { KPI_RANGE_LABELS, type KpiRange } from './helpers'
-
-// ─── StatCard ────────────────────────────────────────────────────────────────
 
 interface StatCardProps {
   label: string
   value: string
+  caption?: string
   accent?: string
-  range: KpiRange
 }
 
-export function StatCard({ label, value, accent, range }: StatCardProps) {
+export function StatCard({ label, value, caption, accent }: StatCardProps) {
   return (
-    <Card>
-      <CardContent className="px-4 py-3 flex flex-col gap-1">
-        <span className="text-[10px] text-muted-foreground uppercase font-semibold tracking-wider">
-          {label}
-        </span>
-        <span className={cn('text-2xl font-bold tabular-nums leading-none', accent ?? 'text-foreground')}>
-          {value}
-        </span>
-        <span className="text-[9px] text-muted-foreground/60">
-          {KPI_RANGE_LABELS[range]}
-        </span>
+    <Card className="border-border/80 bg-card shadow-sm">
+      <CardContent className="flex min-h-24 flex-col justify-center gap-1 px-4 py-3.5">
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</span>
+        <span className={cn('text-2xl font-bold leading-none tracking-tight tabular-nums', accent ?? 'text-foreground')}>{value}</span>
+        {caption && <span className="mt-1 text-[10px] text-muted-foreground">{caption}</span>}
       </CardContent>
     </Card>
   )

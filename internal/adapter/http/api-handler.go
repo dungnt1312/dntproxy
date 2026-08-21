@@ -45,6 +45,7 @@ func RegisterAPIRoutes(r *gin.Engine, store port.CredentialStore, providers port
 		api.POST("/connections/add-gemini", apiAddConnection(store, "gemini"))
 		api.POST("/connections/add-cline", apiAddConnection(store, "cline"))
 		api.POST("/connections/detect-kiro", apiDetectKiroToken(store))
+		api.POST("/connections/detect-commandcode", apiDetectCommandCodeAuth(store))
 		api.DELETE("/connections/:id", apiDeleteConnection(store))
 		api.GET("/connections/:id/export", apiExportConnection(store))
 		api.POST("/connections/:id/test", apiTestConnection(store))

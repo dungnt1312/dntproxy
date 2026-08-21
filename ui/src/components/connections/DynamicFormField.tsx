@@ -1,5 +1,7 @@
+import { useId } from 'react';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import { cn } from '@/lib/utils';
 import type { FormFieldMeta } from '@/types/provider-metadata';
 
 type Props = {
@@ -10,30 +12,51 @@ type Props = {
 };
 
 export function DynamicFormField({ field, value, onChange, className }: Props) {
-  const placeholder = field.placeholder ?? field.label + (field.required ? ' *' : ' (optional)');
+  const id = useId();
+  const isSecret = field.type === 'password' || field.secret;
+  const inputType = isSecret ? 'password' : field.type === 'number' ? 'number' : 'text';
+
+  const label = (
+    <label htmlFor={id} className="text-xs font-medium">
+      {field.label}
+      {field.required ? <span className="text-destructive"> *</span> : null}
+    </label>
+  );
 
   if (field.type === 'textarea') {
     return (
-      <Textarea
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        rows={3}
-        className={className ?? 'text-xs font-mono'}
-      />
+      <div className="space-y-1">
+        {label}
+        <Textarea
+          id={id}
+          name={field.name}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={field.placeholder}
+          autoComplete="off"
+          spellCheck={false}
+          rows={3}
+          className={className ?? 'text-xs font-mono'}
+        />
+      </div>
     );
   }
 
-  const inputType =
-    field.type === 'password' || field.secret ? 'password' : field.type === 'number' ? 'number' : 'text';
-
   return (
-    <Input
-      type={inputType}
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      placeholder={placeholder}
-      className={className ?? (field.secret || field.name === 'apiKey' ? 'text-xs font-mono' : 'text-xs')}
-    />
+    <div className="space-y-1">
+      {label}
+      <Input
+        id={id}
+        name={field.name}
+        type={inputType}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={field.placeholder}
+        autoComplete={isSecret ? 'off' : undefined}
+        spellCheck={isSecret || field.name === 'apiKey' ? false : undefined}
+        className={cn(className ?? (isSecret || field.name === 'apiKey' ? 'text-xs font-mono' : 'text-xs'))}
+      />
+      {field.helpText ? <p className="text-[11px] text-muted-foreground">{field.helpText}</p> : null}
+    </div>
   );
 }

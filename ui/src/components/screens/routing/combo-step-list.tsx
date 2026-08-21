@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import type { ConnectionOption, UiModel } from "./types";
 import type { ComboStep } from "./combo-step-builder";
 import { getModelDisplayName } from "./model-display";
+import { providerToRoutingPrefix } from "./routing-format";
 
 interface ComboStepListProps {
   steps: ComboStep[];
@@ -36,7 +37,7 @@ export function ComboStepList({ steps, connections, models, onMove, onDelete, on
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
-                <Badge variant="outline" className="font-mono text-[10px]">{step.provider}</Badge>
+                <Badge variant="outline" className="font-mono text-[10px]">{providerToRoutingPrefix(step.provider)}</Badge>
                 <span className="truncate text-sm font-medium">{model ? getModelDisplayName(model) : step.model}</span>
               </div>
               <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">

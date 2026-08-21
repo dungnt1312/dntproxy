@@ -136,3 +136,13 @@
     @apply bg-background text-foreground;
   }
 }
+
+.dashboard-console {
+  background-image: linear-gradient(rgb(148 163 184 / 0.055) 1px, transparent 1px), linear-gradient(90deg, rgb(148 163 184 / 0.055) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+.dashboard-grid {
+  background-image: linear-gradient(rgb(148 163 184 / 0.07) 1px, transparent 1px), linear-gradient(90deg, rgb(148 163 184 / 0.07) 1px, transparent 1px);
+  background-size: 32px 32px;
+}

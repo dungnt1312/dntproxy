@@ -56,6 +56,7 @@ chat executor.
 | Qwen (Alibaba) | `qwen` | API Key, OAuth | openai-chat |
 | Anthropic | `anthropic` | API Key | anthropic-messages |
 | ClinePass | `cline` | API Key | openai-chat |
+| Command Code | `commandcode` | API Key | commandcode-ndjson |
 | Google Gemini | `gemini` | API Key | openai-chat + native images |
 | BytePlus ModelArk | `byteplus` | API Key | image API |
 | xAI | `xai` | OAuth | responses + image API |

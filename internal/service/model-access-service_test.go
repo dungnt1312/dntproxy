@@ -181,6 +181,40 @@ func TestBuildPool_CombinedRestriction(t *testing.T) {
 	}
 }
 
+func TestBuildPool_CommandCodeUsesPublicPrefix(t *testing.T) {
+	cfg := newTestConfig()
+	cfg.ProviderConnections = append(cfg.ProviderConnections, domain.ProviderConnection{
+		ID:              "conn-cmc-1",
+		Provider:        "commandcode",
+		IsActive:        true,
+		SupportedModels: []string{"deepseek/deepseek-v4-pro"},
+	})
+	svc := NewModelAccessService(&testStore{cfg: cfg})
+	pool, err := svc.BuildPool(nil)
+	if err != nil {
+		t.Fatalf("BuildPool: %v", err)
+	}
+	found := false
+	for _, m := range pool.Models {
+		if m.Model != "deepseek/deepseek-v4-pro" {
+			continue
+		}
+		found = true
+		if m.QualifiedID != "cmc/deepseek/deepseek-v4-pro" {
+			t.Fatalf("QualifiedID = %q, want cmc/deepseek/deepseek-v4-pro", m.QualifiedID)
+		}
+		if m.DisplayProvider != "cmc" {
+			t.Fatalf("DisplayProvider = %q, want cmc", m.DisplayProvider)
+		}
+		if m.Provider != "commandcode" {
+			t.Fatalf("Provider = %q, want commandcode", m.Provider)
+		}
+	}
+	if !found {
+		t.Fatal("commandcode model missing from pool")
+	}
+}
+
 func TestBuildPool_InactiveConnectionExcluded(t *testing.T) {
 	store := &testStore{cfg: newTestConfig()}
 	svc := NewModelAccessService(store)
@@ -424,27 +458,27 @@ func TestBuildPool_OpenAICompatibleAliasRespectsConnectionPolicy(t *testing.T) {
 	if found == nil {
 		t.Fatal("expected legacy-custom alias to be visible")
 	}
-		if found.Target != "other/RL-4m" {
-			t.Fatalf("expected alias to resolve to policy-allowed route prefix, got %q", found.Target)
-		}
+	if found.Target != "other/RL-4m" {
+		t.Fatalf("expected alias to resolve to policy-allowed route prefix, got %q", found.Target)
 	}
+}
 
-	func TestBuildPool_NoConnectionsEmptyPool(t *testing.T) {
-		cfg := domain.DefaultConfig()
-		cfg.ProviderConnections = nil
-		store := &testStore{cfg: &cfg}
-		svc := NewModelAccessService(store)
+func TestBuildPool_NoConnectionsEmptyPool(t *testing.T) {
+	cfg := domain.DefaultConfig()
+	cfg.ProviderConnections = nil
+	store := &testStore{cfg: &cfg}
+	svc := NewModelAccessService(store)
 
-		pool, err := svc.BuildPool(nil)
-		if err != nil {
-			t.Fatalf("BuildPool: %v", err)
-		}
-		if len(pool.Models) != 0 {
-			t.Fatalf("expected empty model pool without connections, got %d models", len(pool.Models))
-		}
+	pool, err := svc.BuildPool(nil)
+	if err != nil {
+		t.Fatalf("BuildPool: %v", err)
 	}
+	if len(pool.Models) != 0 {
+		t.Fatalf("expected empty model pool without connections, got %d models", len(pool.Models))
+	}
+}
 
-	// --- helpers ---
+// --- helpers ---
 
 func modelRefIDs(refs []ModelRef) []string {
 	ids := make([]string, len(refs))

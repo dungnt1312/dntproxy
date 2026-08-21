@@ -1,213 +1,108 @@
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { CheckCircle2, AlertTriangle, Zap, ArrowRight } from 'lucide-react'
-import { Card, CardContent } from '@/components/ui/card'
+import { Activity, RefreshCw, Zap } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 import { goApi } from '@/lib/go-api'
 import { StatCard } from './dashboard/stat-card'
-import { DailyUsageChart } from './dashboard/daily-usage-chart'
-import { ErrorsHint, type RecentError } from './dashboard/errors-hint'
-import {
-  formatTokens,
-  formatCost,
-  formatLatency,
-  formatRelativeTime,
-  KPI_RANGE_LABELS,
-  type KpiRange,
-} from './dashboard/helpers'
-import type { DailyUsageStat } from '@/types/logs'
+import { RoutingTopology } from './dashboard/routing-topology'
+import { RecentRequests } from './dashboard/recent-requests'
+import { formatCost, formatRelativeTime, formatTokens } from './dashboard/helpers'
+import type { Connection } from '@/types/connections'
+import type { LogConnectionSummary, LogEntry } from '@/types/logs'
+import type { AliasMap, ComboData } from '@/components/screens/routing/types'
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+type DashboardRange = '24h' | '7d' | '30d' | '60d'
+type DashboardTab = 'overview' | 'details'
 
-interface KpiData {
-  totalRequests: number
-  errorRequests: number
-  totalTokens: number
-  costTotal: number
-  avgLatencyMs: number
-}
+const RANGES: Array<{ value: DashboardRange; label: string; apiRange: '24h' | '7d' | '30d' }> = [
+  { value: '24h', label: 'Today', apiRange: '24h' },
+  { value: '7d', label: '7D', apiRange: '7d' },
+  { value: '30d', label: '30D', apiRange: '30d' },
+  { value: '60d', label: '60D', apiRange: '30d' },
+]
 
-// ─── Main Dashboard ──────────────────────────────────────────────────────────
+interface Summary { totalRequests: number; inputTokens: number; outputTokens: number; costTotal: number; errorRequests: number }
 
 export default function DashboardScreen() {
   const navigate = useNavigate()
-  const [kpiRange, setKpiRange] = useState<KpiRange>('24h')
-  const [kpi, setKpi] = useState<KpiData | null>(null)
-  const [recentErrors, setRecentErrors] = useState<RecentError[]>([])
-  const [dailyStats, setDailyStats] = useState<DailyUsageStat[]>([])
+  const [tab, setTab] = useState<DashboardTab>('overview')
+  const [range, setRange] = useState<DashboardRange>('24h')
+  const [summary, setSummary] = useState<Summary | null>(null)
+  const [connections, setConnections] = useState<Connection[]>([])
+  const [connectionSummaries, setConnectionSummaries] = useState<LogConnectionSummary[]>([])
+  const [combos, setCombos] = useState<ComboData[]>([])
+  const [aliases, setAliases] = useState<AliasMap>({})
+  const [requests, setRequests] = useState<LogEntry[]>([])
   const [loading, setLoading] = useState(true)
-  const [chartLoading, setChartLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [chartError, setChartError] = useState<string | null>(null)
-  const [lastRefreshed, setLastRefreshed] = useState<number>(Date.now())
-  const kpiIntervalRef = useRef<ReturnType<typeof setInterval>>(undefined)
-  const chartIntervalRef = useRef<ReturnType<typeof setInterval>>(undefined)
+  const [lastRefreshed, setLastRefreshed] = useState(Date.now())
+  const intervalRef = useRef<ReturnType<typeof setInterval>>(undefined)
+  const apiRange = RANGES.find(item => item.value === range)?.apiRange ?? '24h'
 
-  const fetchKpi = useCallback(async (range: KpiRange) => {
-    try {
-      const summary = await goApi.getLogSummary({ range })
-      setKpi({
-        totalRequests: summary?.totalRequests ?? 0,
-        errorRequests: summary?.errorRequests ?? 0,
-        totalTokens: (summary?.inputTokens ?? 0) + (summary?.outputTokens ?? 0),
-        costTotal: summary?.costTotal ?? 0,
-        avgLatencyMs: summary?.avgLatencyMs ?? 0,
-      })
-      setRecentErrors(summary?.recentErrors ?? [])
-      setError(null)
-      setLastRefreshed(Date.now())
-    } catch {
-      setError('Failed to load KPI data')
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+  const fetchData = useCallback(async () => {
+    const [nextSummary, nextConnections, nextConnectionSummaries, nextCombos, nextAliases, nextRequests] = await Promise.all([
+      goApi.getLogSummary({ range: apiRange }).catch(() => null),
+      goApi.getConnections().catch(() => []),
+      goApi.getLogConnections({ range: apiRange }).catch(() => []),
+      goApi.getCombos().catch(() => []),
+      goApi.getAliases().catch(() => ({})),
+      goApi.getLogs({ range: '24h', limit: 18 }).catch(() => []),
+    ])
+    if (nextSummary) setSummary({ totalRequests: nextSummary.totalRequests ?? 0, inputTokens: nextSummary.inputTokens ?? 0, outputTokens: nextSummary.outputTokens ?? 0, costTotal: nextSummary.costTotal ?? 0, errorRequests: nextSummary.errorRequests ?? 0 })
+    setConnections(Array.isArray(nextConnections) ? nextConnections : [])
+    setConnectionSummaries(Array.isArray(nextConnectionSummaries) ? nextConnectionSummaries : [])
+    setCombos(Array.isArray(nextCombos) ? nextCombos : [])
+    setAliases(nextAliases && typeof nextAliases === 'object' ? nextAliases : {})
+    setRequests(Array.isArray(nextRequests) ? nextRequests : [])
+    setLastRefreshed(Date.now())
+    setLoading(false)
+  }, [apiRange])
 
-  const fetchChart = useCallback(async (range: KpiRange) => {
-    try {
-      const stats = await goApi.getLogDaily(range)
-      setDailyStats(Array.isArray(stats) ? stats : [])
-      setChartError(null)
-    } catch {
-      setChartError('Failed to load chart data')
-    } finally {
-      setChartLoading(false)
-    }
-  }, [])
-
-  // Refetch everything when range changes
   useEffect(() => {
     setLoading(true)
-    setChartLoading(true)
-    fetchKpi(kpiRange)
-    fetchChart(kpiRange)
+    fetchData()
+    if (intervalRef.current) clearInterval(intervalRef.current)
+    intervalRef.current = setInterval(fetchData, 15_000)
+    return () => { if (intervalRef.current) clearInterval(intervalRef.current) }
+  }, [fetchData])
 
-    // Auto-refresh KPI every 30s, chart every 60s
-    if (kpiIntervalRef.current) clearInterval(kpiIntervalRef.current)
-    if (chartIntervalRef.current) clearInterval(chartIntervalRef.current)
-    kpiIntervalRef.current = setInterval(() => fetchKpi(kpiRange), 30_000)
-    chartIntervalRef.current = setInterval(() => fetchChart(kpiRange), 60_000)
-
-    return () => {
-      if (kpiIntervalRef.current) clearInterval(kpiIntervalRef.current)
-      if (chartIntervalRef.current) clearInterval(chartIntervalRef.current)
-    }
-  }, [kpiRange, fetchKpi, fetchChart])
-
-  const successRate = kpi && kpi.totalRequests > 0
-    ? (((kpi.totalRequests - kpi.errorRequests) / kpi.totalRequests) * 100).toFixed(1)
-    : null
-
-  // Only healthy once kpi loaded and no errors
-  const isHealthy = kpi !== null && kpi.errorRequests === 0
-
-  return (
-    <div className="space-y-4">
-      {/* ── Header ── */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-2.5">
-          {loading ? (
-            <Skeleton className="h-5 w-5 rounded-full" />
-          ) : isHealthy ? (
-            <CheckCircle2 className="size-5 text-emerald-500" />
-          ) : (
-            <AlertTriangle className="size-5 text-amber-500" />
-          )}
-          <div>
-            <h1 className="text-xl font-bold leading-tight">Dashboard</h1>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              {loading
-                ? 'Loading...'
-                : error
-                  ? error
-                  : kpi === null
-                    ? 'No data'
-                    : isHealthy
-                      ? `System Healthy · Updated ${formatRelativeTime(new Date(lastRefreshed).toISOString())}`
-                      : `${kpi.errorRequests} error${kpi.errorRequests > 1 ? 's' : ''} in ${KPI_RANGE_LABELS[kpiRange].toLowerCase()}`}
-            </p>
-          </div>
+  return <div className="dashboard-console -mx-4 -mt-4 min-h-[calc(100vh-4rem)] px-4 py-5 sm:-mx-6 sm:px-6">
+    <div className="mx-auto max-w-7xl space-y-5">
+      <header className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+        <div className="inline-flex w-fit rounded-xl border border-border/80 bg-card/90 p-1 shadow-sm">
+          {(['overview', 'details'] as DashboardTab[]).map(item => <button key={item} onClick={() => setTab(item)} className={cn('rounded-lg px-4 py-2 text-sm font-semibold transition', tab === item ? 'bg-muted text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}>{item === 'overview' ? 'Overview' : 'Details'}</button>)}
         </div>
-
-        <div className="flex items-center gap-2 shrink-0">
-          <div className="flex items-center rounded-md border border-border bg-muted/30 p-0.5 gap-0.5">
-            {(['24h', '7d', '30d'] as KpiRange[]).map(r => (
-              <button
-                key={r}
-                onClick={() => setKpiRange(r)}
-                className={cn(
-                  'px-2.5 py-1 text-xs rounded font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                  kpiRange === r
-                    ? 'bg-background shadow-sm text-foreground'
-                    : 'text-muted-foreground hover:text-foreground',
-                )}
-              >
-                {KPI_RANGE_LABELS[r]}
-              </button>
-            ))}
+        <div className="flex items-center justify-between gap-2 sm:justify-end">
+          <div className="inline-flex rounded-xl border border-border/80 bg-card/90 p-1 shadow-sm">
+            {RANGES.map(item => <button key={item.value} onClick={() => setRange(item.value)} className={cn('rounded-lg px-2.5 py-2 text-xs font-semibold transition', range === item.value ? 'bg-muted text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}>{item.label}</button>)}
           </div>
-
-          <Button variant="outline" size="sm" className="gap-1.5" onClick={() => navigate('/playground')}>
-            <Zap className="size-3.5" />
-            Playground
-            <ArrowRight className="size-3" />
-          </Button>
+          <Button variant="outline" size="icon" className="size-9" onClick={fetchData} aria-label="Refresh dashboard"><RefreshCw className="size-3.5" /></Button>
         </div>
-      </div>
+      </header>
 
-      {/* ── KPI Cards (5 cards: Requests / Success% / Total Tokens / Avg Latency / Cost) ── */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-        {loading ? (
-          Array.from({ length: 5 }).map((_, i) => (
-            <Card key={i}>
-              <CardContent className="px-4 py-3">
-                <Skeleton className="h-12 w-full" />
-              </CardContent>
-            </Card>
-          ))
-        ) : (
-          <>
-            <StatCard label="Requests" value={(kpi?.totalRequests ?? 0).toLocaleString()} range={kpiRange} />
-            <StatCard
-              label="Success Rate"
-              value={successRate ? `${successRate}%` : '—'}
-              accent={
-                successRate && parseFloat(successRate) >= 95
-                  ? 'text-emerald-500'
-                  : successRate && parseFloat(successRate) >= 80
-                    ? 'text-amber-500'
-                    : successRate
-                      ? 'text-red-500'
-                      : undefined
-              }
-              range={kpiRange}
-            />
-            <StatCard label="Total Tokens" value={formatTokens(kpi?.totalTokens ?? 0)} accent="text-blue-400" range={kpiRange} />
-            <StatCard label="Avg Latency" value={formatLatency(kpi?.avgLatencyMs ?? 0)} range={kpiRange} />
-            <StatCard label="Est. Cost" value={formatCost(kpi?.costTotal ?? 0)} accent="text-amber-500" range={kpiRange} />
-          </>
-        )}
-      </div>
-
-      {/* ── Chart ── */}
-      <div className="space-y-3">
-        <DailyUsageChart
-          data={dailyStats}
-          loading={chartLoading}
-          error={chartError}
-          range={kpiRange}
-          onRetry={() => {
-            setChartLoading(true)
-            setChartError(null)
-            fetchChart(kpiRange)
-          }}
-        />
-        {recentErrors.length > 0 && (
-          <ErrorsHint errors={recentErrors} onViewAll={() => navigate('/logs?level=ERROR')} />
-        )}
-      </div>
+      {tab === 'overview' ? <>
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          {loading ? Array.from({ length: 4 }).map((_, index) => <Skeleton key={index} className="h-24 rounded-xl" />) : <>
+            <StatCard label="Total requests" value={(summary?.totalRequests ?? 0).toLocaleString()} caption={`${range === '24h' ? 'Today' : `Last ${range}`}`} />
+            <StatCard label="Total input tokens" value={formatTokens(summary?.inputTokens ?? 0)} accent="text-orange-400" />
+            <StatCard label="Output tokens" value={formatTokens(summary?.outputTokens ?? 0)} accent="text-emerald-400" />
+            <StatCard label="Est. cost" value={`~${formatCost(summary?.costTotal ?? 0)}`} caption="Estimated, not actual billing" accent="text-amber-400" />
+          </>}
+        </div>
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,1.9fr)_minmax(320px,0.95fr)]">
+          <RoutingTopology connections={connections} summaries={connectionSummaries} combos={combos} aliases={aliases} onNavigate={navigate} />
+          <RecentRequests requests={requests} loading={loading} onViewAll={() => navigate('/logs')} />
+        </div>
+      </> : <Details summary={summary} connections={connections} requests={requests} loading={loading} lastRefreshed={lastRefreshed} onPlayground={() => navigate('/playground')} />}
     </div>
-  )
+  </div>
+}
+
+function Details({ summary, connections, requests, loading, lastRefreshed, onPlayground }: { summary: Summary | null; connections: Connection[]; requests: LogEntry[]; loading: boolean; lastRefreshed: number; onPlayground: () => void }) {
+  const failures = requests.filter(entry => entry.level === 'ERROR' || (entry.statusCode ?? 0) >= 400).length
+  return <section className="grid gap-3 lg:grid-cols-3">
+    <div className="rounded-xl border border-border/80 bg-card p-5 lg:col-span-2"><div className="flex items-center gap-2"><Activity className="size-4 text-blue-400" /><h2 className="text-sm font-semibold">Proxy status</h2></div><p className="mt-4 text-2xl font-bold text-emerald-400">{loading ? 'Updating…' : failures ? 'Attention needed' : 'Healthy'}</p><p className="mt-2 text-sm text-muted-foreground">{connections.filter(connection => connection.isActive).length} active connections · {summary?.errorRequests ?? 0} errors in the selected period · Updated {formatRelativeTime(new Date(lastRefreshed).toISOString())}</p></div>
+    <div className="rounded-xl border border-border/80 bg-card p-5"><h2 className="text-sm font-semibold">Ready to test?</h2><p className="mt-2 text-sm text-muted-foreground">Send a request through your current routing configuration.</p><Button className="mt-4 w-full gap-1.5" onClick={onPlayground}><Zap className="size-3.5" /> Open Playground</Button></div>
+  </section>
 }

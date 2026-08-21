@@ -20,6 +20,19 @@ func TestConnectionTestURLKeepsXAIVersionPrefix(t *testing.T) {
 	}
 }
 
+func TestConnectionTestURLUsesCommandCodeGeneratePath(t *testing.T) {
+	conn := &domain.ProviderConnection{
+		Provider: "commandcode",
+		BaseURL:  "https://api.commandcode.ai",
+	}
+	cfg := domain.GetProviderConfig("commandcode")
+	got := providerTestURL(conn, cfg)
+	want := "https://api.commandcode.ai/alpha/generate"
+	if got != want {
+		t.Fatalf("providerTestURL() = %q, want %q", got, want)
+	}
+}
+
 func TestConnectionTestURLStripsVersionForChatCompletionsProviders(t *testing.T) {
 	conn := &domain.ProviderConnection{
 		Provider: "openai-compatible",

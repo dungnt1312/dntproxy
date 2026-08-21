@@ -271,7 +271,7 @@ func modelProviderForConnection(conn domain.ProviderConnection) string {
 			return prefix
 		}
 	}
-	return conn.Provider
+	return domain.PublicProviderPrefix(conn.Provider)
 }
 
 // === Model Registry Management ===

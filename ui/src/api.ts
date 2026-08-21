@@ -95,6 +95,8 @@ export const api = {
   updateConnection: (id: string, data: Record<string, unknown>) =>
     request(`/connections/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   detectKiroToken: () => request('/connections/detect-kiro', { method: 'POST' }),
+  detectCommandCodeAuth: (data?: { import?: boolean }) =>
+    request('/connections/detect-commandcode', { method: 'POST', body: JSON.stringify(data ?? {}) }),
   resetCooldown: (id: string) => request(`/connections/${id}/reset-cooldown`, { method: 'POST' }),
   clearConnectionError: (id: string, model?: string) =>
     request(`/connections/${id}/clear-error`, { method: 'POST', body: JSON.stringify(model ? { model } : {}) }),

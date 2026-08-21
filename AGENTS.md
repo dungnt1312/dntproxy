@@ -4,7 +4,7 @@ Go-based OpenAI-compatible proxy that routes requests to multiple AI providers. 
 
 ## Overview
 
-OpenAI-compatible proxy that routes requests to multiple AI providers (Kiro, OpenAI, GLM, MiniMax, Qwen, Anthropic). Supports multi-account fallback, combo model chains, multiple auth methods, Cloudflare tunneling, and structured SQLite logging.
+OpenAI-compatible proxy that routes requests to multiple AI providers (Kiro, OpenAI, GLM, MiniMax, Qwen, Anthropic, Command Code). Supports multi-account fallback, combo model chains, multiple auth methods, Cloudflare tunneling, and structured SQLite logging.
 
 ## Tech Stack
 
@@ -54,6 +54,7 @@ internal/adapter/               → Implementations
   │   └── tunnel-handler.go     → Cloudflare tunnel enable/disable/status
   ├── kiro/                     → Kiro executor + EventStream parser
   ├── openai/                   → OpenAI executor (API + OAuth/Codex)
+  ├── commandcode/              → Command Code executor + NDJSON translator
   ├── custom/                   → NoOpModelFetcher, NoOpQuotaChecker
   ├── shared/                   → StreamingHTTPClient, body sanitization
   ├── auth/                     → OAuth flows (Builder ID, IDC, Social, Import)
@@ -88,6 +89,7 @@ internal/logger/                → Structured logging (ring buffer + SQLite)
 | Anthropic | `anthropic` | apikey | api.anthropic.com | anthropic-msg |
 | Gemini | `gemini` | apikey | generativelanguage.googleapis.com | openai-chat |
 | Cline | `cline` | apikey | api.cline.bot | openai-chat |
+| Command Code | `commandcode` | apikey | api.commandcode.ai | commandcode-ndjson (`/alpha/generate`) |
 | xAI / Grok | `xai` | oauth | api.x.ai | openai-chat (`/responses`) |
 | BytePlus (image) | `byteplus` | apikey | ark.ap-southeast.bytepluses.com | image-only |
 
@@ -148,6 +150,7 @@ go build -o dntproxy ./cmd/dntproxy/
 
 ```
 kr/<model>                     # Kiro provider
+cmc/<model>                    # Command Code provider
 oai/<model>                    # OpenAI provider
 glm/<model>                    # GLM provider
 minimax/<model>                # MiniMax provider

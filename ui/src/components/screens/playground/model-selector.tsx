@@ -9,6 +9,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
+import { providersMatch } from '@/lib/provider-registry'
 import { buildPlaygroundModelId, getSelectableModelValue } from './stream-utils'
 
 interface Model {
@@ -72,7 +73,7 @@ export function ModelSelector({
     const filtered = connections.filter(c => {
       if (!c.isActive) return false
       if (c.routePrefix && c.routePrefix === selectedProvider) return true
-      return c.provider === selectedProvider
+      return providersMatch(c.provider, selectedProvider) || providersMatch((c as { publicPrefix?: string }).publicPrefix, selectedProvider)
     })
 
     // If model is selected, further filter by supportedModels

@@ -1,10 +1,13 @@
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../api';
-import { Plus, Search, Link2, AlertTriangle, RefreshCw, Loader2 } from 'lucide-react';
+import { Plus, Search, Link2, AlertTriangle, RefreshCw, Loader2, ListChecks } from 'lucide-react';
 import EditModelsModal from '../connections/EditModelsModal';
 import EditConnectionModal from '../connections/EditConnectionModal';
 import DeleteDialog from '../connections/DeleteDialog';
+import { BulkActionBar, type BulkAction } from '../connections/BulkActionBar';
+import { BulkModelsModal, stripModelForConnection } from '../connections/BulkModelsModal';
+import { BulkDeleteDialog } from '../connections/BulkDeleteDialog';
 import { ProviderLogoIcon } from '../connections/helpers';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -44,9 +47,48 @@ export default function ConnectionsScreen() {
         name: string;
     } | null>(null);
     const [searchQuery, setSearchQuery] = useState('');
-    const [statusFilter, setStatusFilter] = useState<ConnectionStatusFilterValue>('active');
+    const [statusFilter, setStatusFilter] = useState<ConnectionStatusFilterValue>('all');
     const [autoRefreshQuota, setAutoRefreshQuota] = useState(false);
     const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
+
+    // ── Bulk selection state ──────────────────────────────────────────────────
+    const [selectionMode, setSelectionMode] = useState(false);
+    const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+    const [bulkBusy, setBulkBusy] = useState<string | null>(null);
+    const [bulkModelsOpen, setBulkModelsOpen] = useState(false);
+    const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+
+    const toggleSelect = useCallback((id: string) => {
+        setSelectedIds((prev) => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            return next;
+        });
+    }, []);
+
+    const toggleSelectAll = useCallback((ids: string[], selectAll: boolean) => {
+        setSelectedIds((prev) => {
+            const next = new Set(prev);
+            ids.forEach((id) => (selectAll ? next.add(id) : next.delete(id)));
+            return next;
+        });
+    }, []);
+
+    const exitSelectionMode = useCallback(() => {
+        setSelectionMode(false);
+        setSelectedIds(new Set());
+    }, []);
+
+    // Drop selections for connections that no longer exist after a reload.
+    useEffect(() => {
+        setSelectedIds((prev) => {
+            if (prev.size === 0) return prev;
+            const alive = new Set(conns.map((c) => c.id));
+            const next = new Set([...prev].filter((id) => alive.has(id)));
+            return next.size === prev.size ? prev : next;
+        });
+    }, [conns]);
 
     const toggleGroup = useCallback((id: string) => {
         setCollapsedGroups((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -176,6 +218,71 @@ export default function ConnectionsScreen() {
         load();
     }, [load]);
 
+    // ── Bulk actions (declared after load/filteredConns to avoid TDZ) ──────────
+    const toggleSelectAllVisible = useCallback(() => {
+        const visibleIds = filteredConns.map((c) => c.id);
+        const allSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id));
+        toggleSelectAll(visibleIds, !allSelected);
+    }, [filteredConns, selectedIds, toggleSelectAll]);
+
+    /** Runs an API call per selected connection sequentially, then reports a summary. */
+    const runBulk = useCallback(
+        async (label: string, fn: (conn: Connection) => Promise<unknown>, opts?: { clearAfter?: boolean }) => {
+            const targets = conns.filter((c) => selectedIds.has(c.id));
+            if (targets.length === 0) return;
+            setBulkBusy(label);
+            let done = 0;
+            const errors: string[] = [];
+            for (const conn of targets) {
+                try {
+                    await fn(conn);
+                    done++;
+                } catch (e) {
+                    errors.push(`${conn.name}: ${e instanceof Error ? e.message : 'failed'}`);
+                }
+            }
+            setBulkBusy(null);
+            if (errors.length > 0) {
+                toast.error(
+                    `${label}: ${done}/${targets.length} done. First error — ${errors[0]}${errors.length > 1 ? ` (+${errors.length - 1} more)` : ''}`,
+                );
+            } else {
+                toast.success(`${label}: ${done} connection${done === 1 ? '' : 's'}`);
+            }
+            if (opts?.clearAfter) setSelectedIds(new Set());
+            await load();
+        },
+        [conns, selectedIds, load],
+    );
+
+    const handleBulkAction = useCallback(
+        (action: BulkAction) => {
+            if (action === 'models') setBulkModelsOpen(true);
+            else if (action === 'delete') setBulkDeleteOpen(true);
+            else if (action === 'enable') void runBulk('Enable', (c) => api.updateConnection(c.id, { isActive: true }));
+            else if (action === 'disable') void runBulk('Disable', (c) => api.updateConnection(c.id, { isActive: false }));
+        },
+        [runBulk],
+    );
+
+    const handleBulkDeleteConfirm = useCallback(async () => {
+        await runBulk('Delete', (c) => api.deleteConnection(c.id), { clearAfter: true });
+        setBulkDeleteOpen(false);
+    }, [runBulk]);
+
+    const handleBulkModelsApply = useCallback(
+        async (models: string[]) => {
+            setBulkModelsOpen(false);
+            await runBulk('Update models', (c) =>
+                api.updateConnection(c.id, {
+                    supportedModels: models.map((m) => stripModelForConnection(m, c)),
+                    setModels: true,
+                }),
+            );
+        },
+        [runBulk],
+    );
+
     return (
         <div className="space-y-6">
             {/* Header */}
@@ -226,6 +333,16 @@ export default function ConnectionsScreen() {
                             issues={connectionStats.needsAttention}
                             onChange={setStatusFilter}
                         />
+                        <Button
+                            variant={selectionMode ? 'secondary' : 'outline'}
+                            size="sm"
+                            className="h-8 shrink-0 gap-1.5 text-xs"
+                            aria-pressed={selectionMode}
+                            onClick={() => (selectionMode ? exitSelectionMode() : setSelectionMode(true))}
+                        >
+                            <ListChecks className="h-3.5 w-3.5" />
+                            {selectionMode ? 'Exit Select' : 'Select'}
+                        </Button>
                     </div>
                     <div className="flex flex-col gap-2 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
                         <span>
@@ -248,6 +365,22 @@ export default function ConnectionsScreen() {
                         </div>
                     </div>
                 </div>
+            )}
+
+            {/* Bulk action bar (selection mode) */}
+            {selectionMode && conns.length > 0 && (
+                <BulkActionBar
+                    selectedCount={selectedIds.size}
+                    visibleCount={filteredConns.length}
+                    allVisibleSelected={
+                        filteredConns.length > 0 && filteredConns.every((c) => selectedIds.has(c.id))
+                    }
+                    busy={bulkBusy}
+                    onToggleSelectAll={toggleSelectAllVisible}
+                    onClearSelection={() => setSelectedIds(new Set())}
+                    onExit={exitSelectionMode}
+                    onAction={handleBulkAction}
+                />
             )}
 
             {/* List */}
@@ -304,6 +437,10 @@ export default function ConnectionsScreen() {
                             onEditModels={setEditModelsConn}
                             onEditConnection={setEditConn}
                             onViewDetails={setDetailConn}
+                            selectionMode={selectionMode}
+                            selectedIds={selectedIds}
+                            onToggleSelect={toggleSelect}
+                            onToggleSelectAll={toggleSelectAll}
                         />
                     ))}
                 </div>
@@ -348,6 +485,22 @@ export default function ConnectionsScreen() {
                     target={deleteTarget}
                     onConfirm={handleDeleteConfirm}
                     onClose={() => setDeleteTarget(null)}
+                />
+            )}
+            {bulkModelsOpen && (
+                <BulkModelsModal
+                    connections={conns.filter((c) => selectedIds.has(c.id))}
+                    busy={bulkBusy !== null}
+                    onApply={handleBulkModelsApply}
+                    onClose={() => setBulkModelsOpen(false)}
+                />
+            )}
+            {bulkDeleteOpen && (
+                <BulkDeleteDialog
+                    names={conns.filter((c) => selectedIds.has(c.id)).map((c) => c.name)}
+                    busy={bulkBusy !== null}
+                    onConfirm={handleBulkDeleteConfirm}
+                    onClose={() => setBulkDeleteOpen(false)}
                 />
             )}
         </div>

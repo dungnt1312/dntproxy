@@ -10,6 +10,9 @@ const PROVIDER_PREFIX_LABELS: Record<string, string> = {
   qwen: "Qwen",
   anthropic: "Anthropic",
   gemini: "Gemini",
+  cmc: "Command Code",
+  cmd: "Command Code",
+  commandcode: "Command Code",
 };
 
 export function parseRoutingTarget(target: string) {
@@ -35,11 +38,13 @@ export function getTargetDisplay(target: string, models: UiModel[], connections:
 export function providerPrefixToProvider(prefix: string): string {
   if (prefix === "kr") return "kiro";
   if (prefix === "oai") return "openai";
+  if (prefix === "cmc" || prefix === "cmd" || prefix === "commandcode") return "commandcode";
   return prefix;
 }
 
 export function providerToRoutingPrefix(provider: string): string {
   if (provider === "kiro") return "kr";
   if (provider === "openai") return "oai";
+  if (provider === "commandcode" || provider === "cmd" || provider === "cmc") return "cmc";
   return provider;
 }

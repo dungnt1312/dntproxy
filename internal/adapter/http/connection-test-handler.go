@@ -2,6 +2,7 @@ package http
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/dungnt/dntproxy/internal/adapter/auth"
+	"github.com/dungnt/dntproxy/internal/adapter/commandcode"
 	"github.com/dungnt/dntproxy/internal/adapter/kiro"
 	openai "github.com/dungnt/dntproxy/internal/adapter/openai"
 	"github.com/dungnt/dntproxy/internal/adapter/shared"
@@ -165,6 +167,9 @@ func testProviderAPI(conn *domain.ProviderConnection) testProviderResult {
 	if cfg.Format == domain.FormatImageAPI {
 		return testImageProviderAPI(conn, cfg)
 	}
+	if cfg.Format == domain.FormatCommandCode {
+		return testCommandCodeAPI(conn, cfg)
+	}
 
 	baseURL := conn.BaseURL
 	if baseURL == "" {
@@ -288,6 +293,40 @@ func testImageProviderAPI(conn *domain.ProviderConnection, cfg domain.ProviderCo
 	}
 	return testProviderResult{OK: false, Error: fmt.Sprintf("Non-generative probe returned HTTP %d: %s", resp.StatusCode, string(body))}
 }
+
+func testCommandCodeAPI(conn *domain.ProviderConnection, cfg domain.ProviderConfig) testProviderResult {
+	testModel := cfg.UI.DefaultTestModel
+	if testModel == "" && len(conn.SupportedModels) > 0 {
+		testModel = conn.SupportedModels[0]
+	}
+	if testModel == "" {
+		testModel = "deepseek/deepseek-v4-pro"
+	}
+	body := []byte(`{"model":"` + testModel + `","messages":[{"role":"user","content":"ping"}],"max_tokens":8,"stream":true}`)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	reader, status, err := commandcode.NewExecutor().Execute(ctx, testModel, body, &domain.Credentials{
+		Provider: conn.Provider,
+		APIKey:   conn.APIKey,
+		BaseURL:  conn.BaseURL,
+	}, noopRequestLogger{})
+	if err != nil {
+		return testProviderResult{OK: false, Error: err.Error()}
+	}
+	defer reader.Close()
+	preview, _ := io.ReadAll(io.LimitReader(reader, 2048))
+	if status != http.StatusOK {
+		return testProviderResult{OK: false, Error: fmt.Sprintf("HTTP %d: %s", status, string(preview))}
+	}
+	return testProviderResult{OK: true, Response: "HTTP 200 OK"}
+}
+
+type noopRequestLogger struct{}
+
+func (noopRequestLogger) Upstream(url, method string, status int, duration time.Duration, err error) {
+}
+func (noopRequestLogger) SetUsage(input, output int, source string) {}
+func (noopRequestLogger) SetBodies(reqBody, respBody string)        {}
 
 func providerTestURL(conn *domain.ProviderConnection, cfg domain.ProviderConfig) string {
 	baseURL := conn.BaseURL

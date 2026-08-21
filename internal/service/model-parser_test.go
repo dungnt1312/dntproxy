@@ -106,6 +106,36 @@ func TestParseModelString(t *testing.T) {
 	}
 }
 
+func TestParseModelStringCommandCodePrefix(t *testing.T) {
+	parsed, err := ParseModelString("cmc/deepseek/deepseek-v4-pro")
+	if err != nil {
+		t.Fatalf("ParseModelString() error = %v", err)
+	}
+	if parsed.Provider != "commandcode" {
+		t.Fatalf("provider = %q, want commandcode", parsed.Provider)
+	}
+	if parsed.Model != "deepseek/deepseek-v4-pro" {
+		t.Fatalf("model = %q", parsed.Model)
+	}
+	if parsed.ProviderAlias != "cmc" {
+		t.Fatalf("alias = %q, want cmc", parsed.ProviderAlias)
+	}
+	legacy, err := ParseModelString("cmd/deepseek-v4-pro")
+	if err != nil {
+		t.Fatalf("legacy cmd prefix: %v", err)
+	}
+	if legacy.Provider != "commandcode" {
+		t.Fatalf("legacy provider = %q", legacy.Provider)
+	}
+	full, err := ParseModelString("commandcode/Qwen/Qwen3.7-Max@conn-1")
+	if err != nil {
+		t.Fatalf("ParseModelString() error = %v", err)
+	}
+	if full.Provider != "commandcode" || full.Model != "Qwen/Qwen3.7-Max" || full.ConnectionID != "conn-1" {
+		t.Fatalf("parsed = %+v", full)
+	}
+}
+
 func TestParseModelStringGrokPrefix(t *testing.T) {
 	parsed, err := ParseModelString("grok/grok-4.3@conn-xai")
 	if err != nil {

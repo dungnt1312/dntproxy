@@ -7,7 +7,7 @@ import {
   Eraser,
   Trash2,
   Loader2,
-  Lock,
+  Check,
   TerminalSquare,
   Edit3,
   ExternalLink,
@@ -48,6 +48,9 @@ interface ConnectionCardProps {
   onEditModels: (conn: Connection) => void;
   onEditConnection?: (conn: Connection) => void;
   onViewDetails?: (conn: Connection) => void;
+  selectionMode?: boolean;
+  selected?: boolean;
+  onToggleSelect?: (id: string) => void;
 }
 
 export default function ConnectionCard({
@@ -58,6 +61,9 @@ export default function ConnectionCard({
   onEditModels,
   onEditConnection,
   onViewDetails,
+  selectionMode = false,
+  selected = false,
+  onToggleSelect,
 }: ConnectionCardProps) {
   const [testResult, setTestResult] = useState<TestConnectionResult | null>(null);
   const [quotaResult, setQuotaResult] = useState<UsageData | null>(
@@ -174,14 +180,14 @@ export default function ConnectionCard({
       );
     if (hasIssue)
       return (
-        <Badge
-          variant="outline"
-          className="bg-destructive/10 text-destructive dark:text-red-400 border-destructive/20 cursor-pointer hover:bg-destructive/20"
+        <button
+          type="button"
           onClick={() => setIsLogOpen(true)}
           title={c.lastError || "View logs"}
+          className="inline-flex items-center rounded-md border border-destructive/20 bg-destructive/10 px-2 py-0.5 text-[10px] font-medium text-destructive transition-colors hover:bg-destructive/20 cursor-pointer"
         >
           Error · Logs
-        </Badge>
+        </button>
       );
     return (
       <Badge
@@ -202,10 +208,31 @@ export default function ConnectionCard({
           hasIssue &&
             c.isActive &&
             "border-destructive/30 shadow-destructive/10",
+          selectionMode && selected && "border-primary/50 ring-1 ring-primary/40",
         )}
       >
         <CardHeader className="p-3 pb-2 flex flex-row items-center justify-between gap-3 space-y-0 relative">
           <div className="flex items-center gap-3 min-w-0">
+            {selectionMode && onToggleSelect && (
+              <button
+                type="button"
+                role="checkbox"
+                aria-checked={selected}
+                aria-label={`Select ${c.name}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onToggleSelect(c.id);
+                }}
+                className={cn(
+                  "flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded border transition-colors",
+                  selected
+                    ? "border-primary bg-primary text-primary-foreground"
+                    : "border-input bg-background hover:border-primary/50",
+                )}
+              >
+                {selected && <Check className="h-3 w-3" aria-hidden="true" />}
+              </button>
+            )}
             <div className="shrink-0 rounded-md overflow-hidden flex shadow-sm">
               {providerInfo.icon}
             </div>
@@ -235,11 +262,10 @@ export default function ConnectionCard({
           {/* Metrics / Quota Section */}
           <div className="flex flex-col gap-2">
             <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground pl-0.5">
-              <Lock className="h-3 w-3 shrink-0" />
               <TokenBar conn={c} />
               <button
                 type="button"
-                className="ml-auto font-medium text-muted-foreground hover:text-foreground cursor-pointer transition-colors underline decoration-dashed underline-offset-[3px]"
+                className="ml-auto -mr-1 rounded px-1.5 py-1 font-medium text-muted-foreground hover:text-foreground cursor-pointer transition-colors underline decoration-dashed underline-offset-[3px]"
                 onClick={(e) => {
                   e.stopPropagation();
                   onEditModels(c);
@@ -272,10 +298,11 @@ export default function ConnectionCard({
                   <Button
                     variant="secondary"
                     size="sm"
-                    className="h-5 text-[10px] px-2 font-medium"
+                    className="h-6 text-[10px] px-2.5 font-medium"
                     onClick={handleCheckQuota}
+                    title="Load quota for this connection"
                   >
-                    Load
+                    Load Quota
                   </Button>
                 </div>
               )}
@@ -304,6 +331,7 @@ export default function ConnectionCard({
 
             {testResult && !testResult.loading && (
               <span
+                role="status"
                 className={cn(
                   "text-[10px] font-medium px-2 py-1 rounded-md truncate max-w-[80px]",
                   testResult.status === "ok"

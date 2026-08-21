@@ -14,6 +14,7 @@ import (
 	"github.com/dungnt/dntproxy/internal/adapter/anthropic"
 	"github.com/dungnt/dntproxy/internal/adapter/byteplus"
 	"github.com/dungnt/dntproxy/internal/adapter/cline"
+	"github.com/dungnt/dntproxy/internal/adapter/commandcode"
 	geminiAdapter "github.com/dungnt/dntproxy/internal/adapter/gemini"
 
 	httpAdapter "github.com/dungnt/dntproxy/internal/adapter/http"
@@ -119,6 +120,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	providers.RegisterExecutor("anthropic", anthropic.NewExecutor())
 	providers.RegisterExecutor("cline", cline.NewExecutor())
+	providers.RegisterExecutor("commandcode", commandcode.NewExecutor())
 	providers.RegisterExecutor("gemini", openaiAdapter.NewExecutor())
 	providers.RegisterExecutor("xai", xai.NewExecutor())
 	imageProviders := provider.NewImageRegistry()

@@ -23,7 +23,8 @@ import (
 // It embeds ProviderConnection and adds computed fields from provider config.
 type connectionView struct {
 	domain.ProviderConnection
-	SupportsQuota bool `json:"supportsQuota"`
+	SupportsQuota bool   `json:"supportsQuota"`
+	PublicPrefix  string `json:"publicPrefix,omitempty"`
 }
 
 // redactConnectionSecrets strips credential material from list/detail API
@@ -78,6 +79,7 @@ func apiListConnections(store port.CredentialStore) gin.HandlerFunc {
 			views[i] = connectionView{
 				ProviderConnection: displayConn,
 				SupportsQuota:      supportsQuota,
+				PublicPrefix:       domain.PublicProviderPrefix(conn.Provider),
 			}
 		}
 		c.JSON(200, views)

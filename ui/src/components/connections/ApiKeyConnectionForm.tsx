@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useId } from 'react';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -65,24 +65,41 @@ export function ApiKeyConnectionForm({ provider, loading, onSubmit }: Props) {
 
   const accent = getProviderMeta(provider.id).accentClass;
   const showModels = provider.ui.supportsModelSelect;
+  const modelsInputId = useId();
 
   const ordered = fields.filter((f) => f.name !== 'supportedModels');
 
   return (
-    <div className="space-y-3 max-w-lg mx-auto">
+    <form
+      className="space-y-3 max-w-lg mx-auto"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!loading && canSubmit) void handleSubmit();
+      }}
+    >
       {ordered.map((f) => (
         <DynamicFormField key={f.name} field={f} value={values[f.name] ?? ''} onChange={(v) => set(f.name, v)} />
       ))}
       {showModels && (
-        <Textarea
-          value={values.supportedModels ?? ''}
-          onChange={(e) => set('supportedModels', e.target.value)}
-          placeholder="Supported Models (one per line, optional — defaults from provider)"
-          rows={3}
-          className="text-xs font-mono"
-        />
+        <div className="space-y-1">
+          <label htmlFor={modelsInputId} className="text-xs font-medium">
+            Supported Models{' '}
+            <span className="font-normal text-muted-foreground">(one per line, optional)</span>
+          </label>
+          <Textarea
+            id={modelsInputId}
+            name="supportedModels"
+            value={values.supportedModels ?? ''}
+            onChange={(e) => set('supportedModels', e.target.value)}
+            placeholder="Defaults from provider when empty…"
+            autoComplete="off"
+            spellCheck={false}
+            rows={3}
+            className="text-xs font-mono"
+          />
+        </div>
       )}
-      <Button onClick={() => void handleSubmit()} disabled={loading || !canSubmit} size="sm" className={cn('w-full', accent)}>
+      <Button type="submit" disabled={loading || !canSubmit} size="sm" className={cn('w-full', accent)}>
         {loading ? (
           <>
             <Loader2 size={13} className="animate-spin mr-2" />
@@ -92,6 +109,6 @@ export function ApiKeyConnectionForm({ provider, loading, onSubmit }: Props) {
           `Add ${provider.name} Connection`
         )}
       </Button>
-    </div>
+    </form>
   );
 }

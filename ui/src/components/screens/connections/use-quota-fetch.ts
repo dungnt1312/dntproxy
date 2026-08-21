@@ -80,12 +80,25 @@ export function useQuotaFetch({
         [groupedConns, onConnectionsUpdate],
     );
 
+    // When auto-refresh is toggled on, proactively load quotas for every visible group
+    // instead of only affecting groups that were already loaded manually.
+    useEffect(() => {
+        if (!autoRefreshQuota) return;
+        groupedConns.forEach((group) => {
+            if (fetchedGroups[group.id] || fetchingGroups[group.id]) return;
+            if (group.items.some((c) => c.isActive)) {
+                void handleFetchGroupQuota(group.id);
+            }
+        });
+        // Run only when the toggle flips, not on every data change.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [autoRefreshQuota]);
+
     // ── Auto-refresh: only for groups that were explicitly fetched ──────────────
     useEffect(() => {
         if (!autoRefreshQuota) return;
         const fetchedGroupIds = Object.keys(fetchedGroups);
         if (fetchedGroupIds.length === 0) return;
-
         const refreshFetchedGroupsQuota = async () => {
             if (quotaRefreshInFlightRef.current) return;
             quotaRefreshInFlightRef.current = true;

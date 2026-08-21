@@ -3,6 +3,16 @@ import { api } from '../api';
 import type { ProviderConfigMeta } from '../types/provider-metadata';
 import { PROVIDER_META, PROVIDER_ORDER } from './provider-registry';
 
+// Offline fallback must mirror the server's auth flows; showing e.g. an API-key
+// form for OAuth-only providers would silently mislead users.
+const FALLBACK_AUTH_FLOWS: Record<string, string[]> = {
+  kiro: ['oauth', 'file'],
+  openai: ['oauth', 'apikey'],
+  xai: ['oauth', 'file'],
+  qwen: ['oauth', 'apikey'],
+  commandcode: ['apikey', 'file'],
+};
+
 function fallbackCatalog(): ProviderConfigMeta[] {
   return PROVIDER_ORDER.filter((id) => PROVIDER_META[id]?.canAdd !== false).map((id) => {
     const m = PROVIDER_META[id];
@@ -10,7 +20,7 @@ function fallbackCatalog(): ProviderConfigMeta[] {
       id,
       name: m.label,
       icon: id,
-      authMethods: ['apikey'],
+      authMethods: FALLBACK_AUTH_FLOWS[id] ?? ['apikey'],
       defaultBaseUrl: '',
       recommendedModels: [],
       format: 'openai-chat',
@@ -19,7 +29,7 @@ function fallbackCatalog(): ProviderConfigMeta[] {
         category: 'cloud',
         description: m.description ?? m.label,
         showBaseUrlField: !['openai', 'kiro', 'xai'].includes(id),
-        authFlows: ['apikey'],
+        authFlows: FALLBACK_AUTH_FLOWS[id] ?? ['apikey'],
         formFields: [
           { name: 'name', label: 'Connection Name', type: 'text', required: false },
           { name: 'apiKey', label: 'API Key', type: 'password', required: true, secret: true },

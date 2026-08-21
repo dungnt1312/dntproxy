@@ -351,6 +351,12 @@ export const goApi: any = {
   detectKiroToken: () =>
     goRequest("/connections/detect-kiro", { method: "POST" }),
 
+  detectCommandCodeAuth: (data?: { import?: boolean }) =>
+    goRequest("/connections/detect-commandcode", {
+      method: "POST",
+      body: JSON.stringify(data ?? {}),
+    }),
+
   checkQuota: (id: string) =>
     goRequest(`/connections/${id}/check-quota`, { method: "POST" }),
 

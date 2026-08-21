@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { getProviderLabel } from "@/lib/provider-registry";
+import { getProviderLabel, providersMatch } from "@/lib/provider-registry";
 import type { ConnectionOption, UiModel } from "./types";
 import type { ComboStep } from "./combo-step-builder";
 import { getModelDisplayName, getModelSearchText, isRegistryModel } from "./model-display";
@@ -45,7 +45,10 @@ export function ComboStepForm({
     .filter((model) => !q || getModelSearchText(model).includes(q))
     .slice(0, 60);
   const availableAccounts = connections.filter(
-    (connection) => connection.provider === selectedProvider && connection.isActive !== false,
+    (connection) =>
+      connection.isActive !== false &&
+      (providersMatch(connection.provider, selectedProvider) ||
+        providersMatch((connection as { publicPrefix?: string }).publicPrefix, selectedProvider)),
   );
   const previewStep: ComboStep | null = selectedProvider && selectedModel
     ? {

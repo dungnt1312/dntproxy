@@ -11,7 +11,6 @@ import { RecentRequests } from './dashboard/recent-requests'
 import { formatCost, formatRelativeTime, formatTokens } from './dashboard/helpers'
 import type { Connection } from '@/types/connections'
 import type { LogConnectionSummary, LogEntry } from '@/types/logs'
-import type { AliasMap, ComboData } from '@/components/screens/routing/types'
 
 type DashboardRange = '24h' | '7d' | '30d' | '60d'
 type DashboardTab = 'overview' | 'details'
@@ -32,8 +31,6 @@ export default function DashboardScreen() {
   const [summary, setSummary] = useState<Summary | null>(null)
   const [connections, setConnections] = useState<Connection[]>([])
   const [connectionSummaries, setConnectionSummaries] = useState<LogConnectionSummary[]>([])
-  const [combos, setCombos] = useState<ComboData[]>([])
-  const [aliases, setAliases] = useState<AliasMap>({})
   const [requests, setRequests] = useState<LogEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [lastRefreshed, setLastRefreshed] = useState(Date.now())
@@ -41,19 +38,15 @@ export default function DashboardScreen() {
   const apiRange = RANGES.find(item => item.value === range)?.apiRange ?? '24h'
 
   const fetchData = useCallback(async () => {
-    const [nextSummary, nextConnections, nextConnectionSummaries, nextCombos, nextAliases, nextRequests] = await Promise.all([
+    const [nextSummary, nextConnections, nextConnectionSummaries, nextRequests] = await Promise.all([
       goApi.getLogSummary({ range: apiRange }).catch(() => null),
       goApi.getConnections().catch(() => []),
       goApi.getLogConnections({ range: apiRange }).catch(() => []),
-      goApi.getCombos().catch(() => []),
-      goApi.getAliases().catch(() => ({})),
       goApi.getLogs({ range: '24h', limit: 18 }).catch(() => []),
     ])
     if (nextSummary) setSummary({ totalRequests: nextSummary.totalRequests ?? 0, inputTokens: nextSummary.inputTokens ?? 0, outputTokens: nextSummary.outputTokens ?? 0, costTotal: nextSummary.costTotal ?? 0, errorRequests: nextSummary.errorRequests ?? 0 })
     setConnections(Array.isArray(nextConnections) ? nextConnections : [])
     setConnectionSummaries(Array.isArray(nextConnectionSummaries) ? nextConnectionSummaries : [])
-    setCombos(Array.isArray(nextCombos) ? nextCombos : [])
-    setAliases(nextAliases && typeof nextAliases === 'object' ? nextAliases : {})
     setRequests(Array.isArray(nextRequests) ? nextRequests : [])
     setLastRefreshed(Date.now())
     setLoading(false)
@@ -91,7 +84,7 @@ export default function DashboardScreen() {
           </>}
         </div>
         <div className="grid gap-3 lg:grid-cols-[minmax(0,1.9fr)_minmax(320px,0.95fr)]">
-          <RoutingTopology connections={connections} summaries={connectionSummaries} combos={combos} aliases={aliases} requests={requests} onNavigate={navigate} />
+          <RoutingTopology connections={connections} summaries={connectionSummaries} requests={requests} onNavigate={navigate} />
           <RecentRequests requests={requests} loading={loading} onViewAll={() => navigate('/logs')} />
         </div>
       </> : <Details summary={summary} connections={connections} requests={requests} loading={loading} lastRefreshed={lastRefreshed} onPlayground={() => navigate('/playground')} />}

@@ -91,7 +91,7 @@ export default function DashboardScreen() {
           </>}
         </div>
         <div className="grid gap-3 lg:grid-cols-[minmax(0,1.9fr)_minmax(320px,0.95fr)]">
-          <RoutingTopology connections={connections} summaries={connectionSummaries} combos={combos} aliases={aliases} onNavigate={navigate} />
+          <RoutingTopology connections={connections} summaries={connectionSummaries} combos={combos} aliases={aliases} requests={requests} onNavigate={navigate} />
           <RecentRequests requests={requests} loading={loading} onViewAll={() => navigate('/logs')} />
         </div>
       </> : <Details summary={summary} connections={connections} requests={requests} loading={loading} lastRefreshed={lastRefreshed} onPlayground={() => navigate('/playground')} />}

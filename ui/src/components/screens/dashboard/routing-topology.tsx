@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button'
 import { ProviderLogo } from '@/components/connections/ProviderLogo'
 import { cn } from '@/lib/utils'
 import type { Connection } from '@/types/connections'
-import type { LogConnectionSummary } from '@/types/logs'
+import type { LogConnectionSummary, LogEntry } from '@/types/logs'
 import type { AliasMap, ComboData } from '@/components/screens/routing/types'
 
 interface RoutingTopologyProps {
@@ -12,6 +12,7 @@ interface RoutingTopologyProps {
   summaries: LogConnectionSummary[]
   combos: ComboData[]
   aliases: AliasMap
+  requests: LogEntry[]
   onNavigate: (path: string) => void
 }
 
@@ -27,12 +28,19 @@ function modelLabel(model: string) {
   return model.replace(/^\w+\//, '').replace(/@.+$/, '') || model
 }
 
-export function RoutingTopology({ connections, summaries, combos, aliases, onNavigate }: RoutingTopologyProps) {
+export function RoutingTopology({ connections, summaries, combos, aliases, requests, onNavigate }: RoutingTopologyProps) {
   const [scale, setScale] = useState(1)
   const summaryByConnection = useMemo(() => new Map(summaries.map(summary => [summary.connectionId, summary])), [summaries])
+  const recentRequest = requests.find(request => request.model && request.connectionId)
+  const recentModel = recentRequest?.model || ''
+  const recentProvider = recentRequest?.provider || ''
   const primaryCombo = combos[0]
   const aliasEntries = Object.entries(aliases).slice(0, 2)
   const targetConnections = useMemo(() => {
+    if (recentRequest) {
+      const observed = connections.filter(connection => connection.provider === recentProvider || connection.id === recentRequest.connectionId)
+      return (observed.length ? observed : connections.filter(connection => connection.id === recentRequest.connectionId)).slice(0, 4)
+    }
     if (!primaryCombo) return connections.slice(0, 4)
     const pinnedIds = primaryCombo.models
       .map(model => model.split('@')[1])
@@ -41,9 +49,11 @@ export function RoutingTopology({ connections, summaries, combos, aliases, onNav
       pinnedIds.includes(connection.id) || primaryCombo.models.some(model => model.startsWith(`${connection.routePrefix || connection.provider}/`)),
     )
     return (compatible.length ? compatible : connections).slice(0, 4)
-  }, [connections, primaryCombo])
+  }, [connections, primaryCombo, recentProvider, recentRequest])
 
-  const sourceLabel = primaryCombo?.models[0] ? modelLabel(primaryCombo.models[0]) : aliasEntries[0]?.[0] || 'Incoming requests'
+  const sourceLabel = recentModel ? modelLabel(recentModel) : primaryCombo?.models[0] ? modelLabel(primaryCombo.models[0]) : aliasEntries[0]?.[0] || 'Incoming requests'
+  const routeLabel = recentModel ? (recentProvider || 'Observed route') : primaryCombo?.name || 'Router'
+  const routeDetail = recentModel ? 'recent traffic' : primaryCombo ? `${primaryCombo.models.length} route${primaryCombo.models.length === 1 ? '' : 's'}` : `${aliasEntries.length} alias${aliasEntries.length === 1 ? '' : 'es'}`
   const activeConnection = targetConnections.find(connection => nodeStatus(connection, summaryByConnection.get(connection.id)) === 'active')
   const hasConfig = primaryCombo || aliasEntries.length > 0 || targetConnections.length > 0
 
@@ -78,10 +88,10 @@ export function RoutingTopology({ connections, summaries, combos, aliases, onNav
             </svg>
 
             <div className="absolute left-1/2 top-10 -translate-x-1/2">
-              <GraphNode label={sourceLabel} detail={primaryCombo ? 'entry model' : 'alias route'} status="active" onClick={() => onNavigate(primaryCombo ? '/combos' : '/models')} />
+              <GraphNode label={sourceLabel} detail={recentModel ? 'observed model' : primaryCombo ? 'entry model' : 'alias route'} status="active" onClick={() => onNavigate(recentModel ? '/logs' : primaryCombo ? '/combos' : '/models')} />
             </div>
             <div className="absolute left-1/2 top-[166px] -translate-x-1/2">
-              <GraphNode label={primaryCombo?.name || 'Router'} detail={primaryCombo ? `${primaryCombo.models.length} route${primaryCombo.models.length === 1 ? '' : 's'}` : `${aliasEntries.length} alias${aliasEntries.length === 1 ? '' : 'es'}`} router status={activeConnection ? 'active' : 'standby'} onClick={() => onNavigate(primaryCombo ? '/combos' : '/models')} />
+              <GraphNode label={routeLabel} detail={routeDetail} router status={activeConnection || recentModel ? 'active' : 'standby'} onClick={() => onNavigate(recentModel ? '/logs' : primaryCombo ? '/combos' : '/models')} />
             </div>
             {targetConnections.map((connection, index) => {
               const left = targetConnections.length === 1 ? 50 : 18 + index * (64 / Math.max(targetConnections.length - 1, 1))

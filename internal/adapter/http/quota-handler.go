@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dungnt/dntproxy/internal/adapter/kiro"
 	"github.com/dungnt/dntproxy/internal/adapter/shared"
 	"github.com/dungnt/dntproxy/internal/domain"
 	"github.com/dungnt/dntproxy/internal/port"
@@ -65,7 +66,13 @@ func apiCheckQuota(store port.CredentialStore) gin.HandlerFunc {
 			return
 		}
 
-		// For providers without quota check support (GLM, Qwen, etc.)
+		// For GLM: reuse the canonical usage fetcher and flatten it to the legacy shape.
+		if conn.Provider == "glm" {
+			handleGLMQuota(c, conn, result)
+			return
+		}
+
+		// For providers without quota check support (Qwen, etc.)
 		providerCfg := domain.GetProviderConfig(conn.Provider)
 		c.JSON(200, gin.H{
 			"provider": conn.Provider,
@@ -112,14 +119,14 @@ func handleKiroQuota(c *gin.Context, conn *domain.ProviderConnection, result gin
 
 	if profileArn == "" {
 		req, _ := http.NewRequest("GET", "https://q.us-east-1.amazonaws.com/getUsageLimits?origin=AI_EDITOR&resourceType=AGENTIC_REQUEST", nil)
-		req.Header.Set("Authorization", "Bearer "+conn.AccessToken)
+		kiro.ApplyConnectionAuth(req.Header, conn)
 		req.Header.Set("Accept", "application/json")
 		qResp, err = client.Do(req)
 	} else {
 		payload := map[string]string{"origin": "AI_EDITOR", "profileArn": profileArn, "resourceType": "AGENTIC_REQUEST"}
 		payloadBytes, _ := json.Marshal(payload)
 		req, _ := http.NewRequest("POST", "https://codewhisperer.us-east-1.amazonaws.com", bytes.NewReader(payloadBytes))
-		req.Header.Set("Authorization", "Bearer "+conn.AccessToken)
+		kiro.ApplyConnectionAuth(req.Header, conn)
 		req.Header.Set("Content-Type", "application/x-amz-json-1.0")
 		req.Header.Set("x-amz-target", "AmazonCodeWhispererService.GetUsageLimits")
 		req.Header.Set("Accept", "application/json")
@@ -129,7 +136,7 @@ func handleKiroQuota(c *gin.Context, conn *domain.ProviderConnection, result gin
 			// Fallback to Q endpoint
 			qUrl := fmt.Sprintf("https://q.us-east-1.amazonaws.com/getUsageLimits?origin=AI_EDITOR&profileArn=%s&resourceType=AGENTIC_REQUEST", profileArn)
 			req2, _ := http.NewRequest("GET", qUrl, nil)
-			req2.Header.Set("Authorization", "Bearer "+conn.AccessToken)
+			kiro.ApplyConnectionAuth(req2.Header, conn)
 			req2.Header.Set("Accept", "application/json")
 			qResp, err = client.Do(req2)
 		}

@@ -16,6 +16,7 @@ import (
 
 	"github.com/dungnt/dntproxy/internal/adapter/auth"
 	"github.com/dungnt/dntproxy/internal/adapter/commandcode"
+	"github.com/dungnt/dntproxy/internal/adapter/kiro"
 	"github.com/dungnt/dntproxy/internal/adapter/shared"
 	"github.com/dungnt/dntproxy/internal/domain"
 	"github.com/dungnt/dntproxy/internal/port"
@@ -169,6 +170,8 @@ func (h *UsageHandler) fetchUsage(conn *domain.ProviderConnection) (*UsageRespon
 		return fetchXAIGrokChatUsage(conn)
 	case "commandcode":
 		return fetchCommandCodeUsage(conn)
+	case "glm":
+		return fetchGLMUsage(conn)
 	default:
 		return &UsageResponse{
 			Provider: conn.Provider,
@@ -233,7 +236,7 @@ func fetchKiroUsage(conn *domain.ProviderConnection) (*UsageResponse, error) {
 		// Builder-ID path: GET endpoint
 		req, _ := http.NewRequest("GET",
 			"https://q.us-east-1.amazonaws.com/getUsageLimits?origin=AI_EDITOR&resourceType=AGENTIC_REQUEST", nil)
-		req.Header.Set("Authorization", "Bearer "+conn.AccessToken)
+		kiro.ApplyConnectionAuth(req.Header, conn)
 		req.Header.Set("Accept", "application/json")
 		httpResp, err = client.Do(req)
 	} else {
@@ -243,7 +246,7 @@ func fetchKiroUsage(conn *domain.ProviderConnection) (*UsageResponse, error) {
 		})
 		req, _ := http.NewRequest("POST", "https://codewhisperer.us-east-1.amazonaws.com",
 			bytes.NewReader(payload))
-		req.Header.Set("Authorization", "Bearer "+conn.AccessToken)
+		kiro.ApplyConnectionAuth(req.Header, conn)
 		req.Header.Set("Content-Type", "application/x-amz-json-1.0")
 		req.Header.Set("x-amz-target", "AmazonCodeWhispererService.GetUsageLimits")
 		req.Header.Set("Accept", "application/json")
@@ -256,7 +259,7 @@ func fetchKiroUsage(conn *domain.ProviderConnection) (*UsageResponse, error) {
 				"https://q.us-east-1.amazonaws.com/getUsageLimits?origin=AI_EDITOR&profileArn=%s&resourceType=AGENTIC_REQUEST",
 				profileArn)
 			req2, _ := http.NewRequest("GET", qURL, nil)
-			req2.Header.Set("Authorization", "Bearer "+conn.AccessToken)
+			kiro.ApplyConnectionAuth(req2.Header, conn)
 			req2.Header.Set("Accept", "application/json")
 			httpResp, err = client.Do(req2)
 		}

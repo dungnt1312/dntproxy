@@ -157,10 +157,28 @@ func chatHandler(chatService port.ChatService, store port.CredentialStore, comp 
 			}
 		}
 
+		writeRetryAfterHeader(c, result.RetryAfter)
 		c.JSON(result.StatusCode, gin.H{
 			"error": gin.H{"message": result.Error},
 		})
 	}
+}
+
+// writeRetryAfterHeader converts an RFC3339 cooldown timestamp into an HTTP
+// Retry-After delta-seconds header. A past or unparseable value is skipped.
+func writeRetryAfterHeader(c *gin.Context, retryAfter string) {
+	if retryAfter == "" {
+		return
+	}
+	t, err := time.Parse(time.RFC3339, retryAfter)
+	if err != nil {
+		return
+	}
+	secs := int(time.Until(t).Seconds())
+	if secs <= 0 {
+		return
+	}
+	c.Header("Retry-After", strconv.Itoa(secs))
 }
 
 // sessionHeader returns the first non-empty client session header.

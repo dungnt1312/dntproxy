@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/dungnt/dntproxy/internal/adapter/kiro"
 	"github.com/dungnt/dntproxy/internal/adapter/shared"
 	"github.com/dungnt/dntproxy/internal/domain"
 	"github.com/dungnt/dntproxy/internal/port"
@@ -185,14 +186,23 @@ func convert9RouterConnection(target string, source domain.ProviderConnection) (
 		conn.ProviderSpecificData = providerData
 
 	case "kiro":
-		if source.AuthType != "oauth" {
-			return domain.ProviderConnection{}, fmt.Errorf("kiro requires oauth, got %s", source.AuthType)
+		if source.AuthType != "oauth" && source.AuthType != "apikey" {
+			return domain.ProviderConnection{}, fmt.Errorf("kiro requires oauth or apikey, got %s", source.AuthType)
 		}
 		providerData := map[string]interface{}{}
 		for _, key := range []string{"authMethod", "clientId", "clientSecret", "provider", "region", "profileArn"} {
 			if value, ok := source.ProviderSpecificData[key]; ok {
 				providerData[key] = value
 			}
+		}
+		// API-key accounts carry the key itself rather than a refreshable token.
+		// 9router stores it as the access token, so accept either field.
+		if source.AuthType == "apikey" {
+			conn.APIKey = source.APIKey
+			if conn.APIKey == "" {
+				conn.APIKey = source.AccessToken
+			}
+			providerData["authMethod"] = kiro.AuthMethodAPIKey
 		}
 		conn.ProviderSpecificData = providerData
 

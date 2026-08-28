@@ -92,7 +92,7 @@ var ProviderConfigs = map[string]ProviderConfig{
 		ID:             "kiro",
 		Name:           "Kiro (AWS CodeWhisperer)",
 		Icon:           "kr",
-		AuthMethods:    []string{"oauth"},
+		AuthMethods:    []string{"oauth", "apikey"},
 		DefaultBaseURL: "https://codewhisperer.us-east-1.amazonaws.com",
 		ChatPath:       "", // Uses AWS EventStream, not HTTP
 		RecommendedModels: []string{
@@ -103,11 +103,15 @@ var ProviderConfigs = map[string]ProviderConfig{
 		SupportsQuota: true,
 		UI: ProviderUI{
 			Category:            "cloud",
-			Description:         "Amazon CodeWhisperer / Kiro with OAuth (Builder ID, IDC, Social)",
+			Description:         "Amazon CodeWhisperer / Kiro with OAuth (Builder ID, IDC, Social) or a long-lived API key",
 			DocsURL:             "https://docs.aws.amazon.com/codewhisperer/latest/userguide/",
 			ShowBaseURLField:    false,
-			PreferredAuthMethod: "oauth",
-			AuthFlows:           []string{"import", "oauth-device", "social"},
+			PreferredAuthMethod: "builder-id",
+			// These ids must match the panels the Kiro setup form renders, and
+			// PreferredAuthMethod must be one of them. A coarser list silently
+			// strips panels from the UI (IDC and token import were unreachable),
+			// and an unlisted preference leaves every method chip unselected.
+			AuthFlows:           []string{"builder-id", "social", "idc", "apikey", "import"},
 			FormFields: []FormField{
 				{Name: "name", Label: "Connection Name", Type: FieldTypeText, Required: false},
 			},
@@ -189,7 +193,7 @@ var ProviderConfigs = map[string]ProviderConfig{
 		ChatPath:          "/api/coding/paas/v4/chat/completions",
 		RecommendedModels: []string{"glm-5.2", "glm-5.1", "glm-5", "glm-4.7-flash"},
 		Format:            FormatOpenAIChat,
-		SupportsQuota:     false,
+		SupportsQuota:     true,
 		UI: ProviderUI{
 			Category:            "cloud",
 			Description:         "Zhipu AI GLM models",
@@ -259,7 +263,10 @@ var ProviderConfigs = map[string]ProviderConfig{
 			BaseURLLabel:        "Base URL",
 			BaseURLPlaceholder:  "https://portal.qwen.ai",
 			PreferredAuthMethod: "oauth",
-			AuthFlows:           []string{"apikey", "oauth-device"},
+			// "oauth", not "oauth-device": the Qwen form renders its device-code
+			// panel behind mode === "oauth", so advertising the finer id made the
+			// OAuth chip select a panel that does not exist.
+			AuthFlows:           []string{"apikey", "oauth"},
 			FormFields: []FormField{
 				{Name: "name", Label: "Connection Name", Type: FieldTypeText, Required: false},
 				{Name: "apiKey", Label: "API Key", Type: FieldTypePassword, Required: true, Secret: true},

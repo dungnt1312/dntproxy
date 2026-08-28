@@ -99,6 +99,7 @@ func RegisterAuthRoutes(api *gin.RouterGroup, store port.CredentialStore) {
 		authGroup.POST("/kiro/poll", authPoll(store))
 		authGroup.POST("/kiro/start-social", authStartSocial())
 		authGroup.POST("/kiro/exchange-social", authExchangeSocial(store))
+		authGroup.POST("/kiro/api-key", authKiroAPIKey(store))
 
 		// OpenAI OAuth (PKCE, Authorization Code)
 		authGroup.POST("/openai/start", authOpenAIStart())

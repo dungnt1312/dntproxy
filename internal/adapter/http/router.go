@@ -141,7 +141,13 @@ func serveStaticUI(r *gin.Engine) {
 	// Serve static assets under /dashboard
 	r.StaticFS("/dashboard/assets", newPrefixFS(uiFS, "assets"))
 
-	// Serve index.html at /dashboard root
+	// Serve index.html at /dashboard root.
+	//
+	// index.html must never be cached: it is the only file whose name is stable
+	// across builds, and it carries the hashed asset URLs. A cached copy keeps
+	// pointing at a previous bundle, so a deploy silently has no effect in the
+	// browser until a manual hard refresh. The hashed assets themselves are
+	// immutable and stay cacheable.
 	serveIndex := func(c *gin.Context) {
 		f, err := uiFS.Open("index.html")
 		if err != nil {
@@ -150,6 +156,7 @@ func serveStaticUI(r *gin.Engine) {
 		}
 		defer f.Close()
 		stat, _ := f.Stat()
+		c.Header("Cache-Control", "no-store, must-revalidate")
 		http.ServeContent(c.Writer, c.Request, "index.html", stat.ModTime(), f.(readSeeker))
 	}
 	r.GET("/dashboard", serveIndex)

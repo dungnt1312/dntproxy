@@ -80,7 +80,7 @@ internal/logger/                → Structured logging (ring buffer + SQLite)
 
 | Provider | ID | Auth Methods | Base URL | Protocol |
 |----------|-----|--------------|----------|----------|
-| Kiro (AWS CodeWhisperer) | `kiro` | oauth | codewhisperer.us-east-1.amazonaws.com | aws-eventstream |
+| Kiro (AWS CodeWhisperer) | `kiro` | oauth, apikey | codewhisperer.us-east-1.amazonaws.com | aws-eventstream |
 | OpenAI | `openai` | apikey, oauth | api.openai.com | openai-chat |
 | OpenAI Compatible | `openai-compatible` | apikey | configurable | openai-chat |
 | GLM (Zhipu AI) | `glm` | apikey | api.z.ai | openai-chat |
@@ -145,6 +145,7 @@ go build -o dntproxy ./cmd/dntproxy/
 - `POST /api/tunnel/disable` — Disable Cloudflare tunnel
 - `GET /api/tunnel/status` — Get tunnel status
 - `GET /api/quota` — Quota check
+- `POST /api/auth/kiro/api-key` — Enroll a long-lived Kiro API key
 
 ## Model Format
 
@@ -207,6 +208,22 @@ OpenAI request → model resolve → combo expand → account select →
 - Frame format: 4B total length + 4B headers length + 4B prelude CRC + headers + payload + 4B message CRC
 - Event types: `assistantResponseEvent`, `codeEvent`, `toolUseEvent`, `messageStopEvent`, `contextUsageEvent`, `meteringEvent`, `metricsEvent`
 - Token usage: from `metricsEvent`, fallback to estimation from `contextUsageEvent`
+
+#### Kiro API Key Auth (`authMethod: api_key`)
+- Enroll via `POST /api/auth/kiro/api-key` with `{ apiKey, region?, name? }`; the key is
+  validated against `GET https://q.<region>.amazonaws.com/ListAvailableModels?origin=AI_EDITOR`
+  (`ListAvailableProfiles` does not accept API keys)
+- The key is stored verbatim and sent as `Authorization: Bearer <key>` plus `TokenType: API_KEY`.
+  There is no token exchange and no refresh token, so `expiresAt` is set 365 days out to keep the
+  proactive refresh loop from firing
+- Endpoint order is credential-dependent (`internal/adapter/kiro/endpoints.go`): API keys try
+  `q.<region>` first then `codewhisperer.<region>`, because CodeWhisperer authenticates the key
+  but rejects the identical payload with a terminal 400 `REQUEST_BODY_INVALID`. OAuth accounts stay
+  pinned to `codewhisperer.us-east-1` only. 401/403/404 advance to the next surface; 400/422 are terminal
+- `X-Amz-Target` is set only on `codewhisperer.*` hosts — the Q surface rejects requests carrying it
+- No `profileArn` is sent for API keys; Kiro resolves the profile from the key's own account, and a
+  shared default ARN would produce 403 "bearer token invalid"
+- Quota/usage (`GetUsageLimits`) needs the same `TokenType: API_KEY` header or it answers 401/403
 
 ### Cloudflare Tunnel
 - Auto-downloads cloudflared binary (v2026.3.0) on first use

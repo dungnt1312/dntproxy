@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/sheet';
 import { ProviderLogoIcon } from '@/components/connections/helpers';
 import { getProviderLabel } from '@/lib/provider-registry';
+import { hasBackoff, isExpired, isRateLimited } from '@/lib/connection-status';
 import type { Connection } from '@/types/connections';
 
 interface ConnectionDetailSheetProps {
@@ -37,14 +38,6 @@ function Row({ label, value }: { label: string; value?: string | number | null }
   );
 }
 
-function isRateLimited(c: Connection) {
-  return Boolean(c.rateLimitedUntil && new Date(c.rateLimitedUntil) > new Date());
-}
-
-function isExpired(c: Connection) {
-  return Boolean(c.expiresAt && new Date(c.expiresAt) < new Date());
-}
-
 export function ConnectionDetailSheet({
   connection,
   open,
@@ -57,7 +50,7 @@ export function ConnectionDetailSheet({
 
   const rateLimited = isRateLimited(c);
   const expired = isExpired(c);
-  const cooldown = (c.backoffLevel ?? 0) > 0;
+  const cooldown = hasBackoff(c);
   const hasIssue = rateLimited || expired || cooldown || Boolean(c.lastError);
 
   return (

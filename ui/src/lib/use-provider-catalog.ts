@@ -6,7 +6,7 @@ import { PROVIDER_META, PROVIDER_ORDER } from './provider-registry';
 // Offline fallback must mirror the server's auth flows; showing e.g. an API-key
 // form for OAuth-only providers would silently mislead users.
 const FALLBACK_AUTH_FLOWS: Record<string, string[]> = {
-  kiro: ['oauth', 'file'],
+  kiro: ['builder-id', 'social', 'idc', 'apikey', 'import'],
   openai: ['oauth', 'apikey'],
   xai: ['oauth', 'file'],
   qwen: ['oauth', 'apikey'],

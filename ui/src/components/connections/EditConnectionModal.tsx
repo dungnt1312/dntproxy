@@ -11,6 +11,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { SecretInput } from '@/components/ui/secret-input'
 import type { Connection } from '@/types/connections'
 
 interface EditConnectionModalProps {
@@ -90,14 +91,13 @@ export default function EditConnectionModal({ conn, onSuccess, onClose }: EditCo
 
             <div className="space-y-1">
               <Label className="text-xs">API Key <span className="opacity-70 font-normal">(leave blank to keep current)</span></Label>
-              <Input
-                type="password"
+              <SecretInput
+                name="connection-api-key"
+                revealLabel="API key"
                 value={apiKey}
                 onChange={e => setApiKey(e.target.value)}
                 placeholder="Enter new API key"
                 className="text-xs font-mono"
-                autoComplete="new-password"
-                data-1p-ignore
               />
             </div>
 

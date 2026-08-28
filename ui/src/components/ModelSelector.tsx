@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Plus, X, Search, Check, Loader2 } from 'lucide-react'
+import { Plus, X, Search, Check, Loader2, CheckCircle2, XCircle, TestTube } from 'lucide-react'
 import { api } from '../api'
 import { getModelProviderId } from '@/lib/provider-registry'
 
@@ -9,12 +9,27 @@ interface RegistryModel {
   provider: string
 }
 
+export interface ModelTestState {
+  status: 'ok' | 'error' | 'loading'
+  message?: string
+}
+
+export interface ModelSelectorTestProps {
+  results: Record<string, ModelTestState>
+  onTest: (modelId: string) => void
+  onTestAll?: () => void
+  running?: boolean
+  progress?: string
+}
+
 interface ModelSelectorProps {
   selected: string[]
   onChange: (models: string[]) => void
   provider?: string
   routePrefix?: string
   allowedModels?: string[]
+  /** When provided, each selected model tag gets an inline test button. */
+  test?: ModelSelectorTestProps
 }
 
 export default function ModelSelector({
@@ -23,6 +38,7 @@ export default function ModelSelector({
   provider,
   routePrefix,
   allowedModels,
+  test,
 }: ModelSelectorProps) {
   const [customInput, setCustomInput] = useState('')
   const [showCustomInput, setShowCustomInput] = useState(false)
@@ -104,70 +120,100 @@ export default function ModelSelector({
     setShowCustomInput(false)
   }
 
+  const testIcon = (state: ModelTestState | undefined) => {
+    if (!test) return null
+    if (state?.status === 'loading') return <Loader2 size={11} className="animate-spin text-muted-foreground" />
+    if (state?.status === 'ok') return <CheckCircle2 size={11} className="text-emerald-600" />
+    if (state?.status === 'error') return <XCircle size={11} className="text-destructive" />
+    return <TestTube size={11} className="text-muted-foreground/60" />
+  }
+
+  const testTitle = (state: ModelTestState | undefined) => {
+    if (!test) return undefined
+    if (state?.status === 'loading') return 'Testing…'
+    if (state?.status === 'ok') return 'Model works on this connection'
+    if (state?.status === 'error') return state.message || 'Model test failed'
+    return 'Test this model on the connection'
+  }
+
   return (
     <div className="space-y-3">
-      {/* Selected known model tags */}
-      {selectedKnownModels.length > 0 && (
-        <div className="flex flex-wrap gap-2 p-3 bg-muted/30 rounded-md border border-border">
-          <span className="text-[10px] text-muted-foreground w-full mb-0.5 font-bold uppercase tracking-wider">Allowed models:</span>
-          {selectedKnownModels.map((modelId) => {
-            return (
-              <span
-                key={modelId}
-                className="inline-flex items-center gap-1 px-2 py-1 bg-background border border-border rounded-md text-[11px] font-mono text-foreground shadow-sm"
-              >
-                <span>{modelId}</span>
+      {/* Selected models (known + custom) with inline test + remove actions */}
+      {selected.length > 0 && (
+        <div className="space-y-2 rounded-lg border border-border bg-muted/20 p-3">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+              Selected models · {selected.length}
+            </span>
+            <div className="flex items-center gap-3">
+              {test?.onTestAll && (
                 <button
-                  onClick={() => removeModel(modelId)}
-                  aria-label={`Remove allowed model ${modelId}`}
-                  className="ml-1 hover:bg-muted rounded-sm p-0.5 transition-colors cursor-pointer text-muted-foreground hover:text-foreground"
+                  onClick={test.onTestAll}
+                  disabled={test.running}
+                  className="flex items-center gap-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  <X size={12} />
+                  {test.running
+                    ? <Loader2 size={12} className="animate-spin" />
+                    : <TestTube size={12} />}
+                  {test.running ? `Testing ${test.progress ?? '…'}` : 'Test all'}
                 </button>
-              </span>
-            )
-          })}
-        </div>
-      )}
-
-      {/* Custom models tags */}
-      {customModels.length > 0 && (
-        <div className="flex flex-wrap gap-2 p-3 bg-muted/30 rounded-md border border-border">
-          <span className="text-[10px] text-muted-foreground w-full mb-0.5 font-bold uppercase tracking-wider">Custom models:</span>
-          {customModels.map((modelId) => {
-            return (
-              <span
-                key={modelId}
-                className="inline-flex items-center gap-1 px-2 py-1 bg-background border border-border rounded-md text-[11px] font-mono text-foreground shadow-sm"
+              )}
+              <button
+                onClick={() => onChange([])}
+                className="text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
               >
-                <span>{modelId}</span>
-                <button
-                  onClick={() => removeModel(modelId)}
-                  aria-label={`Remove custom model ${modelId}`}
-                  className="ml-1 hover:bg-muted rounded-sm p-0.5 transition-colors cursor-pointer text-muted-foreground hover:text-foreground"
+                Clear all
+              </button>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {[...selectedKnownModels, ...customModels].map((modelId) => {
+              const isCustom = customModels.includes(modelId)
+              const state = test?.results[modelId]
+              return (
+                <span
+                  key={modelId}
+                  title={isCustom ? 'Custom model (not in registry)' : undefined}
+                  className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-mono text-foreground shadow-sm ${
+                    isCustom
+                      ? 'border-dashed border-amber-500/50 bg-amber-500/5'
+                      : state?.status === 'ok'
+                        ? 'border-emerald-500/30 bg-emerald-500/5'
+                        : state?.status === 'error'
+                          ? 'border-destructive/30 bg-destructive/5'
+                          : 'border-border bg-background'
+                  }`}
                 >
-                  <X size={12} />
-                </button>
-              </span>
-            )
-          })}
+                  {test && (
+                    <button
+                      onClick={() => test.onTest(modelId)}
+                      disabled={state?.status === 'loading'}
+                      title={testTitle(state)}
+                      aria-label={testTitle(state)}
+                      className="cursor-pointer p-0.5 transition-transform hover:scale-110"
+                    >
+                      {testIcon(state)}
+                    </button>
+                  )}
+                  <span className="max-w-[220px] truncate">{modelId}</span>
+                  <button
+                    onClick={() => removeModel(modelId)}
+                    aria-label={`Remove ${modelId}`}
+                    className="ml-0.5 cursor-pointer rounded-sm p-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  >
+                    <X size={11} />
+                  </button>
+                </span>
+              )
+            })}
+          </div>
         </div>
       )}
 
       {/* Status indicator */}
-      {isAllAllowed ? (
-        <div className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 rounded-md text-xs w-full px-3 py-2 flex items-center justify-center font-medium">
+      {isAllAllowed && (
+        <div className="flex w-full items-center justify-center rounded-md border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-xs font-medium text-emerald-600 dark:text-emerald-400">
           All models allowed. Select models below to restrict.
-        </div>
-      ) : (
-        <div className="flex items-center justify-between text-xs text-muted-foreground bg-muted/30 border border-border rounded-md px-3 py-2">
-          <span>Restricted to {selected.length} selected model(s).</span>
-          <button
-            onClick={() => onChange([])}
-            className="text-foreground font-semibold hover:underline cursor-pointer transition-colors"
-          >
-            Clear restrictions
-          </button>
         </div>
       )}
 

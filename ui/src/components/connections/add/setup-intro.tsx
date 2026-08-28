@@ -6,12 +6,15 @@ type Props = {
     description: ReactNode;
 };
 
+/** Left-aligned intro block — matches the modal's section rhythm. */
 export function SetupIntro({ icon, title, description }: Props) {
     return (
-        <div className="mx-auto max-w-sm space-y-2 text-center">
-            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10">{icon}</div>
-            <p className="text-sm font-medium">{title}</p>
-            <p className="text-xs text-muted-foreground">{description}</p>
+        <div className="flex items-start gap-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10">{icon}</div>
+            <div className="min-w-0">
+                <p className="text-sm font-medium leading-tight">{title}</p>
+                <p className="mt-0.5 text-xs leading-snug text-muted-foreground">{description}</p>
+            </div>
         </div>
     );
 }

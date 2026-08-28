@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
-import { AlertTriangle, ExternalLink, Loader2 } from 'lucide-react';
+import { AlertTriangle, Copy, ExternalLink, Loader2 } from 'lucide-react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
@@ -38,17 +39,32 @@ export function OAuthWaitingPanel({
 }: Props) {
     return (
         <div className="space-y-4 rounded-lg border bg-muted/40 p-5 text-left">
-            <div className="space-y-1 text-center">
-                {waiting && <Loader2 size={24} className="mx-auto mb-2 animate-spin text-primary" />}
+            <div className="space-y-2 text-center">
+                {waiting && <Loader2 size={24} className="mx-auto mb-1 animate-spin text-primary" />}
                 <p className="text-sm font-medium">{title}</p>
-                <a
-                    href={authUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="mt-1 inline-flex items-center gap-1 text-xs text-primary hover:underline"
-                >
-                    Open browser manually <ExternalLink size={10} />
-                </a>
+                <div className="flex flex-wrap items-center justify-center gap-2">
+                    <Button asChild size="sm" className="gap-2">
+                        <a href={authUrl} target="_blank" rel="noopener noreferrer">
+                            <ExternalLink size={13} /> Open sign-in page
+                        </a>
+                    </Button>
+                    <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="gap-1.5"
+                        onClick={() => {
+                            void navigator.clipboard?.writeText(authUrl);
+                            toast.success('Sign-in URL copied');
+                        }}
+                        title="Copy URL (paste into another browser if needed)"
+                    >
+                        <Copy size={13} /> Copy URL
+                    </Button>
+                </div>
+                <p className="break-all text-[10px] text-muted-foreground/70" title={authUrl}>
+                    {authUrl.length > 90 ? `${authUrl.slice(0, 90)}…` : authUrl}
+                </p>
                 {expectedRedirect && (
                     <p className="break-all text-[10px] text-muted-foreground">
                         Expected redirect: <code className="rounded bg-muted px-1">{expectedRedirect}</code>

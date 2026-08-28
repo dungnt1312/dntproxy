@@ -43,8 +43,8 @@ export function useQuotaFetch({
                     try {
                         const res = await api.getUsage(c.id);
                         return [c.id, res] as const;
-                    } catch (e: any) {
-                        return [c.id, { error: e.message }] as const;
+                    } catch (e: unknown) {
+                        return [c.id, { error: e instanceof Error ? e.message : 'Failed' }] as const;
                     }
                 });
 

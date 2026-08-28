@@ -2,43 +2,17 @@ import { AlertTriangle, Gauge, Link2, Lock, TimerReset } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { cn } from '@/lib/utils';
+import {
+  computeHealthScore,
+  hasBackoff,
+  hasError,
+  isExpired,
+  isRateLimited,
+} from '@/lib/connection-status';
 import type { Connection } from '@/types/connections';
 
 interface ConnectionHealthDashboardProps {
   connections: Connection[];
-}
-
-function isRateLimited(c: Connection) {
-  return Boolean(c.rateLimitedUntil && new Date(c.rateLimitedUntil) > new Date());
-}
-
-function isExpired(c: Connection) {
-  return Boolean(c.expiresAt && new Date(c.expiresAt) < new Date());
-}
-
-function hasCooldown(c: Connection) {
-  return (c.backoffLevel ?? 0) > 0;
-}
-
-function hasError(c: Connection) {
-  return Boolean(c.lastError);
-}
-
-function getHealthScore(connections: Connection[]) {
-  if (connections.length === 0) return 100;
-  const active = connections.filter((c) => c.isActive).length;
-  const issueWeight = connections.reduce((sum, c) => {
-    if (!c.isActive) return sum + 0.25;
-    let penalty = 0;
-    if (isExpired(c)) penalty += 1;
-    if (isRateLimited(c)) penalty += 0.8;
-    if (hasCooldown(c)) penalty += Math.min(0.6, (c.backoffLevel ?? 0) * 0.15);
-    if (hasError(c)) penalty += 0.5;
-    return sum + Math.min(1, penalty);
-  }, 0);
-  const availability = active / connections.length;
-  const penalty = issueWeight / connections.length;
-  return Math.max(0, Math.round((availability * 0.75 + (1 - penalty) * 0.25) * 100));
 }
 
 export function ConnectionHealthDashboard({ connections }: ConnectionHealthDashboardProps) {
@@ -46,10 +20,10 @@ export function ConnectionHealthDashboard({ connections }: ConnectionHealthDashb
   const active = connections.filter((c) => c.isActive).length;
   const rateLimited = connections.filter(isRateLimited).length;
   const expired = connections.filter(isExpired).length;
-  const cooldown = connections.filter(hasCooldown).length;
+  const cooldown = connections.filter(hasBackoff).length;
   const errors = connections.filter(hasError).length;
   const detectedModels = connections.reduce((sum, c) => sum + (c.supportedModels?.length || 0), 0);
-  const score = getHealthScore(connections);
+  const score = computeHealthScore(connections);
 
   const scoreTone = score >= 85 ? 'text-emerald-600' : score >= 65 ? 'text-amber-600' : 'text-destructive';
   const progressTone = score >= 85 ? '[&>div]:bg-emerald-500' : score >= 65 ? '[&>div]:bg-amber-500' : '[&>div]:bg-destructive';

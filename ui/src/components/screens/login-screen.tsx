@@ -62,8 +62,16 @@ export default function LoginScreen({ onSuccess }: LoginScreenProps) {
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="relative">
             <Key className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            {/*
+              This is the one field the browser should remember, so it opts in
+              with "current-password". Provider API keys use SecretInput, which
+              sends "new-password" precisely to keep this saved credential from
+              being auto-filled into them.
+            */}
             <Input
               type="password"
+              name="dntproxy-dashboard-key"
+              autoComplete="current-password"
               placeholder="sk-dnt-..."
               value={key}
               onChange={(e) => setKey(e.target.value)}

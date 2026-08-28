@@ -129,6 +129,8 @@ export const api = {
     request('/auth/kiro/start-social', { method: 'POST', body: JSON.stringify({ provider }) }),
   exchangeSocialCode: (data: { sessionId: string; callbackUrl?: string; code?: string }) =>
     request('/auth/kiro/exchange-social', { method: 'POST', body: JSON.stringify(data) }),
+  addKiroApiKey: (data: { apiKey: string; name?: string; region?: string }) =>
+    request('/auth/kiro/api-key', { method: 'POST', body: JSON.stringify(data) }),
 
   // OpenAI OAuth (PKCE)
   startOpenAIOAuth: () => request('/auth/openai/start', { method: 'POST' }),

@@ -67,11 +67,12 @@ export function ApiKeyConnectionForm({ provider, loading, onSubmit }: Props) {
   const showModels = provider.ui.supportsModelSelect;
   const modelsInputId = useId();
 
-  const ordered = fields.filter((f) => f.name !== 'supportedModels');
+  // 'name' is owned by the host (AccountNameSection) and injected into the payload.
+  const ordered = fields.filter((f) => f.name !== 'supportedModels' && f.name !== 'name');
 
   return (
     <form
-      className="space-y-3 max-w-lg mx-auto"
+      className="space-y-3 w-full"
       onSubmit={(e) => {
         e.preventDefault();
         if (!loading && canSubmit) void handleSubmit();

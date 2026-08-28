@@ -22,8 +22,14 @@ export function useAddConnectionGuard(shouldGuard: boolean) {
 
     useEffect(() => {
         if (blocker.state !== 'blocked') return;
-        if (confirmLeaveSetup()) blocker.proceed();
-        else blocker.reset();
+        if (confirmLeaveSetup()) {
+            blocker.proceed();
+            // Reset so future accidental navigations stay guarded; without this the
+            // flag stayed true forever after the first intentional nav.
+            intentionalNavRef.current = false;
+        } else {
+            blocker.reset();
+        }
     }, [blocker]);
 
     return {

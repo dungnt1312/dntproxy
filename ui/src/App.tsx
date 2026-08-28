@@ -49,7 +49,6 @@ import UsageScreen from "@/components/screens/usage-screen";
 import TunnelScreen from "@/components/screens/tunnel-screen";
 import ProfilesScreen from "@/components/screens/profiles-screen";
 import ToolsScreen from "@/components/screens/tools-screen";
-import AddConnectionPage from "@/components/pages/add-connection-page";
 import LoginScreen from "@/components/screens/login-screen";
 import TenantsScreen from "@/components/screens/tenants-screen";
 
@@ -126,7 +125,6 @@ function RequireAdmin({ children }: { children: React.ReactNode }) {
 export const appRoutes: RouteObject[] = [
   { path: "/", element: <DashboardScreen /> },
   { path: "/connections", element: <ConnectionsScreen /> },
-  { path: "/connections/add", element: <AddConnectionPage /> },
   { path: "/models", element: <ModelsScreen /> },
   { path: "/combos", element: <CombosScreen /> },
   { path: "/profiles", element: <ProfilesScreen /> },

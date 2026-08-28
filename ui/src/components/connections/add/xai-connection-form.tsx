@@ -1,16 +1,21 @@
 import { useEffect, useState } from 'react';
-import { ExternalLink } from 'lucide-react';
+import { ExternalLink, ShieldCheck } from 'lucide-react';
 import { api } from '../../../api';
 import { ProviderLogoIcon } from '../helpers';
 import { Button } from '@/components/ui/button';
 import { FileDropzone } from './file-dropzone';
-import { errorMessage } from './helpers';
+import {
+    errorMessage,
+    pickResultId,
+    type CreateResult,
+    type OnSuccess,
+} from './helpers';
 import { OAuthWaitingPanel } from './oauth-waiting-panel';
 import { SetupIntro } from './setup-intro';
 
 type Props = {
     mode: string;
-    onSuccess: (message: string) => void;
+    onSuccess: OnSuccess;
     onError: (message: string) => void;
     onBusyChange: (busy: boolean) => void;
 };
@@ -42,13 +47,21 @@ export function XaiConnectionForm({ mode, onSuccess, onError, onBusyChange }: Pr
         onError('');
         let imported = 0;
         let skipped = 0;
+        let firstNewId: string | undefined;
+        let firstName: string | undefined;
         const errors: string[] = [];
         for (const file of files) {
             try {
                 const data = JSON.parse(await file.text());
-                const res = await api.importXAIAuthFile(data);
+                const res = (await api.importXAIAuthFile(data)) as CreateResult & { duplicate?: boolean };
                 if (res.duplicate) skipped++;
-                else imported++;
+                else {
+                    imported++;
+                    if (!firstNewId) {
+                        firstNewId = res.id;
+                        firstName = res.name;
+                    }
+                }
             } catch (error: unknown) {
                 errors.push(`${file.name}: ${errorMessage(error, 'failed')}`);
             }
@@ -60,14 +73,17 @@ export function XaiConnectionForm({ mode, onSuccess, onError, onBusyChange }: Pr
                 skipped > 0 ? `${skipped} skipped (duplicate)` : '',
                 errors.length > 0 ? `${errors.length} failed` : '',
             ].filter(Boolean);
-            onSuccess(`Grok batch import: ${parts.join(', ')}`);
+            onSuccess(
+                `Grok batch import: ${parts.join(', ')}`,
+                firstNewId ? { id: firstNewId, name: firstName } : undefined,
+            );
             return;
         }
         if (errors.length > 0) onError(errors.join('\n'));
     };
 
     return (
-        <div className="mx-auto max-w-lg space-y-5">
+        <div className="space-y-5">
             <SetupIntro
                 icon={<ProviderLogoIcon provider="xai" size={20} />}
                 title="Grok Build"
@@ -79,17 +95,18 @@ export function XaiConnectionForm({ mode, onSuccess, onError, onBusyChange }: Pr
                 }
             />
             {mode === 'oauth' && !session && (
-                <div className="space-y-4 text-center">
+                <div className="space-y-4">
                     <Button
                         onClick={() =>
                             void run(async () => {
+                                // No auto window.open — popup blockers kill it post-await.
+                                // The waiting panel owns a prominent manual CTA.
                                 const res = await api.startXAIOAuth();
                                 setSession({
                                     sessionId: res.sessionId,
                                     authUrl: res.authUrl,
                                     redirectUri: res.redirectUri,
                                 });
-                                window.open(res.authUrl, '_blank');
                             })
                         }
                         disabled={loading}
@@ -100,7 +117,7 @@ export function XaiConnectionForm({ mode, onSuccess, onError, onBusyChange }: Pr
                         {loading ? 'Starting…' : 'Connect Grok Build'}
                     </Button>
                     <p className="text-[10px] text-muted-foreground">
-                        Browser opens to xAI OAuth. Paste the callback URL here after authorization.
+                        Open the xAI OAuth page from the panel below, then paste the callback URL here after authorizing.
                     </p>
                 </div>
             )}
@@ -117,7 +134,7 @@ export function XaiConnectionForm({ mode, onSuccess, onError, onBusyChange }: Pr
                     onSubmit={() =>
                         void run(async () => {
                             const res = await api.exchangeXAIOAuth(session.sessionId, callback.trim());
-                            onSuccess(`Grok Build connected! ${res.email || res.name || ''}`);
+                            onSuccess(`Grok Build connected!`, pickResultId(res));
                         })
                     }
                     onCancel={() => {
@@ -130,17 +147,18 @@ export function XaiConnectionForm({ mode, onSuccess, onError, onBusyChange }: Pr
             )}
 
             {mode === 'file' && (
-                <div className="space-y-4 text-center">
+                <div className="space-y-4">
                     <p className="text-xs text-muted-foreground">
-                        Upload a Grok auth JSON file. Expected fields:{' '}
+                        <ShieldCheck size={13} className="mr-1 inline text-emerald-500" />
+                        Upload a Grok auth JSON. Expected fields:{' '}
                         <code className="rounded bg-muted px-1 text-[11px]">access_token</code>,{' '}
                         <code className="rounded bg-muted px-1 text-[11px]">refresh_token</code>,{' '}
-                        <code className="rounded bg-muted px-1 text-[11px]">email</code>.
+                        <code className="rounded bg-muted px-1 text-[11px]">email</code>. Select multiple files for batch import (duplicates are skipped).
                     </p>
                     <FileDropzone
                         multiple
                         disabled={loading}
-                        title={loading ? 'Importing…' : 'Drop file here or click to select'}
+                        title={loading ? 'Importing…' : 'Drop files here or click to select'}
                         hint="Grok auth JSON format"
                         ariaLabel="Select Grok auth JSON files"
                         onFiles={(files) => void importFiles(files)}

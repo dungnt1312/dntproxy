@@ -1,7 +1,7 @@
-import { CheckCheck, Loader2, Power, PowerOff, Settings2, Trash2, X } from 'lucide-react';
+import { ArrowRightLeft, CheckCheck, Layers, Loader2, Power, PowerOff, Trash2, X, Zap } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
-export type BulkAction = 'models' | 'enable' | 'disable' | 'delete';
+export type BulkAction = 'models' | 'migrate' | 'quotas' | 'enable' | 'disable' | 'delete';
 
 interface BulkActionBarProps {
     selectedCount: number;
@@ -17,7 +17,8 @@ interface BulkActionBarProps {
 
 /**
  * Toolbar shown while the connections screen is in selection mode.
- * Reports how many cards are selected and hosts the bulk actions.
+ * Reports the *scope* explicitly (selected vs current filtered matches) and
+ * hosts bulk operations, including the model migration entry point.
  */
 export function BulkActionBar({
     selectedCount,
@@ -35,7 +36,7 @@ export function BulkActionBar({
         <div
             role="toolbar"
             aria-label="Bulk connection actions"
-            className="flex flex-wrap items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2"
+            className="sticky bottom-3 z-10 flex flex-wrap items-center gap-2 rounded-lg border border-primary/30 bg-background px-3 py-2 shadow-lg"
         >
             <span className="text-sm font-medium tabular-nums" aria-live="polite">
                 {busy ? (
@@ -43,7 +44,10 @@ export function BulkActionBar({
                         <Loader2 className="h-3.5 w-3.5 animate-spin" /> {busy}…
                     </span>
                 ) : (
-                    `${selectedCount} selected`
+                    <>
+                        Selected <span className="text-primary">{selectedCount}</span>
+                        <span className="font-normal text-muted-foreground">of {visibleCount} filtered results</span>
+                    </>
                 )}
             </span>
 
@@ -55,7 +59,7 @@ export function BulkActionBar({
                 disabled={disabled || visibleCount === 0}
             >
                 <CheckCheck className="h-3.5 w-3.5" />
-                {allVisibleSelected ? 'Deselect All' : `Select All (${visibleCount})`}
+                {allVisibleSelected ? 'Deselect all' : `Select all (${visibleCount})`}
             </Button>
             <Button
                 variant="outline"
@@ -75,7 +79,25 @@ export function BulkActionBar({
                     onClick={() => onAction('models')}
                     disabled={disabled || selectedCount === 0}
                 >
-                    <Settings2 className="h-3.5 w-3.5" /> Models…
+                    <Layers className="h-3.5 w-3.5" /> Copy models…
+                </Button>
+                <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 gap-1.5 text-xs"
+                    onClick={() => onAction('migrate')}
+                    disabled={disabled || selectedCount === 0}
+                >
+                    <ArrowRightLeft className="h-3.5 w-3.5" /> Migrate models…
+                </Button>
+                <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 gap-1.5 text-xs"
+                    onClick={() => onAction('quotas')}
+                    disabled={disabled || selectedCount === 0}
+                >
+                    <Zap className="h-3.5 w-3.5" /> Load quotas
                 </Button>
                 <Button
                     variant="outline"
@@ -104,13 +126,7 @@ export function BulkActionBar({
                 >
                     <Trash2 className="h-3.5 w-3.5" /> Delete…
                 </Button>
-                <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 text-xs"
-                    onClick={onExit}
-                    disabled={disabled}
-                >
+                <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={onExit} disabled={disabled}>
                     Done
                 </Button>
             </div>

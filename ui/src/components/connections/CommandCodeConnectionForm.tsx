@@ -3,6 +3,7 @@ import { KeyRound, Loader2, Play, Search, Upload } from 'lucide-react';
 import { api } from '../../api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { SecretInput } from '@/components/ui/secret-input';
 import { ProviderLogoIcon } from './helpers';
 import type { CreateConnectionPayload } from '@/types/provider-metadata';
 import { parseCommandCodeAuthFile } from './CommandCodeAuthImport';
@@ -159,10 +160,10 @@ export function CommandCodeConnectionForm({
               <label htmlFor="commandcode-api-key" className="text-xs font-medium">
                 API Key <span className="text-destructive">*</span>
               </label>
-              <Input
+              <SecretInput
                 id="commandcode-api-key"
-                type="password"
-                autoComplete="off"
+                name="commandcode-api-key"
+                revealLabel="API key"
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
                 placeholder="user_…"

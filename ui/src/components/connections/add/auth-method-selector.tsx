@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { ChevronDown } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -66,11 +66,10 @@ export function AuthMethodSelector<T extends string>({
     more = [],
 }: Props<T>) {
     const moreSelected = more.some((option) => option.id === value);
-    const [moreOpen, setMoreOpen] = useState(moreSelected);
-
-    useEffect(() => {
-        if (moreSelected) setMoreOpen(true);
-    }, [moreSelected]);
+    // Derived open state: opens automatically when a "more" method is selected,
+    // with an explicit user override once they toggle it themselves.
+    const [moreOpenOverride, setMoreOpen] = useState<boolean | null>(null);
+    const moreOpen = moreOpenOverride ?? moreSelected;
 
     return (
         <div className="space-y-3">

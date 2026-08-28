@@ -9,15 +9,19 @@ import (
 	"github.com/dungnt/dntproxy/internal/domain"
 )
 
+// codeWhispererEndpoint is the legacy surface, the only one that carries the
+// X-Amz-Target RPC header.
+var codeWhispererEndpoint = kiroCodeWhispererHost + generateAssistantResponsePath
+
 func TestBuildKiroRequestHeaders(t *testing.T) {
 	creds := &domain.Credentials{AccessToken: "tok-123"}
-	req, err := buildKiroRequest(context.Background(), []byte(`{}`), creds, 1)
+	req, err := buildKiroRequest(context.Background(), codeWhispererEndpoint, []byte(`{}`), creds, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if req.URL.String() != kiroBaseURL {
-		t.Fatalf("URL = %s, want %s", req.URL, kiroBaseURL)
+	if req.URL.String() != codeWhispererEndpoint {
+		t.Fatalf("URL = %s, want %s", req.URL, codeWhispererEndpoint)
 	}
 	if got := req.Header.Get("Authorization"); got != "Bearer tok-123" {
 		t.Fatalf("Authorization = %q, want %q", got, "Bearer tok-123")
@@ -35,7 +39,7 @@ func TestBuildKiroRequestHeaders(t *testing.T) {
 
 func TestBuildKiroRequestAttemptIncrements(t *testing.T) {
 	creds := &domain.Credentials{}
-	retryReq, err := buildKiroRequest(context.Background(), []byte(`{}`), creds, 2)
+	retryReq, err := buildKiroRequest(context.Background(), kiroCodeWhispererHost+generateAssistantResponsePath, []byte(`{}`), creds, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +48,7 @@ func TestBuildKiroRequestAttemptIncrements(t *testing.T) {
 	}
 
 	// Invocation ID must be fresh per attempt.
-	first, err := buildKiroRequest(context.Background(), []byte(`{}`), creds, 1)
+	first, err := buildKiroRequest(context.Background(), kiroCodeWhispererHost+generateAssistantResponsePath, []byte(`{}`), creds, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +58,7 @@ func TestBuildKiroRequestAttemptIncrements(t *testing.T) {
 }
 
 func TestBuildKiroRequestNoTokenNoAuthHeader(t *testing.T) {
-	req, err := buildKiroRequest(context.Background(), []byte(`{}`), &domain.Credentials{}, 1)
+	req, err := buildKiroRequest(context.Background(), kiroCodeWhispererHost+generateAssistantResponsePath, []byte(`{}`), &domain.Credentials{}, 1)
 	if err != nil {
 		t.Fatal(err)
 	}

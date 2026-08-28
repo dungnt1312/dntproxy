@@ -11,6 +11,7 @@ const (
 	UpstreamAuth             UpstreamClass = "auth"
 	UpstreamTransient        UpstreamClass = "transient"
 	UpstreamModelEntitlement UpstreamClass = "model_entitlement"
+	UpstreamSuspended        UpstreamClass = "suspended"
 )
 
 func ClassifyUpstream(status int, errorText string) UpstreamClass {
@@ -26,6 +27,12 @@ func ClassifyUpstream(status int, errorText string) UpstreamClass {
 	}
 	if status == 403 && isModelEntitlementError(lower) {
 		return UpstreamModelEntitlement
+	}
+	if isSuspensionError(lower) {
+		return UpstreamSuspended
+	}
+	if isAuthRevokedError(lower) {
+		return UpstreamAuth
 	}
 	for _, kw := range []string{"rate limit", "too many requests", "quota exceeded", "capacity", "overloaded"} {
 		if strings.Contains(lower, kw) {

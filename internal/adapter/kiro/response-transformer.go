@@ -172,14 +172,26 @@ func (t *ResponseTransformer) TransformFrame(frame *EventFrame) [][]byte {
 }
 
 // Flush emits any remaining finish/done markers.
+//
+// Reaching this path with finishSent still false means the upstream stream hit a
+// clean EOF without ever emitting a terminal signal (messageStopEvent, metrics,
+// or a tool call). If content was delivered, the turn was truncated mid-answer —
+// the classic Kiro symptom where a stream dies before the stop event. We finish
+// it as "length" (OpenAI's incomplete-response reason) instead of "stop" so the
+// client is not told a cut-off turn completed cleanly, and log it for visibility.
 func (t *ResponseTransformer) Flush() [][]byte {
 	var results [][]byte
 
 	if !t.finishSent {
 		t.finishSent = true
 		finishReason := "stop"
-		if t.hasToolCalls {
+		switch {
+		case t.hasToolCalls:
 			finishReason = "tool_calls"
+		case t.isTruncated():
+			finishReason = "length"
+			log.Printf("[KIRO] truncated stream: model=%s contentBytes=%d stopReceived=%v metering=%v — finishing as length",
+				t.model, t.totalContent, t.stopReceived, t.hasMetering)
 		}
 		if t.usage == nil && t.totalContent > 0 {
 			t.estimateUsage()
@@ -195,6 +207,27 @@ func (t *ResponseTransformer) Flush() [][]byte {
 	t.notifyPayload()
 	results = append(results, []byte("data: [DONE]\n\n"))
 	return results
+}
+
+// isTruncated reports whether a stream that reached Flush without a terminal
+// signal delivered content but no stop event. A stream with no content at all is
+// not classified as truncated here (it is an empty response, handled elsewhere).
+func (t *ResponseTransformer) isTruncated() bool {
+	return !t.stopReceived && !t.hasToolCalls && t.totalContent > 0
+}
+
+// WasTruncated exposes the truncation verdict for a fully-consumed stream so a
+// buffered (non-streaming) caller can fail over to another account instead of
+// returning a cut-off turn. The verdict is stable after the stream ends: none of
+// its inputs (stopReceived, hasToolCalls, totalContent) are mutated by Flush.
+func (t *ResponseTransformer) WasTruncated() bool {
+	return t.isTruncated()
+}
+
+// TotalContentBytes returns the number of assistant content bytes seen, for
+// diagnostics in a truncation error.
+func (t *ResponseTransformer) TotalContentBytes() int {
+	return t.totalContent
 }
 
 func (t *ResponseTransformer) handleAssistantResponse(frame *EventFrame) []byte {

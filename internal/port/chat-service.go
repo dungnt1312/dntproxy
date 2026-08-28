@@ -15,6 +15,10 @@ type ChatResult struct {
 	StatusCode int
 	// Error message (empty on success).
 	Error string
+	// RetryAfter is an absolute RFC3339 timestamp derived from a server-provided
+	// Retry-After header, surfaced to the client on rate-limit failures. Empty
+	// when the upstream gave no hint.
+	RetryAfter string
 }
 
 // APIKeyPolicy holds restrictions from the API key for a single request.

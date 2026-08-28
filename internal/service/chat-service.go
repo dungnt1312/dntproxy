@@ -141,7 +141,7 @@ func (s *ChatService) HandleChat(body []byte, modelStr string, requestID string,
 		if msg == "" {
 			msg = "All models unavailable"
 		}
-		return &port.ChatResult{StatusCode: status, Error: msg}
+		return &port.ChatResult{StatusCode: status, Error: msg, RetryAfter: result.RetryAfter}
 	}
 
 	if err != nil {
@@ -274,6 +274,7 @@ func (s *ChatService) executeOnProvider(body []byte, qualifiedModel string, requ
 					OK:            false,
 					StatusCode:    statusCode,
 					Error:         message,
+					RetryAfter:    retryAfterFromError(lastExecErr),
 					AllowFallback: shouldFallbackToNextAccount(lastExecStatus, lastExecErr),
 				}, nil
 			}
@@ -341,7 +342,7 @@ func (s *ChatService) executeOnProvider(body []byte, qualifiedModel string, requ
 		if !shouldFallbackToNextAccount(status, errMsg) {
 			statusCode, message := normalizeExecutorFailure(status, errMsg)
 			reqlog.End(statusCode, message)
-			return &ComboResult{OK: false, StatusCode: statusCode, Error: message}, nil
+			return &ComboResult{OK: false, StatusCode: statusCode, Error: message, RetryAfter: retryAfterFromError(errMsg)}, nil
 		}
 
 		// Mark unavailable and retry...
@@ -363,7 +364,7 @@ func (s *ChatService) executeOnProvider(body []byte, qualifiedModel string, requ
 			// A user-specified pin must not spill over to another connection.
 			statusCode, message := normalizeExecutorFailure(status, errMsg)
 			reqlog.End(statusCode, message)
-			return &ComboResult{OK: false, StatusCode: statusCode, Error: message, AllowFallback: shouldFallbackToNextAccount(status, errMsg)}, nil
+			return &ComboResult{OK: false, StatusCode: statusCode, Error: message, RetryAfter: retryAfterFromError(errMsg), AllowFallback: shouldFallbackToNextAccount(status, errMsg)}, nil
 		}
 
 		max := 0

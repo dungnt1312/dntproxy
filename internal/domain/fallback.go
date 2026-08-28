@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"fmt"
 	"math"
 	"strings"
 	"time"
@@ -22,14 +23,37 @@ func IsNonFallbackStatus(status int) bool {
 // Cooldown durations in milliseconds.
 const (
 	CooldownUnauthorized   = 5000
-	CooldownPaymentReq     = 300000 // 5 min
+	CooldownPaymentReq     = 300000  // 5 min
 	CooldownNotFound       = 1000
 	CooldownTransient      = 2000
 	CooldownRequestNotAlwd = 60000
+	CooldownAuthRevoked    = 1800000 // 30 min - dead refresh token / revoked grant, needs re-auth
+	CooldownSuspended      = 1800000 // 30 min - account sidelined by upstream, operator likely must act
+	CooldownQuotaExhausted = 3600000 // 1 hour - monthly/usage cap hit; short retries just burn budget
 	BackoffBase            = 1000
-	BackoffMax             = 120000 // 2 min
+	BackoffMax             = 120000  // 2 min
 	BackoffMaxLevel        = 7
 )
+
+// truncatedStreamMarker is a stable, lowercase substring embedded in the error
+// an executor returns when a transport-clean upstream stream carried content but
+// never a terminal signal (the classic Kiro mid-answer truncation). CheckFallbackError
+// treats it as a no-penalty failover so the request retries on another account
+// without cooling the current one. Kept lowercase so the case-insensitive match
+// in CheckFallbackError is exact.
+const truncatedStreamMarker = "upstream truncated response without stop reason"
+
+// TruncatedStreamError builds the error text an executor returns for a detected
+// truncation, embedding the sentinel CheckFallbackError matches on.
+func TruncatedStreamError(model string, contentBytes int) string {
+	return fmt.Sprintf("%s (model=%s, contentBytes=%d)", truncatedStreamMarker, model, contentBytes)
+}
+
+// IsTruncatedStreamError reports whether an error text carries the truncation
+// sentinel.
+func IsTruncatedStreamError(errorText string) bool {
+	return strings.Contains(strings.ToLower(errorText), truncatedStreamMarker)
+}
 
 // FallbackResult describes whether to fallback and how long to cool down.
 type FallbackResult struct {
@@ -64,6 +88,13 @@ func CheckFallbackError(status int, errorText string, backoffLevel int) Fallback
 		// HTTP/2 response-header timeouts can fail over without penalizing the account.
 		return FallbackResult{ShouldFallback: true, NewBackoffLevel: backoffLevel}
 	}
+	if strings.Contains(lower, truncatedStreamMarker) {
+		// A transport-clean stream that carried content but never a terminal signal
+		// is an upstream blip, not an unhealthy account: fail over to the next
+		// account for this request without penalizing (mirrors Kiro IDE, which
+		// retries truncation on the same credential without cooling it).
+		return FallbackResult{ShouldFallback: true, NewBackoffLevel: backoffLevel}
+	}
 	if strings.Contains(lower, "no credentials") {
 		return FallbackResult{ShouldFallback: true, CooldownMs: CooldownNotFound, NewBackoffLevel: backoffLevel}
 	}
@@ -72,7 +103,18 @@ func CheckFallbackError(status int, errorText string, backoffLevel int) Fallback
 	}
 
 	switch class {
+	case UpstreamSuspended:
+		// Account sidelined by upstream (suspended/banned). Not transient: sideline
+		// it for a long account-level window instead of retrying every few seconds.
+		return FallbackResult{ShouldFallback: true, CooldownMs: CooldownSuspended, NewBackoffLevel: BackoffMaxLevel}
 	case UpstreamAuth:
+		// A dead refresh token / revoked grant cannot be fixed by an in-place
+		// refresh, so sideline the account for a long window instead of hammering
+		// it on the 5s cooldown. A plain expired access token stays short: the
+		// chat-service refreshes it in place before ever reaching a fallback.
+		if isAuthRevokedError(lower) {
+			return FallbackResult{ShouldFallback: true, CooldownMs: CooldownAuthRevoked, NewBackoffLevel: BackoffMaxLevel}
+		}
 		return FallbackResult{ShouldFallback: true, CooldownMs: CooldownUnauthorized, NewBackoffLevel: backoffLevel}
 	case UpstreamQuota:
 		// Preserve Command Code's unqualified 402 payment cooldown. A generic
@@ -92,9 +134,24 @@ func CheckFallbackError(status int, errorText string, backoffLevel int) Fallback
 		if status == 402 {
 			return FallbackResult{ShouldFallback: true, CooldownMs: CooldownPaymentReq, NewBackoffLevel: backoffLevel}
 		}
+		// A monthly/usage-cap exhaustion keeps returning the same error for a long
+		// window; short exponential backoff just burns request budget re-selecting
+		// an account that cannot serve. Sideline it for a long account-level window.
+		if isHardQuotaExhaustion(lower) {
+			return FallbackResult{ShouldFallback: true, CooldownMs: CooldownQuotaExhausted, NewBackoffLevel: BackoffMaxLevel}
+		}
 		newLevel := min(backoffLevel+1, BackoffMaxLevel)
+		// A server-provided Retry-After is authoritative for a plain rate limit:
+		// honor it instead of a guessed exponential backoff. Still clamped by the
+		// operator's MaxCooldownSeconds downstream in MarkUnavailable.
+		if hintMs, ok := ExtractRetryAfterHint(errorText); ok {
+			return FallbackResult{ShouldFallback: true, CooldownMs: hintMs, NewBackoffLevel: newLevel}
+		}
 		return FallbackResult{ShouldFallback: true, CooldownMs: GetQuotaCooldown(backoffLevel), NewBackoffLevel: newLevel}
 	case UpstreamTransient:
+		if hintMs, ok := ExtractRetryAfterHint(errorText); ok {
+			return FallbackResult{ShouldFallback: true, CooldownMs: hintMs, NewBackoffLevel: backoffLevel, ModelOnly: true}
+		}
 		return FallbackResult{ShouldFallback: true, CooldownMs: CooldownTransient, NewBackoffLevel: backoffLevel, ModelOnly: true}
 	}
 
@@ -102,6 +159,79 @@ func CheckFallbackError(status int, errorText string, backoffLevel int) Fallback
 		return FallbackResult{ShouldFallback: true, CooldownMs: CooldownNotFound, NewBackoffLevel: backoffLevel}
 	}
 	return FallbackResult{ShouldFallback: true, CooldownMs: CooldownTransient, NewBackoffLevel: backoffLevel}
+}
+
+// isSuspensionError reports whether the upstream marked the account as
+// suspended/banned. These are not transient: the account cannot recover on its
+// own, so it must be sidelined for a long window instead of being retried every
+// few seconds. Mirrors Kiro's suspension signals.
+func isSuspensionError(lower string) bool {
+	hints := []string{
+		"temporarily_suspended",
+		"temporarily suspended",
+		"temporarily is suspended",
+		"account suspended",
+		"account is suspended",
+		"unusual user activity",
+	}
+	for _, hint := range hints {
+		if strings.Contains(lower, hint) {
+			return true
+		}
+	}
+	return false
+}
+
+// isAuthRevokedError reports whether an auth failure is a hard credential
+// revocation (refresh token dead, grant revoked) rather than a merely expired
+// access token that an in-place refresh can fix. A dead refresh token cannot be
+// recovered automatically, so the account should be sidelined for a long window
+// rather than hammered every few seconds on the 5s unauthorized cooldown.
+func isAuthRevokedError(lower string) bool {
+	hints := []string{
+		"invalid_grant",
+		"invalid grant",
+		"refresh token expired",
+		"refresh token is invalid",
+		"refresh token invalid",
+		"token has been revoked",
+		"token revoked",
+		"reauthenticate",
+		"re-authenticate",
+	}
+	for _, hint := range hints {
+		if strings.Contains(lower, hint) {
+			return true
+		}
+	}
+	return false
+}
+
+// isHardQuotaExhaustion reports whether a quota error is a long-window
+// exhaustion (monthly/usage cap hit) rather than a short-term rate limit. A
+// short-term "too many requests" recovers in seconds and suits exponential
+// backoff; a monthly/usage-limit exhaustion will keep returning the same error
+// for hours, so retrying the same account every 120s just burns request budget.
+func isHardQuotaExhaustion(lower string) bool {
+	hints := []string{
+		"quota exceeded",
+		"quota has been exceeded",
+		"usage limit",
+		"monthly limit",
+		"monthly request",
+		"free tier",
+		"out of credits",
+		"insufficient credits",
+		"insufficient_quota",
+		"limit reached",
+		"limit exceeded",
+	}
+	for _, hint := range hints {
+		if strings.Contains(lower, hint) {
+			return true
+		}
+	}
+	return false
 }
 
 func isModelEntitlementError(lower string) bool {

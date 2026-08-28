@@ -22,7 +22,8 @@ func normalizeExecutorFailure(status int, errMsg string) (int, string) {
 	if status <= 0 {
 		status = http.StatusBadGateway
 	}
-	message := errMsg
+	// Drop the internal Retry-After marker so it never reaches the client body.
+	message := domain.StripRetryAfterHint(errMsg)
 	if message == "" {
 		message = http.StatusText(status)
 	}
@@ -30,6 +31,15 @@ func normalizeExecutorFailure(status int, errMsg string) (int, string) {
 		message = "request failed"
 	}
 	return status, message
+}
+
+// retryAfterFromError converts an embedded Retry-After hint into an absolute
+// RFC3339 timestamp for surfacing to the client, or "" when none is present.
+func retryAfterFromError(errMsg string) string {
+	if ms, ok := domain.ExtractRetryAfterHint(errMsg); ok {
+		return domain.RetryAfterTimestamp(ms)
+	}
+	return ""
 }
 
 // mapSelectionErrorToChatResult maps AccountSelectionError to a ChatResult for

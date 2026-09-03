@@ -32,6 +32,7 @@ func apiGetSettings(store port.CredentialStore) gin.HandlerFunc {
 			ConnectionStrategy:     s.ConnectionStrategy,
 			ConnectionStrategies:   s.ConnectionStrategies,
 			Compression:            s.Compression,
+			MCP:                    s.MCP,
 			LogBodies:              s.LogBodies,
 			DefaultModels:          s.DefaultModels,
 			DisableImageGeneration: s.DisableImageGeneration,
@@ -66,6 +67,10 @@ func apiUpdateSettings(store port.CredentialStore) gin.HandlerFunc {
 			}
 			cfg.Settings.Compression = req.Compression
 			cfg.Settings.Compression.Normalize()
+			if req.MCP != nil {
+				cfg.Settings.MCP = *req.MCP
+				cfg.Settings.MCP.Normalize()
+			}
 			cfg.Settings.LogBodies = req.LogBodies
 			if req.DefaultModels != nil {
 				cfg.Settings.DefaultModels = req.DefaultModels
@@ -89,6 +94,7 @@ func apiUpdateSettings(store port.CredentialStore) gin.HandlerFunc {
 			ConnectionStrategy:     updated.ConnectionStrategy,
 			ConnectionStrategies:   updated.ConnectionStrategies,
 			Compression:            updated.Compression,
+			MCP:                    updated.MCP,
 			LogBodies:              updated.LogBodies,
 			DefaultModels:          updated.DefaultModels,
 			DisableImageGeneration: updated.DisableImageGeneration,
@@ -104,6 +110,7 @@ type settingsUpdateRequest struct {
 	ConnectionStrategies   map[string]string          `json:"connectionStrategies"`
 	ComboStrategies        map[string]string          `json:"comboStrategies"`
 	Compression            domain.CompressionSettings `json:"compression"`
+	MCP                    *domain.MCPSettings        `json:"mcp,omitempty"`
 	LogBodies              bool                       `json:"logBodies"`
 	DefaultModels          map[string][]string        `json:"defaultModels"`
 	DisableImageGeneration *bool                      `json:"disableImageGeneration"`
@@ -115,6 +122,7 @@ type settingsAPIView struct {
 	ConnectionStrategy     string                     `json:"connectionStrategy,omitempty"`
 	ConnectionStrategies   map[string]string          `json:"connectionStrategies,omitempty"`
 	Compression            domain.CompressionSettings `json:"compression"`
+	MCP                    domain.MCPSettings         `json:"mcp"`
 	LogBodies              bool                       `json:"logBodies"`
 	DefaultModels          map[string][]string        `json:"defaultModels,omitempty"`
 	DisableImageGeneration bool                       `json:"disableImageGeneration"`

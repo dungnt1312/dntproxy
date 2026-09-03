@@ -29,6 +29,22 @@ func (c *CompressionSettings) Normalize() {
 	}
 }
 
+// MCPSettings configures the MCP analytics server (/mcp).
+type MCPSettings struct {
+	DefaultModel   string `json:"defaultModel,omitempty"`
+	VideoMaxFrames int    `json:"videoMaxFrames,omitempty"` // default 8, clamped 1..16
+}
+
+// Normalize sets safe defaults for zero values loaded from JSON.
+func (m *MCPSettings) Normalize() {
+	if m.VideoMaxFrames <= 0 {
+		m.VideoMaxFrames = 8
+	}
+	if m.VideoMaxFrames > 16 {
+		m.VideoMaxFrames = 16
+	}
+}
+
 // Settings holds app-level settings.
 type Settings struct {
 	ComboStrategy   string            `json:"comboStrategy"`
@@ -52,6 +68,8 @@ type Settings struct {
 	TunnelRunning  bool   `json:"tunnelRunning,omitempty"`
 	// Compression settings
 	Compression CompressionSettings `json:"compression,omitempty"`
+	// MCP analytics server settings (/mcp)
+	MCP MCPSettings `json:"mcp,omitempty"`
 	// Logging settings
 	LogBodies bool `json:"logBodies"` // persist request/response bodies in SQLite (default: false)
 	// Migration flags

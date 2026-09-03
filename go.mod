@@ -8,6 +8,7 @@ require (
 	github.com/gofrs/flock v0.13.0
 	github.com/google/uuid v1.6.0
 	github.com/spf13/cobra v1.10.2
+	github.com/ulikunitz/xz v0.5.16
 	golang.org/x/sync v0.20.0
 	modernc.org/sqlite v1.48.2
 )

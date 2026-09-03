@@ -315,6 +315,7 @@ export function AddConnectionModal({ open, onOpenChange, initialProvider, onCrea
                                     onCreate={handleCreateConnection}
                                     onError={setError}
                                     onSuccess={handleSuccess}
+                                    onImported={() => onCreated?.()}
                                 />
                             </div>
                         </div>
@@ -428,6 +429,7 @@ function SetupForm({
     onCreate,
     onError,
     onSuccess,
+    onImported,
 }: {
     provider: ProviderConfigMeta;
     method: string;
@@ -435,6 +437,7 @@ function SetupForm({
     onCreate: (payload: CreateConnectionPayload) => Promise<void>;
     onError: (message: string) => void;
     onSuccess: OnSuccess;
+    onImported: () => void;
 }) {
     // onBusyChange guards navigation in the old page world; inside a modal there
     // is no route to guard, so a no-op keeps the form contracts intact.
@@ -445,7 +448,7 @@ function SetupForm({
                 <KiroConnectionForm initialMethod={method} onSuccess={onSuccess} onError={onError} onBusyChange={noopBusy} />
             )}
             {provider.id === 'openai' && (
-                <OpenAIConnectionForm provider={provider} mode={method} loading={loading} onCreate={onCreate} onSuccess={onSuccess} onError={onError} onBusyChange={noopBusy} />
+                <OpenAIConnectionForm provider={provider} mode={method} loading={loading} onCreate={onCreate} onSuccess={onSuccess} onError={onError} onBusyChange={noopBusy} onImported={onImported} />
             )}
             {provider.id === 'xai' && (
                 <XaiConnectionForm mode={method} onSuccess={onSuccess} onError={onError} onBusyChange={noopBusy} />

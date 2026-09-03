@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { ExternalLink, Globe, KeyRound, Play, Search, Shield, Upload } from 'lucide-react';
+import { ExternalLink, Globe, KeyRound, Play, Search, Shield, Upload, Users } from 'lucide-react';
 
 /**
  * Human-readable labels for connection auth methods. One source of truth for
@@ -21,6 +21,12 @@ const FLOWS: Record<string, Omit<AuthFlowInfo, 'id'>> = {
         short: 'OAuth',
         description: 'Connect securely in your browser — no key pasting.',
         icon: <ExternalLink size={12} />,
+    },
+    bulk: {
+        label: 'Bulk auto-login',
+        short: 'Bulk',
+        description: 'Paste an email|password|2FA list — a built-in browser signs in each account automatically.',
+        icon: <Users size={12} />,
     },
     apikey: {
         label: 'API key',

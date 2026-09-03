@@ -145,7 +145,7 @@ var ProviderConfigs = map[string]ProviderConfig{
 			Description:         "Official OpenAI API with API key and OAuth support",
 			ShowBaseURLField:    false,
 			PreferredAuthMethod: "apikey",
-			AuthFlows:           []string{"apikey", "oauth"},
+			AuthFlows:           []string{"apikey", "oauth", "bulk"},
 			FormFields: []FormField{
 				{Name: "name", Label: "Connection Name", Type: FieldTypeText, Required: false},
 				{Name: "apiKey", Label: "API Key", Type: FieldTypePassword, Required: true, Secret: true},

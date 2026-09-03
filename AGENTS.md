@@ -146,6 +146,9 @@ go build -o dntproxy ./cmd/dntproxy/
 - `GET /api/tunnel/status` — Get tunnel status
 - `GET /api/quota` — Quota check
 - `POST /api/auth/kiro/api-key` — Enroll a long-lived Kiro API key
+- `POST /api/auth/openai/auto-login/start` — Bulk auto-login from `email|password|2fa` lines
+- `GET /api/auth/openai/auto-login/status` — Bulk job progress (owner-scoped)
+- `POST /api/auth/openai/auto-login/stop` — Cancel job and kill its browsers
 
 ## Model Format
 
@@ -202,6 +205,28 @@ OpenAI request → model resolve → combo expand → account select →
 ### Combo Strategies
 - `fallback` — try models in order until one succeeds
 - `round-robin` — rotate starting model each request
+
+### Bulk OpenAI Auto-Login (`internal/service/autologin`)
+- Pastes `email|password|2fa_secret` lines (one per line; `|`, tab, or comma separators) and signs
+  each account into auth.openai.com with an automated Chromium (`internal/adapter/browser`, go-rod),
+  then saves tokens as `openai` OAuth connections
+- Flow mirrors Codex CLI: PKCE + `originator=codex_cli_rs` + `codex_cli_simplified_flow=true`
+  (`auth.BuildCodexAuthURL`), redirect `http://localhost:1455/auth/callback`
+- One isolated browser per account; worker pool (default 3, max 10); 3 attempts per account for
+  retryable failures (timeouts, bot challenges); wrong password / locked accounts fail immediately
+- Shared callback dispatcher on port 1455 routes redirects by `state` so parallel workers don't mix
+  results; if the port is busy the code is parsed from the browser's final URL instead
+- Existing connections with the same email (same tenant) are refreshed in place (id/name/weight kept);
+  genuinely new accounts are appended
+- Skip-existing (default on): pasted accounts that already have a healthy openai OAuth connection
+  (active + refresh token + access token valid > 24h) are recorded as "skipped" without opening a
+  browser; `skipExisting: false` forces re-login of everything
+- Phone-verification gate ("Phone number required") fails the account immediately, no retries;
+  wrong password/locked accounts also fail on attempt 1; captcha/timeouts retry up to 3 times
+- Rod runs with leakless disabled — SentinelOne blocks its unsigned helper exe. Orphaned browsers
+  (after a hard kill) are swept at job start by matching the `--disable-blink-features=AutomationControlled`
+  marker; failed attempts leave a debug screenshot in `%TEMP%\dntproxy-autologin`
+- Headed mode is the default (bot checks pass more reliably); headless is a request/UI toggle
 
 ### Kiro-Specific
 - AWS EventStream binary protocol (not standard SSE)
@@ -330,3 +355,14 @@ OpenAI request → model resolve → combo expand → account select →
 - `domain.CompressionSettings` + `Normalize()` + backward-compatible JSON zero-fill
 - Settings API + UI toggle (Token Compression card in Settings screen)
 - 29 unit tests covering detector, all filters, and end-to-end compressor
+
+### Phase 8: Bulk OpenAI Auto-Login — DONE
+- Inspired by github.com/javip0001001/auto-login-9router, rebuilt natively in Go (no Python)
+- `internal/adapter/browser/` — go-rod (CDP) automation: fresh Chromium per account
+  (auto-downloaded on first use, like cloudflared), email/password/TOTP fill, consent handling,
+  hard-fail + captcha detection, debug screenshots
+- `internal/adapter/auth/totp.go` — stdlib-only RFC 6238 TOTP (RFC 4226 test vectors)
+- `internal/service/autologin/` — job lifecycle, worker pool (errgroup), state-routed callback
+  dispatcher, token exchange, email-dedupe upsert, owner-scoped status
+- API `/api/auth/openai/auto-login/{start,status,stop}` + "Bulk auto-login" method chip in the
+  OpenAI Add-connection flow (textarea paste, worker count, headless toggle, live progress)

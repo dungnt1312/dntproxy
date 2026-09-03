@@ -42,7 +42,7 @@ func TestEveryProviderAdvertisesAFlow(t *testing.T) {
 // Keep the vocabulary closed.
 func TestAuthFlowIDsAreKnown(t *testing.T) {
 	known := map[string]bool{
-		"apikey": true, "oauth": true, "oauth-device": true,
+		"apikey": true, "oauth": true, "oauth-device": true, "bulk": true,
 		"builder-id": true, "idc": true, "social": true,
 		"import": true, "file": true, "detect": true, "manual": true,
 	}

@@ -44,6 +44,25 @@ func BuildOpenAIAuthURL(redirectURI, state, codeChallenge string) string {
 	return OpenAIAuthorizeURL + "?" + params.Encode()
 }
 
+// BuildCodexAuthURL builds the authorization URL exactly like the Codex CLI
+// (originator codex_cli_rs + simplified flow) — that variant skips the
+// interstitial consent screen, which automated bulk logins need.
+func BuildCodexAuthURL(redirectURI, state, codeChallenge string) string {
+	params := url.Values{}
+	params.Set("client_id", OpenAIClientID)
+	params.Set("response_type", "code")
+	params.Set("redirect_uri", redirectURI)
+	params.Set("scope", OpenAIScope)
+	params.Set("state", state)
+	params.Set("code_challenge", codeChallenge)
+	params.Set("code_challenge_method", "S256")
+	params.Set("id_token_add_organizations", "true")
+	params.Set("codex_cli_simplified_flow", "true")
+	params.Set("originator", "codex_cli_rs")
+
+	return OpenAIAuthorizeURL + "?" + params.Encode()
+}
+
 // ExchangeOpenAICode exchanges an authorization code for OpenAI tokens.
 func ExchangeOpenAICode(code, redirectURI, codeVerifier string) (*OpenAITokenResponse, error) {
 	data := url.Values{}

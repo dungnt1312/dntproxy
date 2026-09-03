@@ -3,6 +3,7 @@ import { ExternalLink } from 'lucide-react';
 import { api } from '../../../api';
 import { ApiKeyConnectionForm } from '../ApiKeyConnectionForm';
 import { Button } from '@/components/ui/button';
+import { BulkAutoLoginForm } from './bulk-auto-login-form';
 import type { CreateConnectionPayload, ProviderConfigMeta } from '@/types/provider-metadata';
 import {
     DEVICE_CODE_FALLBACK_SECS,
@@ -23,6 +24,8 @@ type Props = {
     onSuccess: OnSuccess;
     onError: (message: string) => void;
     onBusyChange: (busy: boolean) => void;
+    /** Fires when bulk auto-login lands new/updated connections. */
+    onImported?: () => void;
 };
 
 export function OpenAIConnectionForm({
@@ -33,6 +36,7 @@ export function OpenAIConnectionForm({
     onSuccess,
     onError,
     onBusyChange,
+    onImported,
 }: Props) {
     const [session, setSession] = useState<{ sessionId: string; authUrl: string } | null>(null);
     const [callback, setCallback] = useState('');
@@ -126,6 +130,8 @@ export function OpenAIConnectionForm({
 
     return (
         <div className="space-y-5">
+            {mode === 'bulk' && <BulkAutoLoginForm onImported={onImported ?? (() => {})} />}
+
             {mode === 'oauth' && !session && (
                 <div className="space-y-4">
                     <SetupIntro

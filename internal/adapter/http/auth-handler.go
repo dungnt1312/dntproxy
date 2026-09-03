@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/dungnt/dntproxy/internal/port"
+	"github.com/dungnt/dntproxy/internal/service/autologin"
 	"github.com/gin-gonic/gin"
 )
 
@@ -104,6 +105,12 @@ func RegisterAuthRoutes(api *gin.RouterGroup, store port.CredentialStore) {
 		// OpenAI OAuth (PKCE, Authorization Code)
 		authGroup.POST("/openai/start", authOpenAIStart())
 		authGroup.POST("/openai/exchange", authOpenAIExchange(store))
+
+		// OpenAI bulk auto-login (automated browser, email|password|2fa list)
+		autoLoginSvc := autologin.NewService(store)
+		authGroup.POST("/openai/auto-login/start", authOpenAIAutoLoginStart(autoLoginSvc))
+		authGroup.GET("/openai/auto-login/status", authOpenAIAutoLoginStatus(autoLoginSvc))
+		authGroup.POST("/openai/auto-login/stop", authOpenAIAutoLoginStop(autoLoginSvc))
 
 		// Qwen OAuth (Device Code Flow)
 		authGroup.POST("/qwen/start", authQwenStart())

@@ -137,6 +137,12 @@ export const api = {
   pollOpenAIOAuth: (sessionId: string, callbackUrl?: string) =>
     request('/auth/openai/exchange', { method: 'POST', body: JSON.stringify({ sessionId, callbackUrl }) }),
 
+  // OpenAI bulk auto-login (automated browser)
+  startOpenAIAutoLogin: (payload: { accounts: string[]; workers: number; headless?: boolean; skipExisting?: boolean }) =>
+    request('/auth/openai/auto-login/start', { method: 'POST', body: JSON.stringify(payload) }),
+  getOpenAIAutoLoginStatus: () => request('/auth/openai/auto-login/status'),
+  stopOpenAIAutoLogin: () => request('/auth/openai/auto-login/stop', { method: 'POST' }),
+
   // Qwen OAuth (Device Code)
   startQwenOAuth: () => request('/auth/qwen/start', { method: 'POST' }),
   pollQwenOAuth: (sessionId: string) =>

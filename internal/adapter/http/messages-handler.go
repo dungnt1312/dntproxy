@@ -704,7 +704,7 @@ func convertAnthropicImage(block map[string]interface{}) map[string]interface{} 
 			return nil
 		}
 		return map[string]interface{}{
-			"type": "image_url",
+			"type":      "image_url",
 			"image_url": map[string]interface{}{"url": url},
 		}
 	default:

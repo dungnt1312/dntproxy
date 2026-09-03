@@ -27,14 +27,14 @@ func apiGetSettings(store port.CredentialStore) gin.HandlerFunc {
 
 		s := cfg.Settings
 		c.JSON(200, settingsAPIView{
-			ComboStrategy:            s.ComboStrategy,
-			ComboStrategies:          s.ComboStrategies,
-			ConnectionStrategy:       s.ConnectionStrategy,
-			ConnectionStrategies:     s.ConnectionStrategies,
-			Compression:              s.Compression,
-			LogBodies:                s.LogBodies,
-			DefaultModels:            s.DefaultModels,
-			DisableImageGeneration:   s.DisableImageGeneration,
+			ComboStrategy:          s.ComboStrategy,
+			ComboStrategies:        s.ComboStrategies,
+			ConnectionStrategy:     s.ConnectionStrategy,
+			ConnectionStrategies:   s.ConnectionStrategies,
+			Compression:            s.Compression,
+			LogBodies:              s.LogBodies,
+			DefaultModels:          s.DefaultModels,
+			DisableImageGeneration: s.DisableImageGeneration,
 		})
 	}
 }
@@ -99,23 +99,23 @@ func apiUpdateSettings(store port.CredentialStore) gin.HandlerFunc {
 // Port and requireApiKey are not accepted here. Listen port comes from
 // PORT / --port; API keys are always required.
 type settingsUpdateRequest struct {
-	ComboStrategy        string              `json:"comboStrategy"`
-	ConnectionStrategy   string              `json:"connectionStrategy"`
-	ConnectionStrategies map[string]string   `json:"connectionStrategies"`
-	ComboStrategies      map[string]string   `json:"comboStrategies"`
-	Compression          domain.CompressionSettings `json:"compression"`
-	LogBodies                bool                 `json:"logBodies"`
-	DefaultModels            map[string][]string  `json:"defaultModels"`
-	DisableImageGeneration   *bool                `json:"disableImageGeneration"`
+	ComboStrategy          string                     `json:"comboStrategy"`
+	ConnectionStrategy     string                     `json:"connectionStrategy"`
+	ConnectionStrategies   map[string]string          `json:"connectionStrategies"`
+	ComboStrategies        map[string]string          `json:"comboStrategies"`
+	Compression            domain.CompressionSettings `json:"compression"`
+	LogBodies              bool                       `json:"logBodies"`
+	DefaultModels          map[string][]string        `json:"defaultModels"`
+	DisableImageGeneration *bool                      `json:"disableImageGeneration"`
 }
 
 type settingsAPIView struct {
-	ComboStrategy          string                       `json:"comboStrategy"`
-	ComboStrategies        map[string]string            `json:"comboStrategies,omitempty"`
-	ConnectionStrategy     string                       `json:"connectionStrategy,omitempty"`
-	ConnectionStrategies   map[string]string            `json:"connectionStrategies,omitempty"`
-	Compression            domain.CompressionSettings   `json:"compression"`
-	LogBodies              bool                         `json:"logBodies"`
-	DefaultModels          map[string][]string          `json:"defaultModels,omitempty"`
-	DisableImageGeneration bool                         `json:"disableImageGeneration"`
+	ComboStrategy          string                     `json:"comboStrategy"`
+	ComboStrategies        map[string]string          `json:"comboStrategies,omitempty"`
+	ConnectionStrategy     string                     `json:"connectionStrategy,omitempty"`
+	ConnectionStrategies   map[string]string          `json:"connectionStrategies,omitempty"`
+	Compression            domain.CompressionSettings `json:"compression"`
+	LogBodies              bool                       `json:"logBodies"`
+	DefaultModels          map[string][]string        `json:"defaultModels,omitempty"`
+	DisableImageGeneration bool                       `json:"disableImageGeneration"`
 }

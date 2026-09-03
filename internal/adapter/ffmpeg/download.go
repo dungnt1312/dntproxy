@@ -16,8 +16,11 @@ import (
 	"github.com/ulikunitz/xz"
 )
 
-// fetchBundle downloads one archive (zip or tar.xz) into the cache dir.
-func fetchBundle(ctx context.Context, url string) error {
+// fetchBundle downloads one archive (zip or tar.xz) into dir. Extraction is
+// intentionally not verified here — single-binary bundles (darwin evermeet
+// zips) legitimately contain only one of the two binaries, and verification
+// happens once in downloadAllFrom after every bundle lands.
+func fetchBundle(ctx context.Context, url, dir string) error {
 	fmt.Printf("[ffmpeg] Downloading %s\n", url)
 
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
@@ -41,42 +44,42 @@ func fetchBundle(ctx context.Context, url string) error {
 		return fmt.Errorf("read download: %w", err)
 	}
 
-	if err := os.MkdirAll(cacheDir(), 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
 
 	switch {
 	case strings.HasSuffix(url, ".zip"):
-		return extractZip(body)
+		return extractZip(body, dir)
 	case strings.HasSuffix(url, ".tar.xz"):
-		return extractTarXz(body)
+		return extractTarXz(body, dir)
 	default:
 		return fmt.Errorf("unsupported archive format: %s", url)
 	}
 }
 
-func extractZip(body []byte) error {
+func extractZip(body []byte, dir string) error {
 	zr, err := zip.NewReader(bytes.NewReader(body), int64(len(body)))
 	if err != nil {
 		return fmt.Errorf("zip: %w", err)
 	}
 	for _, f := range zr.File {
-		base := filepath.Base(f.Name)
-		if base != "ffmpeg.exe" && base != "ffprobe.exe" && base != "ffmpeg" && base != "ffprobe" {
-			continue
-		}
 		if f.FileInfo().IsDir() {
 			continue
 		}
-		if err := writeFileFromZip(zr, f, filepath.Join(cacheDir(), base)); err != nil {
+		base := filepath.Base(f.Name)
+		if base != binaryName("ffmpeg") && base != binaryName("ffprobe") {
+			continue
+		}
+		if err := writeFileFromZip(f, filepath.Join(dir, base)); err != nil {
 			return err
 		}
 		fmt.Printf("[ffmpeg] Extracted %s\n", base)
 	}
-	return verifyExtracted()
+	return nil
 }
 
-func writeFileFromZip(zr *zip.Reader, f *zip.File, target string) error {
+func writeFileFromZip(f *zip.File, target string) error {
 	rc, err := f.Open()
 	if err != nil {
 		return err
@@ -85,7 +88,7 @@ func writeFileFromZip(zr *zip.Reader, f *zip.File, target string) error {
 	return writeExecutable(target, rc)
 }
 
-func extractTarXz(body []byte) error {
+func extractTarXz(body []byte, dir string) error {
 	xr, err := xz.NewReader(bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("xz: %w", err)
@@ -99,20 +102,31 @@ func extractTarXz(body []byte) error {
 		if err != nil {
 			return fmt.Errorf("tar: %w", err)
 		}
-		base := filepath.Base(hdr.Name)
-		if base != "ffmpeg" && base != "ffprobe" {
+		if !hdr.FileInfo().Mode().IsRegular() {
 			continue
 		}
-		if err := writeExecutable(filepath.Join(cacheDir(), base), tr); err != nil {
+		base := filepath.Base(hdr.Name)
+		if base != binaryName("ffmpeg") && base != binaryName("ffprobe") {
+			continue
+		}
+		if err := writeExecutable(filepath.Join(dir, base), tr); err != nil {
 			return err
 		}
 		fmt.Printf("[ffmpeg] Extracted %s\n", base)
 	}
-	return verifyExtracted()
+	return nil
 }
 
+// writeExecutable streams r into a temp file next to target and renames it into
+// place once the copy succeeds, so an interrupted or failed write can never
+// leave a truncated file at target (which the cache-hit guard would otherwise
+// serve forever).
 func writeExecutable(target string, r io.Reader) error {
-	f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
+	tmp := target + ".tmp"
+	_ = os.Remove(tmp)
+	defer os.Remove(tmp)
+
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
 	if err != nil {
 		return err
 	}
@@ -121,14 +135,21 @@ func writeExecutable(target string, r io.Reader) error {
 	if copyErr != nil {
 		return copyErr
 	}
-	return closeErr
+	if closeErr != nil {
+		return closeErr
+	}
+	return os.Rename(tmp, target)
 }
 
-func verifyExtracted() error {
+// verifyExtracted reports an error if either expected binary is missing or
+// undersized in dir. It is called once after all platform bundles have been
+// fetched, never per-bundle: single-binary bundles (darwin evermeet zips)
+// legitimately contain only ffmpeg or only ffprobe.
+func verifyExtracted(dir string) error {
 	for _, name := range []string{binaryName("ffmpeg"), binaryName("ffprobe")} {
-		p := filepath.Join(cacheDir(), name)
-		if info, err := os.Stat(p); err != nil || info.Size() < 1024 {
-			return fmt.Errorf("extraction incomplete: %s missing from archive", name)
+		p := filepath.Join(dir, name)
+		if info, err := os.Stat(p); err != nil || info.Size() < minBinarySize {
+			return fmt.Errorf("%s missing from cache", name)
 		}
 	}
 	return nil

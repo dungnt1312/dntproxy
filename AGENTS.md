@@ -149,6 +149,7 @@ go build -o dntproxy ./cmd/dntproxy/
 - `POST /api/auth/openai/auto-login/start` — Bulk auto-login from `email|password|2fa` lines
 - `GET /api/auth/openai/auto-login/status` — Bulk job progress (owner-scoped)
 - `POST /api/auth/openai/auto-login/stop` — Cancel job and kill its browsers
+- `POST|GET|DELETE /mcp` — MCP analytics server (streamable HTTP, `analyze_image` / `analyze_video`)
 
 ## Model Format
 
@@ -255,6 +256,17 @@ OpenAI request → model resolve → combo expand → account select →
 - Cross-platform: Windows, macOS, Linux (amd64/arm64)
 - Persistent state: `~/.dntproxy/tunnel/state.json`
 - Controlled via dashboard UI and `/api/tunnel/*` (no management CLI)
+
+### MCP Analytics Server (`internal/adapter/mcp`)
+- Streamable HTTP MCP endpoint at `/mcp`, API key required (`Authorization: Bearer`), any valid key works
+- Tools: `analyze_image(image_url, prompt?, model?)` and `analyze_video(video_url, prompt?, model?, max_frames?)`,
+  both return `{ content: [{ type: "text", text }] }`; failures come back as `isError: true` tool results
+- Media is always downloaded and inlined as base64 data URLs (image ≤ 20 MB; video ≤ 150 MB / 2 min timeout)
+- Video: ffprobe duration → evenly spaced JPEG frames (1–16, settings default 8, scaled ≤ 1280 px) → sent as
+  multiple `image_url` parts, so every vision model can analyze video
+- Model resolution: tool `model` param → settings `mcp.defaultModel` → tool error; ffmpeg/ffprobe auto-download
+  to `~/.dntproxy/bin/` on first video call (env overrides `DNTPROXY_FFMPEG_PATH` / `DNTPROXY_FFPROBE_PATH`)
+- Requests run through `ChatService` (requestID `mcp-<uuid>`), so account fallback, cooldown and logging apply
 
 ### Logging
 - Structured request logs to SQLite (`~/.dntproxy/logs.db`)
@@ -366,3 +378,8 @@ OpenAI request → model resolve → combo expand → account select →
   dispatcher, token exchange, email-dedupe upsert, owner-scoped status
 - API `/api/auth/openai/auto-login/{start,status,stop}` + "Bulk auto-login" method chip in the
   OpenAI Add-connection flow (textarea paste, worker count, headless toggle, live progress)
+
+### Phase 9: MCP Analytics Server — DONE
+- `/mcp` streamable HTTP endpoint (official go-sdk), analyze_image/analyze_video tools
+- ffmpeg frame-extraction pipeline (auto-download like cloudflared)
+- Settings `mcp` block + dashboard "MCP Analytics" card with client config snippet

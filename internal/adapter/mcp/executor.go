@@ -62,7 +62,8 @@ func NewAnalyzer(chat port.ChatService, store port.CredentialStore) *Analyzer {
 var errNoModelConfigured = fmt.Errorf("No default vision model configured — set it in Settings → MCP Analytics, or pass the model parameter")
 
 // Analyze runs vision analysis over one media item.
-// kind is "image" or "video"; maxFrames <= 0 uses the settings default.
+// kind is "image" or "video"; maxFrames <= 0 uses the settings default and
+// values above 16 are clamped to 16.
 func (a *Analyzer) Analyze(ctx context.Context, kind, mediaURL, prompt, model string, maxFrames int) (string, error) {
 	settings, err := a.store.GetSettings()
 	if err != nil {
@@ -77,6 +78,9 @@ func (a *Analyzer) Analyze(ctx context.Context, kind, mediaURL, prompt, model st
 	}
 	if maxFrames <= 0 {
 		maxFrames = settings.MCP.VideoMaxFrames
+	}
+	if maxFrames > 16 {
+		maxFrames = 16 // hard ceiling, matches MCPSettings.Normalize
 	}
 	if prompt == "" {
 		prompt = defaultPrompt(kind)

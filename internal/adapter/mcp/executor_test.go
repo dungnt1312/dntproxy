@@ -265,3 +265,30 @@ func TestAnalyzeVideoUsesExtractor(t *testing.T) {
 		t.Fatalf("Analyze default frames: %v", err)
 	}
 }
+
+func TestAnalyzeVideoClampsMaxFrames(t *testing.T) {
+	chat := &fakeChat{resp: sseResp("clamped ok")}
+	a := NewAnalyzer(chat, testStore(t, domain.Settings{
+		MCP: domain.MCPSettings{DefaultModel: "m1"},
+	}))
+
+	var capturedMax int
+	a.ExtractVideo = func(ctx context.Context, videoPath string, maxFrames int) ([]string, func(), error) {
+		capturedMax = maxFrames
+		return []string{dataPNG}, func() {}, nil
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("fakevid"))
+	}))
+	defer srv.Close()
+
+	// Tool-supplied max_frames must be clamped to the hard ceiling of 16
+	// (matches MCPSettings.Normalize), never passed to ffmpeg unbounded.
+	if _, err := a.Analyze(context.Background(), "video", srv.URL+"/v.mp4", "what", "m1", 1000); err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+	if capturedMax != 16 {
+		t.Fatalf("maxFrames = %d, want clamped 16", capturedMax)
+	}
+}

@@ -12,7 +12,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/dungnt/dntproxy/internal/adapter/ffmpeg"
 	"github.com/dungnt/dntproxy/internal/adapter/storage"
 	"github.com/dungnt/dntproxy/internal/domain"
 	"github.com/dungnt/dntproxy/internal/port"
@@ -179,44 +181,46 @@ func TestAnalyzeIdentityPassesPolicy(t *testing.T) {
 	}
 }
 
-func TestFramesToDataURLs(t *testing.T) {
+func TestFramesToTimeline(t *testing.T) {
 	dir := t.TempDir()
 
 	// Real JPEG magic plus arbitrary bytes; the helper must not validate
 	// content beyond a successful non-empty read.
-	write := func(name string, b []byte) string {
+	write := func(name string, b []byte) ffmpeg.Frame {
 		p := filepath.Join(dir, name)
 		if err := os.WriteFile(p, b, 0o600); err != nil {
 			t.Fatal(err)
 		}
-		return p
+		return ffmpeg.Frame{Path: p}
 	}
-	p1 := write("frame-000.jpg", []byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10})
-	p2 := write("frame-001.jpg", []byte{0xFF, 0xD8, 'j', 'p', 'e', 'g'})
+	f1 := write("frame-000.jpg", []byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10})
+	f1.Start, f1.End = 0, 2*time.Minute
+	f2 := write("frame-001.jpg", []byte{0xFF, 0xD8, 'j', 'p', 'e', 'g'})
+	f2.Start, f2.End = 2*time.Minute, 4*time.Minute
 
-	urls, err := framesToDataURLs([]string{p1, p2})
+	timeline, err := framesToTimeline([]ffmpeg.Frame{f1, f2})
 	if err != nil {
-		t.Fatalf("framesToDataURLs: %v", err)
+		t.Fatalf("framesToTimeline: %v", err)
 	}
-	if len(urls) != 2 {
-		t.Fatalf("got %d urls, want 2", len(urls))
+	if len(timeline) != 2 {
+		t.Fatalf("got %d frames, want 2", len(timeline))
 	}
 	want := func(b []byte) string {
 		return "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(b)
 	}
-	if urls[0] != want([]byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10}) {
-		t.Fatalf("url[0] = %q", urls[0])
+	if timeline[0].DataURL != want([]byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10}) {
+		t.Fatalf("url[0] = %q", timeline[0].DataURL)
 	}
-	if urls[1] != want([]byte{0xFF, 0xD8, 'j', 'p', 'e', 'g'}) {
-		t.Fatalf("url[1] = %q", urls[1])
+	if timeline[0].Start != 0 || timeline[0].End != 2*time.Minute {
+		t.Fatalf("frame[0] range = [%v,%v]", timeline[0].Start, timeline[0].End)
 	}
-	if !strings.HasPrefix(urls[0], "data:image/jpeg;base64,") {
-		t.Fatalf("url[0] missing data URL prefix: %q", urls[0])
+	if timeline[1].Start != 2*time.Minute || timeline[1].End != 4*time.Minute {
+		t.Fatalf("frame[1] range = [%v,%v]", timeline[1].Start, timeline[1].End)
 	}
 }
 
-func TestFramesToDataURLsErrorsOnMissingFile(t *testing.T) {
-	if _, err := framesToDataURLs([]string{filepath.Join(t.TempDir(), "nope.jpg")}); err == nil {
+func TestFramesToTimelineErrorsOnMissingFile(t *testing.T) {
+	if _, err := framesToTimeline([]ffmpeg.Frame{{Path: filepath.Join(t.TempDir(), "nope.jpg")}}); err == nil {
 		t.Fatal("want error for missing frame file")
 	}
 }
@@ -228,12 +232,16 @@ func TestAnalyzeVideoUsesExtractor(t *testing.T) {
 	}))
 
 	var capturedMax int
-	a.ExtractVideo = func(ctx context.Context, videoPath string, maxFrames int) ([]string, func(), error) {
+	a.ExtractVideo = func(ctx context.Context, videoPath string, maxFrames int) ([]TimelineFrame, func(), error) {
 		capturedMax = maxFrames
 		if filepath.Ext(videoPath) != ".mp4" {
 			return nil, nil, errors.New("bad video path: " + videoPath)
 		}
-		frames := []string{dataPNG, dataPNG, dataPNG}
+		frames := []TimelineFrame{
+			{DataURL: dataPNG, Start: 0, End: time.Minute},
+			{DataURL: dataPNG, Start: time.Minute, End: 2 * time.Minute},
+			{DataURL: dataPNG, Start: 2 * time.Minute, End: 3 * time.Minute},
+		}
 		return frames, func() {}, nil
 	}
 
@@ -253,13 +261,37 @@ func TestAnalyzeVideoUsesExtractor(t *testing.T) {
 		t.Fatalf("maxFrames = %d, want param 3", capturedMax)
 	}
 
+	// The chat body must interleave timeline labels with the frames so the
+	// model can attribute content to specific video spans.
+	var req struct {
+		Messages []struct {
+			Content []struct {
+				Type string `json:"type"`
+				Text string `json:"text,omitempty"`
+			} `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(chat.body, &req); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
+	parts := req.Messages[0].Content
+	// [prompt, label, img, label, img, label, img]
+	if len(parts) != 7 {
+		t.Fatalf("content parts = %d, want 7", len(parts))
+	}
+	if !strings.Contains(parts[1].Text, "00:00 – 01:00") {
+		t.Fatalf("label[0] = %q, want 00:00 – 01:00", parts[1].Text)
+	}
+	if !strings.Contains(parts[3].Text, "01:00 – 02:00") {
+		t.Fatalf("label[1] = %q, want 01:00 – 02:00", parts[3].Text)
+	}
+
 	// maxFrames <= 0 must fall back to settings default
-	_ = capturedMax
-	a.ExtractVideo = func(ctx context.Context, videoPath string, maxFrames int) ([]string, func(), error) {
+	a.ExtractVideo = func(ctx context.Context, videoPath string, maxFrames int) ([]TimelineFrame, func(), error) {
 		if maxFrames != 8 {
 			return nil, nil, errors.New("want settings default 8")
 		}
-		return []string{dataPNG}, func() {}, nil
+		return []TimelineFrame{{DataURL: dataPNG}}, func() {}, nil
 	}
 	if _, err := a.Analyze(context.Background(), "video", srv.URL+"/v.mp4", "what", "", 0); err != nil {
 		t.Fatalf("Analyze default frames: %v", err)
@@ -273,9 +305,9 @@ func TestAnalyzeVideoClampsMaxFrames(t *testing.T) {
 	}))
 
 	var capturedMax int
-	a.ExtractVideo = func(ctx context.Context, videoPath string, maxFrames int) ([]string, func(), error) {
+	a.ExtractVideo = func(ctx context.Context, videoPath string, maxFrames int) ([]TimelineFrame, func(), error) {
 		capturedMax = maxFrames
-		return []string{dataPNG}, func() {}, nil
+		return []TimelineFrame{{DataURL: dataPNG}}, func() {}, nil
 	}
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

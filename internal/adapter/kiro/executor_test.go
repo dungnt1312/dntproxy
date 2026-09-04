@@ -133,3 +133,69 @@ func TestBuildKiroPayloadNoToolConfigWithoutTools(t *testing.T) {
 		t.Fatal("ToolConfig must be nil when no tools are present")
 	}
 }
+
+func TestBuildKiroPayloadAttachesInlineDataURLs(t *testing.T) {
+	dataURL := "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ"
+	body := `{"model":"claude-sonnet-4.6","messages":[{"role":"user","content":[` +
+		`{"type":"text","text":"What is in this image?"},` +
+		`{"type":"image_url","image_url":{"url":"` + dataURL + `"}}]}]}`
+	var req OpenAIRequest
+	if err := json.Unmarshal([]byte(body), &req); err != nil {
+		t.Fatal(err)
+	}
+	payload, err := BuildKiroPayload(&req, "claude-sonnet-4.6", &domain.Credentials{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	msg := payload.ConversationState.CurrentMessage.UserInputMessage
+	if msg == nil {
+		t.Fatal("missing current user message")
+	}
+	if len(msg.Images) != 1 {
+		t.Fatalf("images = %d, want 1 (payload: %s)", len(msg.Images), mustJSON(t, payload))
+	}
+	if msg.Images[0].Format != "jpeg" {
+		t.Fatalf("format = %q, want jpeg", msg.Images[0].Format)
+	}
+	if msg.Images[0].Source.Bytes != "/9j/4AAQSkZJRgABAQ" {
+		t.Fatalf("bytes mismatch: %q", msg.Images[0].Source.Bytes)
+	}
+	// The base64 blob must not leak into the text content.
+	if strings.Contains(msg.Content, "/9j/4AAQ") {
+		t.Fatalf("base64 leaked into content: %q", msg.Content)
+	}
+	if !strings.Contains(msg.Content, "What is in this image?") {
+		t.Fatalf("prompt text missing: %q", msg.Content)
+	}
+}
+
+func TestBuildKiroPayloadRemoteImageKeepsPlaceholder(t *testing.T) {
+	body := `{"model":"claude-sonnet-4.6","messages":[{"role":"user","content":[` +
+		`{"type":"text","text":"describe"},` +
+		`{"type":"image_url","image_url":{"url":"https://example.com/cat.png"}}]}]}`
+	var req OpenAIRequest
+	if err := json.Unmarshal([]byte(body), &req); err != nil {
+		t.Fatal(err)
+	}
+	payload, err := BuildKiroPayload(&req, "claude-sonnet-4.6", &domain.Credentials{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg := payload.ConversationState.CurrentMessage.UserInputMessage
+	if len(msg.Images) != 0 {
+		t.Fatalf("remote URL must not become inline image, got %d", len(msg.Images))
+	}
+	if !strings.Contains(msg.Content, "[Image: https://example.com/cat.png]") {
+		t.Fatalf("placeholder missing: %q", msg.Content)
+	}
+}
+
+func mustJSON(t *testing.T, v interface{}) string {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}

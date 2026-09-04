@@ -63,7 +63,7 @@ export default function PlaygroundScreen() {
   });
 
   useEffect(() => {
-    async function loadData() {
+    async function loadData(resetSelection = true) {
       setLoadingModels(true);
       try {
         const [modelsData, connectionsData] = await Promise.all([
@@ -73,7 +73,7 @@ export default function PlaygroundScreen() {
         const availableModels = Array.isArray(modelsData) ? modelsData : [];
         setModels(availableModels);
         setConnections(Array.isArray(connectionsData) ? connectionsData.filter((c: Connection) => c.isActive) : []);
-        initializeSelection(availableModels);
+        if (resetSelection) initializeSelection(availableModels);
       } catch {
         toast.error("Failed to load models and connections");
       } finally {
@@ -81,6 +81,18 @@ export default function PlaygroundScreen() {
       }
     }
     loadData();
+    // Refetch when the tab regains focus so newly added connections/models
+    // appear without a manual reload. Selection is preserved.
+    const onVisible = () => {
+      if (document.visibilityState === "visible") loadData(false);
+    };
+    window.addEventListener("focus", onVisible);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("focus", onVisible);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {

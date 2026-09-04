@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -35,17 +36,25 @@ func IdentityFrom(ctx context.Context) *Identity {
 	return id
 }
 
+// TimelineFrame is one video sample inlined as a base64 data URL together
+// with the span of the video it represents.
+type TimelineFrame struct {
+	DataURL string
+	Start   time.Duration
+	End     time.Duration
+}
+
 // Analyzer runs one vision analysis: load media → build an OpenAI chat body →
 // ChatService → aggregate SSE → text.
 type Analyzer struct {
 	chat  port.ChatService
 	store port.CredentialStore
-	// ExtractVideo extracts frames from a downloaded video file and returns
-	// them as base64 data URLs (data:image/jpeg;base64,...), NOT file paths.
-	// Media must always be inlined as data URLs so behavior is identical
-	// across all provider translators. Swap in tests; production default uses
-	// ffmpeg (defaultExtractVideo).
-	ExtractVideo func(ctx context.Context, videoPath string, maxFrames int) (frames []string, cleanup func(), err error)
+	// ExtractVideo extracts timeline frames from a downloaded video file and
+	// returns them as base64 data URLs (data:image/jpeg;base64,...), NOT file
+	// paths. Media must always be inlined as data URLs so behavior is
+	// identical across all provider translators. Swap in tests; production
+	// default uses ffmpeg (defaultExtractVideo).
+	ExtractVideo func(ctx context.Context, videoPath string, maxFrames int) (frames []TimelineFrame, cleanup func(), err error)
 }
 
 // NewAnalyzer creates an Analyzer with the production ffmpeg extractor.
@@ -57,7 +66,7 @@ func NewAnalyzer(chat port.ChatService, store port.CredentialStore) *Analyzer {
 	}
 }
 
-// noModelConfigured is the actionable error when neither the tool call nor
+// errNoModelConfigured is the actionable error when neither the tool call nor
 // settings name a vision model.
 var errNoModelConfigured = fmt.Errorf("No default vision model configured — set it in Settings → MCP Analytics, or pass the model parameter")
 
@@ -86,14 +95,13 @@ func (a *Analyzer) Analyze(ctx context.Context, kind, mediaURL, prompt, model st
 		prompt = defaultPrompt(kind)
 	}
 
-	var imageParts []string
 	switch kind {
 	case "image":
 		dataURL, err := FetchImageAsDataURL(ctx, http.DefaultClient, mediaURL)
 		if err != nil {
 			return "", err
 		}
-		imageParts = []string{dataURL}
+		return a.complete(ctx, model, prompt, []chatMessage{userMessage(prompt, []string{dataURL})})
 	case "video":
 		videoPath, cleanup, err := DownloadVideo(ctx, http.DefaultClient, mediaURL)
 		if err != nil {
@@ -111,19 +119,19 @@ func (a *Analyzer) Analyze(ctx context.Context, kind, mediaURL, prompt, model st
 		if len(frames) > maxFrames {
 			frames = frames[:maxFrames]
 		}
-		imageParts = frames
+		return a.complete(ctx, model, prompt, timelineMessages(prompt, frames))
 	default:
 		return "", fmt.Errorf("unknown media kind %q", kind)
 	}
-
-	return a.complete(ctx, model, prompt, imageParts)
 }
 
-func (a *Analyzer) complete(ctx context.Context, model, prompt string, imageParts []string) (string, error) {
+// complete sends one or more pre-built messages through the chat pipeline and
+// returns the aggregated assistant text.
+func (a *Analyzer) complete(ctx context.Context, model, prompt string, messages []chatMessage) (string, error) {
 	body, err := json.Marshal(chatRequest{
 		Model:    model,
 		Stream:   true,
-		Messages: []chatMessage{userMessage(prompt, imageParts)},
+		Messages: messages,
 	})
 	if err != nil {
 		return "", err
@@ -157,10 +165,10 @@ func (a *Analyzer) complete(ctx context.Context, model, prompt string, imagePart
 	return completion.Choices[0].Message.Content, nil
 }
 
-// defaultExtractVideo locates ffmpeg and extracts frames into a temp dir,
-// returning them as base64 JPEG data URLs. The returned cleanup func removes
-// the temp dir (and thus the underlying frame files).
-func defaultExtractVideo(ctx context.Context, videoPath string, maxFrames int) ([]string, func(), error) {
+// defaultExtractVideo locates ffmpeg and extracts timeline frames into a temp
+// dir, returning them as base64 JPEG data URLs with their time ranges. The
+// returned cleanup func removes the temp dir (and thus the frame files).
+func defaultExtractVideo(ctx context.Context, videoPath string, maxFrames int) ([]TimelineFrame, func(), error) {
 	ffmpegPath, ffprobePath, err := ffmpeg.Locate(ctx)
 	if err != nil {
 		return nil, nil, err
@@ -170,34 +178,37 @@ func defaultExtractVideo(ctx context.Context, videoPath string, maxFrames int) (
 		return nil, nil, err
 	}
 	cleanup := func() { os.RemoveAll(dir) }
-	framePaths, err := ffmpeg.ExtractFrames(ctx, ffmpegPath, ffprobePath, videoPath, dir, maxFrames)
+	extracted, err := ffmpeg.ExtractFrames(ctx, ffmpegPath, ffprobePath, videoPath, dir, maxFrames)
 	if err != nil {
 		cleanup()
 		return nil, nil, err
 	}
-	dataURLs, err := framesToDataURLs(framePaths)
+	timeline, err := framesToTimeline(extracted)
 	if err != nil {
 		cleanup()
 		return nil, nil, err
 	}
-	return dataURLs, cleanup, nil
+	return timeline, cleanup, nil
 }
 
-// framesToDataURLs reads each JPEG frame file and encodes it as a base64
-// data URL so media is always inlined. Frame files are small (max 16 frames,
-// <=1280px, q:v 4), so reading them fully into memory is fine. The bytes are
-// not validated beyond a successful read and non-empty content.
-func framesToDataURLs(paths []string) ([]string, error) {
-	dataURLs := make([]string, 0, len(paths))
-	for _, p := range paths {
-		b, err := os.ReadFile(p)
+// framesToTimeline reads each extracted JPEG and encodes it as a base64 data
+// URL so media is always inlined. Frame files are small (max 16 frames,
+// <=1280px, q:v 4), so reading them fully into memory is fine.
+func framesToTimeline(extracted []ffmpeg.Frame) ([]TimelineFrame, error) {
+	timeline := make([]TimelineFrame, 0, len(extracted))
+	for _, f := range extracted {
+		b, err := os.ReadFile(f.Path)
 		if err != nil {
-			return nil, fmt.Errorf("read frame %s: %w", p, err)
+			return nil, fmt.Errorf("read frame %s: %w", f.Path, err)
 		}
 		if len(b) == 0 {
-			return nil, fmt.Errorf("read frame %s: empty file", p)
+			return nil, fmt.Errorf("read frame %s: empty file", f.Path)
 		}
-		dataURLs = append(dataURLs, "data:image/jpeg;base64,"+base64.StdEncoding.EncodeToString(b))
+		timeline = append(timeline, TimelineFrame{
+			DataURL: "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(b),
+			Start:   f.Start,
+			End:     f.End,
+		})
 	}
-	return dataURLs, nil
+	return timeline, nil
 }

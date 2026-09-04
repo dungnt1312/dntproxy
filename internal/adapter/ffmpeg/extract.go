@@ -3,6 +3,7 @@ package ffmpeg
 import (
 	"context"
 	"fmt"
+	"log"
 	"math"
 	"os"
 	"os/exec"
@@ -30,18 +31,49 @@ func FrameTimestamps(duration time.Duration, maxFrames int) []time.Duration {
 	return ts
 }
 
+// Frame is one extracted JPEG with the time range of the video it
+// represents. Ranges are bounded by the midpoints between consecutive
+// samples: the first frame starts at 0 and the last ends at the video
+// duration.
+type Frame struct {
+	Path      string
+	Timestamp time.Duration
+	Start     time.Duration
+	End       time.Duration
+}
+
+// frameRanges pairs sample points with the segment each represents:
+// [0, mid01], [mid01, mid02], ..., [midN-1N, duration].
+func frameRanges(timestamps []time.Duration, duration time.Duration) [][2]time.Duration {
+	ranges := make([][2]time.Duration, len(timestamps))
+	for i, ts := range timestamps {
+		start := time.Duration(0)
+		if i > 0 {
+			start = (timestamps[i-1] + ts) / 2
+		}
+		end := duration
+		if i < len(timestamps)-1 {
+			end = (ts + timestamps[i+1]) / 2
+		}
+		ranges[i] = [2]time.Duration{start, end}
+	}
+	return ranges
+}
+
 // ExtractFrames extracts up to maxFrames evenly spaced JPEG frames from
-// videoPath into dir (which must exist), returning frame paths in
-// chronological order. Frames whose extraction fails are skipped; an error
-// is returned only when no frame could be extracted or probing fails.
-func ExtractFrames(ctx context.Context, ffmpegPath, ffprobePath, videoPath, dir string, maxFrames int) ([]string, error) {
+// videoPath into dir (which must exist), returning frames in chronological
+// order with the time range each represents. Frames whose extraction fails
+// are skipped; an error is returned only when no frame could be extracted or
+// probing fails.
+func ExtractFrames(ctx context.Context, ffmpegPath, ffprobePath, videoPath, dir string, maxFrames int) ([]Frame, error) {
 	duration, err := probeDuration(ctx, ffprobePath, videoPath)
 	if err != nil {
 		return nil, err
 	}
 
 	timestamps := FrameTimestamps(duration, maxFrames)
-	frames := make([]string, 0, len(timestamps))
+	ranges := frameRanges(timestamps, duration)
+	frames := make([]Frame, 0, len(timestamps))
 	for i, ts := range timestamps {
 		out := filepath.Join(dir, fmt.Sprintf("frame-%03d.jpg", i))
 		args := []string{
@@ -56,11 +88,16 @@ func ExtractFrames(ctx context.Context, ffmpegPath, ffprobePath, videoPath, dir 
 		cmd := exec.CommandContext(ctx, ffmpegPath, args...)
 		if outBytes, err := cmd.CombinedOutput(); err != nil {
 			// Likely past EOF for short videos — skip and keep going.
-			fmt.Printf("[ffmpeg] frame %d at %v failed: %v\n%s\n", i, ts, err, outBytes)
+			log.Printf("[ffmpeg] frame %d at %v failed: %v\n%s", i, ts, err, outBytes)
 			continue
 		}
 		if info, err := os.Stat(out); err == nil && info.Size() > 0 {
-			frames = append(frames, out)
+			frames = append(frames, Frame{
+				Path:      out,
+				Timestamp: ts,
+				Start:     ranges[i][0],
+				End:       ranges[i][1],
+			})
 		}
 	}
 	if len(frames) == 0 {

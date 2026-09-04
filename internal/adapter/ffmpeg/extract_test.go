@@ -55,12 +55,39 @@ func TestExtractFramesIntegration(t *testing.T) {
 		t.Fatalf("got %d frames, want 4: %v", len(frames), frames)
 	}
 	for i, f := range frames {
-		data, err := os.ReadFile(f)
+		data, err := os.ReadFile(f.Path)
 		if err != nil {
 			t.Fatalf("read frame %d: %v", i, err)
 		}
 		if len(data) < 2 || data[0] != 0xFF || data[1] != 0xD8 {
-			t.Fatalf("frame %d is not JPEG: %s (%d bytes)", i, f, len(data))
+			t.Fatalf("frame %d is not JPEG: %s (%d bytes)", i, f.Path, len(data))
+		}
+	}
+	// Ranges must be chronological and span the whole fixture.
+	if frames[0].Start != 0 {
+		t.Fatalf("first frame start = %v, want 0", frames[0].Start)
+	}
+	for i := 1; i < len(frames); i++ {
+		if frames[i].Start < frames[i-1].End {
+			t.Fatalf("frame %d range [%v,%v] overlaps previous end %v", i, frames[i].Start, frames[i].End, frames[i-1].End)
+		}
+	}
+}
+
+func TestFrameRangesSpanDuration(t *testing.T) {
+	duration := 10 * time.Second
+	ts := FrameTimestamps(duration, 4)
+	ranges := frameRanges(ts, duration)
+
+	if ranges[0][0] != 0 {
+		t.Fatalf("first start = %v, want 0", ranges[0][0])
+	}
+	if ranges[len(ranges)-1][1] != duration {
+		t.Fatalf("last end = %v, want %v", ranges[len(ranges)-1][1], duration)
+	}
+	for i := 1; i < len(ranges); i++ {
+		if ranges[i][0] != ranges[i-1][1] {
+			t.Fatalf("range %d start %v != previous end %v", i, ranges[i][0], ranges[i-1][1])
 		}
 	}
 }

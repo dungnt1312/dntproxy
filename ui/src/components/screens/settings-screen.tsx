@@ -610,11 +610,16 @@ function MCPCard({
     goApi
       .getModels()
       .then((models: Array<{ id: string; capabilities?: string[] }>) => {
-        setVisionModels(
-          (models || [])
-            .filter((m) => Array.isArray(m.capabilities) && m.capabilities.includes("vision"))
-            .map((m) => m.id),
+        // Vision-capable models first; models without capability metadata
+        // (e.g. openai-compatible custom routes) still appear so they can be
+        // picked as the default.
+        const vision = (models || []).filter((m) =>
+          Array.isArray(m.capabilities) && m.capabilities.includes("vision"),
         );
+        const rest = (models || []).filter(
+          (m) => !vision.includes(m),
+        );
+        setVisionModels([...vision, ...rest].map((m) => m.id));
       })
       .catch(() => setVisionModels([]));
   }, []);
@@ -673,8 +678,8 @@ function MCPCard({
             ))}
           </datalist>
           <p className="text-xs text-muted-foreground">
-            Used when a tool call does not pass its own model. Tools also
-            accept aliases and combos.
+            Used when a tool call does not pass its own model. Vision-capable
+            models are listed first; tools also accept aliases and combos.
           </p>
         </div>
 

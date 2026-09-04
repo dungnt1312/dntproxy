@@ -22,6 +22,18 @@ type KiroUserMessage struct {
 	ModelID                 string                  `json:"modelId"`
 	Origin                  string                  `json:"origin,omitempty"`
 	UserInputMessageContext *KiroUserMessageContext `json:"userInputMessageContext,omitempty"`
+	Images                  []KiroImage             `json:"images,omitempty"`
+}
+
+// KiroImage is an inline image attached to a user message.
+type KiroImage struct {
+	Format string          `json:"format"`
+	Source KiroImageSource `json:"source"`
+}
+
+// KiroImageSource carries the base64-encoded image bytes.
+type KiroImageSource struct {
+	Bytes string `json:"bytes"`
 }
 
 // KiroUserMessageContext holds tools and tool results.
@@ -187,6 +199,11 @@ func BuildKiroPayload(req *OpenAIRequest, model string, creds *domain.Credential
 		current.UserInputMessage.UserInputMessageContext = currentMsg.UserInputMessage.UserInputMessageContext
 	}
 
+	// Attach inline images from the current message (vision requests).
+	if currentMsg != nil && currentMsg.UserInputMessage != nil && len(currentMsg.UserInputMessage.Images) > 0 {
+		current.UserInputMessage.Images = currentMsg.UserInputMessage.Images
+	}
+
 	payload := &KiroPayload{
 		ConversationState: KiroConversationState{
 			ChatTriggerType: "MANUAL",
@@ -273,6 +290,7 @@ func convertMessages(messages []OpenAIMessage, tools []KiroTool, model string) (
 	var pendingUserContent []string
 	var pendingAssistantContent []string
 	var pendingToolResults []KiroToolResult
+	var pendingUserImages []KiroImage
 	var currentRole string
 
 	flushPending := func() {
@@ -287,6 +305,9 @@ func convertMessages(messages []OpenAIMessage, tools []KiroTool, model string) (
 					Content: content,
 					ModelID: "",
 				},
+			}
+			if len(pendingUserImages) > 0 {
+				userMsg.UserInputMessage.Images = pendingUserImages
 			}
 
 			if len(pendingToolResults) > 0 {
@@ -308,6 +329,7 @@ func convertMessages(messages []OpenAIMessage, tools []KiroTool, model string) (
 			currentMessage = &userMsg
 			pendingUserContent = nil
 			pendingToolResults = nil
+			pendingUserImages = nil
 
 		} else if currentRole == "assistant" {
 			content := strings.Join(pendingAssistantContent, "\n\n")
@@ -339,7 +361,7 @@ func convertMessages(messages []OpenAIMessage, tools []KiroTool, model string) (
 		currentRole = role
 
 		if role == "user" {
-			content, toolResults := extractUserContent(msg)
+			content, toolResults, images := extractUserContent(msg)
 
 			if msg.Role == "tool" {
 				// Tool role message
@@ -354,6 +376,7 @@ func convertMessages(messages []OpenAIMessage, tools []KiroTool, model string) (
 					pendingUserContent = append(pendingUserContent, content)
 				}
 				pendingToolResults = append(pendingToolResults, toolResults...)
+				pendingUserImages = append(pendingUserImages, images...)
 			}
 
 		} else if role == "assistant" {
@@ -443,25 +466,26 @@ func extractStringContent(raw json.RawMessage) string {
 	return string(raw)
 }
 
-func extractUserContent(msg OpenAIMessage) (string, []KiroToolResult) {
+func extractUserContent(msg OpenAIMessage) (string, []KiroToolResult, []KiroImage) {
 	if len(msg.Content) == 0 {
-		return "", nil
+		return "", nil, nil
 	}
 
 	// Try as string first
 	var s string
 	if err := json.Unmarshal(msg.Content, &s); err == nil {
-		return s, nil
+		return s, nil, nil
 	}
 
 	// Try as array of content blocks
 	var blocks []ContentBlock
 	if err := json.Unmarshal(msg.Content, &blocks); err != nil {
-		return string(msg.Content), nil
+		return string(msg.Content), nil, nil
 	}
 
 	var textParts []string
 	var toolResults []KiroToolResult
+	var images []KiroImage
 
 	for _, b := range blocks {
 		switch b.Type {
@@ -471,9 +495,17 @@ func extractUserContent(msg OpenAIMessage) (string, []KiroToolResult) {
 			}
 		case "image_url":
 			imgURL := extractImageURL(b.ImageURL)
-			if imgURL != "" {
-				textParts = append(textParts, fmt.Sprintf("[Image: %s]", imgURL))
+			if imgURL == "" {
+				continue
 			}
+			if img, ok := kiroImageFromDataURL(imgURL); ok {
+				// Inline data URLs become real image attachments so vision
+				// requests reach the upstream model.
+				images = append(images, img)
+				continue
+			}
+			// Remote URLs cannot be inlined here; keep the textual placeholder.
+			textParts = append(textParts, fmt.Sprintf("[Image: %s]", imgURL))
 		case "tool_result":
 			text := ""
 			if len(b.Content) > 0 {
@@ -500,7 +532,28 @@ func extractUserContent(msg OpenAIMessage) (string, []KiroToolResult) {
 		}
 	}
 
-	return strings.Join(textParts, "\n"), toolResults
+	return strings.Join(textParts, "\n"), toolResults, images
+}
+
+// kiroImageFromDataURL parses a data:image/<format>;base64,<payload> URL into
+// a Kiro inline image. Returns ok=false for anything that is not a complete
+// base64 image data URL.
+func kiroImageFromDataURL(raw string) (KiroImage, bool) {
+	const prefix = "data:image/"
+	const marker = ";base64,"
+	if !strings.HasPrefix(raw, prefix) {
+		return KiroImage{}, false
+	}
+	semi := strings.Index(raw, marker)
+	if semi < 0 {
+		return KiroImage{}, false
+	}
+	format := raw[len(prefix):semi]
+	payload := raw[semi+len(marker):]
+	if format == "" || strings.Contains(format, "/") || payload == "" {
+		return KiroImage{}, false
+	}
+	return KiroImage{Format: format, Source: KiroImageSource{Bytes: payload}}, true
 }
 
 func extractImageURL(imageURL interface{}) string {

@@ -79,6 +79,9 @@ func NewRouter(store port.CredentialStore, providers port.ProviderRegistry, imag
 	// inside on the /api group under dashboardKeyMiddleware)
 	RegisterAPIRoutes(r, store, providers, imageProviders, chatService.ClearComboRotation, tunnelMgr)
 
+	// MCP analytics server (streamable HTTP, API key required)
+	mountMCP(r, store, chatService)
+
 	// Health check
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok", "version": version.Version})

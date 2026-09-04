@@ -156,6 +156,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	log.Printf("[dntproxy] Dashboard: http://localhost%s/dashboard", addr)
 	log.Printf("[dntproxy] OpenAI-compatible API: http://localhost%s/v1/chat/completions", addr)
 	log.Printf("[dntproxy] Anthropic Messages API: http://localhost%s/v1/messages", addr)
+	log.Printf("[dntproxy] MCP analytics endpoint: http://localhost%s/mcp", addr)
 
 	srv := &http.Server{
 		Addr:    addr,

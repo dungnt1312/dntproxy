@@ -9,6 +9,7 @@ import {
   GitBranch,
   Link2,
   ChevronDown,
+  Puzzle,
 } from "lucide-react";
 import {
   Card,
@@ -44,6 +45,8 @@ interface SettingsData {
   logBodies: boolean;
   defaultModels: Record<string, string[]>;
   disableImageGeneration: boolean;
+  mcpDefaultModel: string;
+  mcpVideoMaxFrames: number;
 }
 
 const DEFAULT_SETTINGS: SettingsData = {
@@ -57,6 +60,8 @@ const DEFAULT_SETTINGS: SettingsData = {
   logBodies: false,
   defaultModels: {},
   disableImageGeneration: false,
+  mcpDefaultModel: "",
+  mcpVideoMaxFrames: 8,
 };
 
 const PROVIDERS = [
@@ -158,6 +163,8 @@ export default function SettingsScreen() {
         logBodies: settings.logBodies,
         defaultModels: settings.defaultModels,
         disableImageGeneration: settings.disableImageGeneration,
+        mcpDefaultModel: settings.mcpDefaultModel,
+        mcpVideoMaxFrames: settings.mcpVideoMaxFrames,
       });
       setSettings(json);
       setSaved(json);
@@ -447,6 +454,7 @@ export default function SettingsScreen() {
       </Card>
 
       <DefaultModelsCard settings={settings} updateField={updateField} />
+      <MCPCard settings={settings} updateField={updateField} />
     </div>
   );
 }
@@ -580,6 +588,132 @@ function DefaultModelsCard({
             </div>
           );
         })}
+      </CardContent>
+    </Card>
+  );
+}
+
+function MCPCard({
+  settings,
+  updateField,
+}: {
+  settings: SettingsData;
+  updateField: <K extends keyof SettingsData>(
+    key: K,
+    value: SettingsData[K],
+  ) => void;
+}) {
+  const [visionModels, setVisionModels] = useState<string[]>([]);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    goApi
+      .getModels()
+      .then((models: Array<{ id: string; capabilities?: string[] }>) => {
+        setVisionModels(
+          (models || [])
+            .filter((m) => Array.isArray(m.capabilities) && m.capabilities.includes("vision"))
+            .map((m) => m.id),
+        );
+      })
+      .catch(() => setVisionModels([]));
+  }, []);
+
+  const endpoint = `${window.location.origin}/mcp`;
+  const snippet = JSON.stringify(
+    {
+      mcpServers: {
+        dntproxy: {
+          url: endpoint,
+          headers: { Authorization: "Bearer <your-api-key>" },
+        },
+      },
+    },
+    null,
+    2,
+  );
+
+  const copySnippet = async () => {
+    try {
+      await navigator.clipboard.writeText(snippet);
+      setCopied(true);
+      toast.success("Client config copied");
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      toast.error("Copy failed");
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <Puzzle className="size-5 text-emerald-600" />
+          <CardTitle className="text-base">MCP Analytics</CardTitle>
+        </div>
+        <CardDescription>
+          MCP server endpoint with analyze_image / analyze_video tools. Any API
+          key can call it with <code>Authorization: Bearer</code>.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-5 p-6 pt-0">
+        <div className="space-y-2">
+          <Label htmlFor="mcpModel">Default vision model</Label>
+          <Input
+            id="mcpModel"
+            list="mcp-vision-models"
+            placeholder="e.g. glm/glm-4.5v"
+            value={settings.mcpDefaultModel}
+            onChange={(e) => updateField("mcpDefaultModel", e.target.value)}
+            className="max-w-xs"
+          />
+          <datalist id="mcp-vision-models">
+            {visionModels.map((id) => (
+              <option key={id} value={id} />
+            ))}
+          </datalist>
+          <p className="text-xs text-muted-foreground">
+            Used when a tool call does not pass its own model. Tools also
+            accept aliases and combos.
+          </p>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="mcpFrames">Video frames per analysis</Label>
+          <Input
+            id="mcpFrames"
+            type="number"
+            min={1}
+            max={16}
+            value={settings.mcpVideoMaxFrames}
+            onChange={(e) =>
+              updateField(
+                "mcpVideoMaxFrames",
+                Math.min(16, Math.max(1, parseInt(e.target.value, 10) || 8)),
+              )
+            }
+            className="max-w-xs"
+          />
+          <p className="text-xs text-muted-foreground">
+            Videos are sampled into evenly spaced frames (max 16) and sent as
+            images to the vision model.
+          </p>
+        </div>
+
+        <div className="space-y-2 border-t pt-4">
+          <Label>MCP endpoint</Label>
+          <code className="block rounded-md bg-muted px-3 py-2 text-xs">
+            {endpoint}
+          </code>
+          <div className="flex items-center gap-2">
+            <Button type="button" variant="outline" size="sm" onClick={copySnippet}>
+              {copied ? "Copied" : "Copy client config"}
+            </Button>
+            <span className="text-xs text-muted-foreground">
+              Paste into your MCP client config, then replace the placeholder key.
+            </span>
+          </div>
+        </div>
       </CardContent>
     </Card>
   );

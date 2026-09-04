@@ -285,6 +285,8 @@ function mapSettings(go: any) {
     logBodies: Boolean(go.logBodies),
     defaultModels: go.defaultModels || {},
     disableImageGeneration: Boolean(go.disableImageGeneration),
+    mcpDefaultModel: String(go?.mcp?.defaultModel || ""),
+    mcpVideoMaxFrames: Number(go?.mcp?.videoMaxFrames ?? 8),
   };
 }
 
@@ -478,6 +480,10 @@ export const goApi: any = {
       logBodies: Boolean(data.logBodies ?? false),
       defaultModels: data.defaultModels || {},
       disableImageGeneration: Boolean(data.disableImageGeneration ?? false),
+      mcp: {
+        defaultModel: data.mcpDefaultModel || "",
+        videoMaxFrames: Number(data.mcpVideoMaxFrames ?? 8),
+      },
     };
     return goRequest("/settings", {
       method: "PUT",

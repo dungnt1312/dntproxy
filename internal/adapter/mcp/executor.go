@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -39,8 +40,11 @@ func IdentityFrom(ctx context.Context) *Identity {
 type Analyzer struct {
 	chat  port.ChatService
 	store port.CredentialStore
-	// ExtractVideo extracts frames from a downloaded video file. Swap in
-	// tests; production default uses ffmpeg (defaultExtractVideo).
+	// ExtractVideo extracts frames from a downloaded video file and returns
+	// them as base64 data URLs (data:image/jpeg;base64,...), NOT file paths.
+	// Media must always be inlined as data URLs so behavior is identical
+	// across all provider translators. Swap in tests; production default uses
+	// ffmpeg (defaultExtractVideo).
 	ExtractVideo func(ctx context.Context, videoPath string, maxFrames int) (frames []string, cleanup func(), err error)
 }
 
@@ -149,7 +153,9 @@ func (a *Analyzer) complete(ctx context.Context, model, prompt string, imagePart
 	return completion.Choices[0].Message.Content, nil
 }
 
-// defaultExtractVideo locates ffmpeg and extracts frames into a temp dir.
+// defaultExtractVideo locates ffmpeg and extracts frames into a temp dir,
+// returning them as base64 JPEG data URLs. The returned cleanup func removes
+// the temp dir (and thus the underlying frame files).
 func defaultExtractVideo(ctx context.Context, videoPath string, maxFrames int) ([]string, func(), error) {
 	ffmpegPath, ffprobePath, err := ffmpeg.Locate(ctx)
 	if err != nil {
@@ -159,10 +165,35 @@ func defaultExtractVideo(ctx context.Context, videoPath string, maxFrames int) (
 	if err != nil {
 		return nil, nil, err
 	}
-	frames, err := ffmpeg.ExtractFrames(ctx, ffmpegPath, ffprobePath, videoPath, dir, maxFrames)
+	cleanup := func() { os.RemoveAll(dir) }
+	framePaths, err := ffmpeg.ExtractFrames(ctx, ffmpegPath, ffprobePath, videoPath, dir, maxFrames)
 	if err != nil {
-		os.RemoveAll(dir)
+		cleanup()
 		return nil, nil, err
 	}
-	return frames, func() { os.RemoveAll(dir) }, nil
+	dataURLs, err := framesToDataURLs(framePaths)
+	if err != nil {
+		cleanup()
+		return nil, nil, err
+	}
+	return dataURLs, cleanup, nil
+}
+
+// framesToDataURLs reads each JPEG frame file and encodes it as a base64
+// data URL so media is always inlined. Frame files are small (max 16 frames,
+// <=1280px, q:v 4), so reading them fully into memory is fine. The bytes are
+// not validated beyond a successful read and non-empty content.
+func framesToDataURLs(paths []string) ([]string, error) {
+	dataURLs := make([]string, 0, len(paths))
+	for _, p := range paths {
+		b, err := os.ReadFile(p)
+		if err != nil {
+			return nil, fmt.Errorf("read frame %s: %w", p, err)
+		}
+		if len(b) == 0 {
+			return nil, fmt.Errorf("read frame %s: empty file", p)
+		}
+		dataURLs = append(dataURLs, "data:image/jpeg;base64,"+base64.StdEncoding.EncodeToString(b))
+	}
+	return dataURLs, nil
 }

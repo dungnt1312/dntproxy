@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -23,6 +24,7 @@ type fakeChat struct {
 	model     string
 	requestID string
 	policy    *port.APIKeyPolicy
+	meta      []port.RequestMetadata
 	resp      *port.ChatResult
 }
 
@@ -31,6 +33,7 @@ func (f *fakeChat) HandleChat(body []byte, model, requestID string, policy *port
 	f.model = model
 	f.requestID = requestID
 	f.policy = policy
+	f.meta = meta
 	return f.resp
 }
 
@@ -164,6 +167,57 @@ func TestAnalyzeIdentityPassesPolicy(t *testing.T) {
 	}
 	if chat.policy == nil || len(chat.policy.AllowedModels) != 1 {
 		t.Fatalf("policy not passed through: %+v", chat.policy)
+	}
+	if len(chat.meta) == 0 {
+		t.Fatal("no request metadata passed through")
+	}
+	if chat.meta[0].TenantID != "t1" {
+		t.Fatalf("meta TenantID = %q, want t1", chat.meta[0].TenantID)
+	}
+	if chat.meta[0].APIKeyID != "k1" {
+		t.Fatalf("meta APIKeyID = %q, want k1", chat.meta[0].APIKeyID)
+	}
+}
+
+func TestFramesToDataURLs(t *testing.T) {
+	dir := t.TempDir()
+
+	// Real JPEG magic plus arbitrary bytes; the helper must not validate
+	// content beyond a successful non-empty read.
+	write := func(name string, b []byte) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, b, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	p1 := write("frame-000.jpg", []byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10})
+	p2 := write("frame-001.jpg", []byte{0xFF, 0xD8, 'j', 'p', 'e', 'g'})
+
+	urls, err := framesToDataURLs([]string{p1, p2})
+	if err != nil {
+		t.Fatalf("framesToDataURLs: %v", err)
+	}
+	if len(urls) != 2 {
+		t.Fatalf("got %d urls, want 2", len(urls))
+	}
+	want := func(b []byte) string {
+		return "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(b)
+	}
+	if urls[0] != want([]byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10}) {
+		t.Fatalf("url[0] = %q", urls[0])
+	}
+	if urls[1] != want([]byte{0xFF, 0xD8, 'j', 'p', 'e', 'g'}) {
+		t.Fatalf("url[1] = %q", urls[1])
+	}
+	if !strings.HasPrefix(urls[0], "data:image/jpeg;base64,") {
+		t.Fatalf("url[0] missing data URL prefix: %q", urls[0])
+	}
+}
+
+func TestFramesToDataURLsErrorsOnMissingFile(t *testing.T) {
+	if _, err := framesToDataURLs([]string{filepath.Join(t.TempDir(), "nope.jpg")}); err == nil {
+		t.Fatal("want error for missing frame file")
 	}
 }
 

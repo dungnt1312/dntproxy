@@ -88,3 +88,27 @@ func TestCheckFallbackErrorBackoffEscalation(t *testing.T) {
 		t.Fatal("5xx should lock the model only, not the whole account")
 	}
 }
+
+func TestIsAuthRevokedErrorTextInvalidRefreshToken(t *testing.T) {
+	// OpenAI's dead refresh token error must classify as a hard auth revocation
+	// (long cooldown) so the account is sidelined rather than retried on the 5s
+	// unauthorized cooldown.
+	openaiBody := `{"error":{"message":"Invalid refresh token.","type":"invalid_request_error","code":"invalid_refresh_token"}}`
+	errText := "openai refresh failed: token refresh failed (401): " + openaiBody
+	if !IsAuthRevokedErrorText(errText) {
+		t.Fatalf("IsAuthRevokedErrorText(%q) = false, want true", errText)
+	}
+
+	fb := CheckFallbackError(401, errText, 0)
+	if !fb.ShouldFallback {
+		t.Fatal("ShouldFallback = false, want true")
+	}
+	if fb.CooldownMs != CooldownAuthRevoked {
+		t.Fatalf("CooldownMs = %d, want %d (auth revoked)", fb.CooldownMs, CooldownAuthRevoked)
+	}
+
+	// A plain network error during refresh is not a revocation.
+	if IsAuthRevokedErrorText(`request failed: Post "https://auth.openai.com": dial tcp 140.82.112.3:443: connectex: A connection attempt failed`) {
+		t.Fatal("network error must not classify as revoked")
+	}
+}

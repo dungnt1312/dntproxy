@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"net/http"
 	"sort"
 	"strings"
 	"sync"
@@ -14,13 +15,21 @@ import (
 	"github.com/dungnt/dntproxy/internal/adapter/auth"
 	"github.com/dungnt/dntproxy/internal/adapter/shared"
 	"github.com/dungnt/dntproxy/internal/domain"
+	"github.com/dungnt/dntproxy/internal/logger"
 	"github.com/dungnt/dntproxy/internal/port"
 )
+
+// oauthTokenRefresher is the subset of auth.TokenRefreshService the selector
+// needs. Defined as an interface so tests can stub refresh outcomes.
+type oauthTokenRefresher interface {
+	ForceRefresh(conn *domain.ProviderConnection) (*domain.ProviderConnection, error)
+	ShouldProactivelyRefresh(conn *domain.ProviderConnection) bool
+}
 
 // AccountSelector manages multi-account selection with weighted random and cooldown.
 type AccountSelector struct {
 	store          port.CredentialStore
-	tokenRefresh   *auth.TokenRefreshService
+	tokenRefresh   oauthTokenRefresher
 	rotationStates sync.Map // strategy key -> *int32
 }
 
@@ -72,6 +81,31 @@ func IsAccountSelectionError(err error, kind AccountSelectionErrorKind) bool {
 		return false
 	}
 	return selErr.Kind == kind
+}
+
+// oauthRefreshError wraps a failed OAuth token refresh so selection code can
+// distinguish a dead refresh token (upstream rejects it — the account needs
+// re-auth and should be sidelined for a long window) from a transient refresh
+// failure (network blip — retry another account now, cool briefly).
+type oauthRefreshError struct {
+	ConnectionID string
+	Dead         bool
+	Err          error
+}
+
+func (e *oauthRefreshError) Error() string {
+	return fmt.Sprintf("oauth refresh failed for connection %s: %v", e.ConnectionID, e.Err)
+}
+
+func (e *oauthRefreshError) Unwrap() error { return e.Err }
+
+// isDeadRefreshToken reports whether a refresh failure means the refresh token
+// itself was rejected (needs re-auth) rather than a transient network error.
+func isDeadRefreshToken(err error) bool {
+	if err == nil {
+		return false
+	}
+	return domain.IsAuthRevokedErrorText(err.Error())
 }
 
 // NewAccountSelector creates a new AccountSelector.
@@ -167,6 +201,26 @@ func (s *AccountSelector) selectPinnedConnection(
 
 		fresh, err := s.ensureFreshOAuth(&conn)
 		if err != nil {
+			// A pinned connection whose token cannot be refreshed must not be
+			// silently retried on every request. Sideline it so the operator
+			// sees the failure and re-auths; the request itself still fails
+			// fast (pins never spill over to another connection).
+			var refreshErr *oauthRefreshError
+			if errors.As(err, &refreshErr) {
+				status := http.StatusServiceUnavailable
+				msg := refreshErr.Err.Error()
+				if refreshErr.Dead {
+					status = http.StatusUnauthorized
+				}
+				if markErr := s.MarkUnavailable(conn.ID, status, "token refresh failed: "+msg, model); markErr != nil && logger.IsDevMode() {
+					logger.Get().AddError("PROXY", "Failed marking account unavailable: %s", markErr)
+				}
+				return nil, &AccountSelectionError{
+					Kind:     SelectionErrUnavailable,
+					Provider: provider,
+					Model:    model,
+				}
+			}
 			return nil, err
 		}
 
@@ -264,6 +318,8 @@ func (s *AccountSelector) SelectCredentials(
 		available = append(available, conn)
 	}
 
+	// If no candidate can serve this request, return the classification error
+	// describing which filter eliminated the pool.
 	if len(available) == 0 {
 		// Return appropriate error based on what filtered them out
 		if nonExcludedCount == 0 {
@@ -308,15 +364,64 @@ func (s *AccountSelector) SelectCredentials(
 		}
 	}
 
-	selected := s.selectConnection(available, provider, model, allowedConnectionIDs)
+	// Pick candidates in strategy order. When a candidate's OAuth token needs
+	// refreshing and the refresh fails (dead refresh token or transient), the
+	// connection is sidelined with an appropriate cooldown and the next
+	// candidate is tried — a single stale credential must not abort the whole
+	// request while healthy accounts remain.
+	pool := available
+	for len(pool) > 0 {
+		selected := s.selectConnection(pool, provider, model, allowedConnectionIDs)
+		if selected == nil {
+			break
+		}
 
-	updated, err := s.ensureFreshOAuth(selected)
-	if err != nil {
+		fresh, err := s.ensureFreshOAuth(selected)
+		if err == nil {
+			return shared.ConnectionToCredentials(fresh), nil
+		}
+
+		// A failed refresh means this connection cannot be used right now:
+		// record the reason and remove it from the pool, then try the next
+		// candidate. Dead refresh tokens (upstream rejects them) get the long
+		// auth-revoked cooldown; transient failures a short one. Proactive
+		// refresh failures are non-fatal (current token is used) and are not
+		// oauthRefreshError, so they never reach this branch.
+		var refreshErr *oauthRefreshError
+		if errors.As(err, &refreshErr) {
+			status := http.StatusServiceUnavailable
+			msg := refreshErr.Err.Error()
+			if refreshErr.Dead {
+				status = http.StatusUnauthorized
+			}
+			if markErr := s.MarkUnavailable(selected.ID, status, "token refresh failed: "+msg, model); markErr != nil && logger.IsDevMode() {
+				logger.Get().AddError("PROXY", "Failed marking account unavailable: %s", markErr)
+			}
+			pool = removeConnection(pool, selected.ID)
+			continue
+		}
+
 		return nil, err
 	}
-	selected = updated
 
-	return shared.ConnectionToCredentials(selected), nil
+	// Every candidate was tried and its refresh failed. Report unavailable so
+	// the caller can surface a meaningful error instead of a raw refresh error.
+	return nil, &AccountSelectionError{
+		Kind:     SelectionErrUnavailable,
+		Provider: provider,
+		Model:    model,
+	}
+}
+
+// removeConnection returns a new slice without the connection with the given id.
+func removeConnection(conns []domain.ProviderConnection, id string) []domain.ProviderConnection {
+	out := make([]domain.ProviderConnection, 0, len(conns)-1)
+	for _, c := range conns {
+		if c.ID != id {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 func (s *AccountSelector) selectConnection(available []domain.ProviderConnection, provider string, model string, allowedConnectionIDs []string) *domain.ProviderConnection {
@@ -636,7 +741,12 @@ func (s *AccountSelector) ensureFreshOAuth(conn *domain.ProviderConnection) (*do
 		log.Printf("[AUTH] Refreshing expired OAuth token for %s", conn.Name)
 		refreshed, err := s.tokenRefresh.ForceRefresh(conn)
 		if err != nil {
-			return nil, fmt.Errorf("token refresh failed for %s: %w", conn.Name, err)
+			log.Printf("[AUTH] Token refresh failed for %s: %v", conn.Name, err)
+			return nil, &oauthRefreshError{
+				ConnectionID: conn.ID,
+				Dead:         isDeadRefreshToken(err),
+				Err:          err,
+			}
 		}
 		log.Printf("[AUTH] Token refreshed successfully for %s", conn.Name)
 		return refreshed, nil

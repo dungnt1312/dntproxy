@@ -191,6 +191,7 @@ func isAuthRevokedError(lower string) bool {
 	hints := []string{
 		"invalid_grant",
 		"invalid grant",
+		"invalid refresh token",
 		"refresh token expired",
 		"refresh token is invalid",
 		"refresh token invalid",
@@ -205,6 +206,13 @@ func isAuthRevokedError(lower string) bool {
 		}
 	}
 	return false
+}
+
+// IsAuthRevokedErrorText reports whether an error message indicates a hard
+// credential revocation. Exported so services can sideline accounts whose
+// refresh token the upstream no longer accepts.
+func IsAuthRevokedErrorText(errorText string) bool {
+	return isAuthRevokedError(strings.ToLower(errorText))
 }
 
 // isHardQuotaExhaustion reports whether a quota error is a long-window

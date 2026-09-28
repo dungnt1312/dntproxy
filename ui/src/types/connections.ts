@@ -38,6 +38,8 @@ export interface QuotaBucket {
   unlimited: boolean;
   unit?: string;
   scale?: number;
+  /** The bucket list rows should display (operationally relevant window). */
+  primary?: boolean;
 }
 
 export interface BillingHistoryEntry {
@@ -52,6 +54,8 @@ export interface UsageData {
   provider?: string;
   plan?: string;
   limitReached?: boolean;
+  /** Hard-cap windows the account has hit ("monthly", "weekly", "5-hour"). */
+  limits?: string[];
   message?: string;
   quotas?: QuotaBucket[];
   overages?: {

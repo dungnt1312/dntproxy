@@ -13,14 +13,21 @@ const HEADER_HEIGHT = 42;
 const GROUP_GAP = 18;
 const OVERSCAN = 6;
 
+/** Same thresholds as the per-row quota bar, so header and rows never disagree. */
+function quotaBarTone(pct: number): string {
+  return pct >= 90 ? 'bg-red-500' : pct >= 70 ? 'bg-amber-500' : 'bg-emerald-500/70';
+}
+
 export interface RailGroup {
   id: string;
   label: string;
   colorClass: string;
   items: Connection[]; // already sorted (attention-first)
   issueCount: number;
-  /** Average worst-bucket usage across connections whose quota is known, else null. */
+  /** Average of each connection's worst-bucket usage across connections whose quota is known, else null. */
   avgUsagePct: number | null;
+  /** Single worst connection's worst bucket — drives the group bar color. */
+  peakUsagePct: number | null;
 }
 
 type FlatItem =
@@ -270,18 +277,21 @@ function GroupHeader({
             ⚠{group.issueCount}
           </Badge>
         )}
-        {group.avgUsagePct !== null && (
-          <span className="hidden shrink-0 items-center gap-1.5 pl-2 sm:flex" title="Average usage across connections with known quota">
+        {(group.avgUsagePct !== null || group.peakUsagePct !== null) && (
+          <span
+            className="hidden shrink-0 items-center gap-1.5 pl-2 sm:flex"
+            title="Avg of each connection's effective quota (hard-capped accounts count as 100%); bar color follows the single worst connection"
+          >
             <span className="h-1.5 w-16 overflow-hidden rounded-full bg-muted">
               <span
                 className={cn(
                   'block h-full rounded-full',
-                  group.avgUsagePct >= 90 ? 'bg-red-500' : group.avgUsagePct >= 70 ? 'bg-amber-500' : 'bg-emerald-500/70',
+                  quotaBarTone(group.peakUsagePct ?? group.avgUsagePct ?? 0),
                 )}
-                style={{ width: `${Math.round(group.avgUsagePct)}%` }}
+                style={{ width: `${Math.round(group.avgUsagePct ?? 0)}%` }}
               />
             </span>
-            <span className="font-mono text-[10px] tabular-nums text-muted-foreground">{Math.round(group.avgUsagePct)}%</span>
+            <span className="font-mono text-[10px] tabular-nums text-muted-foreground">{Math.round(group.avgUsagePct ?? 0)}%</span>
           </span>
         )}
       </button>

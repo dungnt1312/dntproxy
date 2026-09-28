@@ -26,12 +26,7 @@ func apiListKeys(store port.CredentialStore) gin.HandlerFunc {
 		// In legacy mode (empty tenant) list all keys (admin view).
 		// In tenant mode, only list keys for that tenant.
 		keys := domain.FilterAPIKeysByTenant(cfg.APIKeys, tenantID)
-		out := make([]domain.APIKey, len(keys))
-		for i, k := range keys {
-			out[i] = k
-			out[i].Key = maskAPIKey(k.Key)
-		}
-		c.JSON(200, out)
+		c.JSON(200, keys)
 	}
 }
 
@@ -244,13 +239,6 @@ func uniqueNonEmpty(values []string) []string {
 		result = append(result, value)
 	}
 	return result
-}
-
-func maskAPIKey(key string) string {
-	if len(key) <= 8 {
-		return "****"
-	}
-	return key[:7] + "..." + key[len(key)-4:]
 }
 
 func validateAllowedConnectionIDs(store port.CredentialStore, ids []string, tenantID string) error {

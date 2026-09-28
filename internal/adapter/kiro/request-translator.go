@@ -1,11 +1,14 @@
 package kiro
 
 import (
+	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/dungnt/dntproxy/internal/adapter/shared"
 	"github.com/dungnt/dntproxy/internal/domain"
 	"github.com/google/uuid"
 )
@@ -173,9 +176,12 @@ type OpenAIFunction struct {
 }
 
 // BuildKiroPayload converts an OpenAI request to Kiro format.
-func BuildKiroPayload(req *OpenAIRequest, model string, creds *domain.Credentials) (*KiroPayload, error) {
+func BuildKiroPayload(ctx context.Context, req *OpenAIRequest, model string, creds *domain.Credentials) (*KiroPayload, error) {
 	tools := convertTools(req.Tools)
-	history, currentMsg, effectiveTools := convertMessages(req.Messages, tools, model)
+	history, currentMsg, effectiveTools, err := convertMessages(ctx, req.Messages, tools, model)
+	if err != nil {
+		return nil, err
+	}
 
 	// Inject timestamp into current message content
 	finalContent := ""
@@ -283,7 +289,7 @@ func convertTools(tools []OpenAITool) []KiroTool {
 	return result
 }
 
-func convertMessages(messages []OpenAIMessage, tools []KiroTool, model string) ([]KiroMessage, *KiroMessage, []KiroTool) {
+func convertMessages(ctx context.Context, messages []OpenAIMessage, tools []KiroTool, model string) ([]KiroMessage, *KiroMessage, []KiroTool, error) {
 	var history []KiroMessage
 	var currentMessage *KiroMessage
 
@@ -361,7 +367,10 @@ func convertMessages(messages []OpenAIMessage, tools []KiroTool, model string) (
 		currentRole = role
 
 		if role == "user" {
-			content, toolResults, images := extractUserContent(msg)
+			content, toolResults, images, err := extractUserContent(ctx, msg)
+			if err != nil {
+				return nil, nil, nil, err
+			}
 
 			if msg.Role == "tool" {
 				// Tool role message
@@ -452,7 +461,7 @@ func convertMessages(messages []OpenAIMessage, tools []KiroTool, model string) (
 		}
 	}
 
-	return history, currentMessage, effectiveTools
+	return history, currentMessage, effectiveTools, nil
 }
 
 func extractStringContent(raw json.RawMessage) string {
@@ -466,21 +475,21 @@ func extractStringContent(raw json.RawMessage) string {
 	return string(raw)
 }
 
-func extractUserContent(msg OpenAIMessage) (string, []KiroToolResult, []KiroImage) {
+func extractUserContent(ctx context.Context, msg OpenAIMessage) (string, []KiroToolResult, []KiroImage, error) {
 	if len(msg.Content) == 0 {
-		return "", nil, nil
+		return "", nil, nil, nil
 	}
 
 	// Try as string first
 	var s string
 	if err := json.Unmarshal(msg.Content, &s); err == nil {
-		return s, nil, nil
+		return s, nil, nil, nil
 	}
 
 	// Try as array of content blocks
 	var blocks []ContentBlock
 	if err := json.Unmarshal(msg.Content, &blocks); err != nil {
-		return string(msg.Content), nil, nil
+		return string(msg.Content), nil, nil, nil
 	}
 
 	var textParts []string
@@ -499,13 +508,17 @@ func extractUserContent(msg OpenAIMessage) (string, []KiroToolResult, []KiroImag
 				continue
 			}
 			if img, ok := kiroImageFromDataURL(imgURL); ok {
-				// Inline data URLs become real image attachments so vision
-				// requests reach the upstream model.
 				images = append(images, img)
 				continue
 			}
-			// Remote URLs cannot be inlined here; keep the textual placeholder.
-			textParts = append(textParts, fmt.Sprintf("[Image: %s]", imgURL))
+			data, mimeType, err := shared.LoadImageInput(ctx, imgURL)
+			if err != nil {
+				return "", nil, nil, fmt.Errorf("load image input: %w", err)
+			}
+			images = append(images, KiroImage{
+				Format: strings.TrimPrefix(mimeType, "image/"),
+				Source: KiroImageSource{Bytes: base64.StdEncoding.EncodeToString(data)},
+			})
 		case "tool_result":
 			text := ""
 			if len(b.Content) > 0 {
@@ -532,7 +545,7 @@ func extractUserContent(msg OpenAIMessage) (string, []KiroToolResult, []KiroImag
 		}
 	}
 
-	return strings.Join(textParts, "\n"), toolResults, images
+	return strings.Join(textParts, "\n"), toolResults, images, nil
 }
 
 // kiroImageFromDataURL parses a data:image/<format>;base64,<payload> URL into

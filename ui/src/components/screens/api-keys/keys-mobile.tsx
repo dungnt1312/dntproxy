@@ -1,29 +1,32 @@
-import { Edit3, Trash2 } from 'lucide-react'
+import { Edit3, Trash2, Copy } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { PermissionSummary } from './permission-summary'
 import type { ApiKey } from './types'
 
 interface KeysMobileProps {
   keys: ApiKey[]
-  revealedKeys: Set<string>
-  onToggleReveal: (id: string) => void
   onDelete: (key: ApiKey) => void
   onEdit: (key: ApiKey) => void
   formatDate: (dateStr: string) => string
-  maskKey: (key: string) => string
 }
 
 export function KeysMobile({
   keys,
-  revealedKeys,
-  onToggleReveal,
   onDelete,
   onEdit,
   formatDate,
-  maskKey,
 }: KeysMobileProps) {
+  const copyKey = (apiKey: ApiKey) => {
+    navigator.clipboard.writeText(apiKey.key).then(() => {
+      toast.success(`API key "${apiKey.name}" copied to clipboard`)
+    }).catch(() => {
+      toast.error('Failed to copy to clipboard')
+    })
+  }
+
   return (
     <div className="space-y-3 p-4 md:hidden">
       {keys.map((apiKey) => {
@@ -65,8 +68,16 @@ export function KeysMobile({
 
             <div className="flex items-center gap-1.5">
               <code className="min-w-0 flex-1 truncate rounded bg-muted px-2 py-1.5 font-mono text-xs select-all">
-                {maskKey(apiKey.key)}
+                {apiKey.key}
               </code>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-7 shrink-0"
+                onClick={() => copyKey(apiKey)}
+              >
+                <Copy className="size-3.5" />
+              </Button>
             </div>
 
             <div className="flex items-center justify-between gap-2 text-xs">

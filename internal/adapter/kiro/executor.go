@@ -83,7 +83,7 @@ func (e *Executor) Execute(ctx context.Context, model string, body []byte, crede
 	}
 
 	// Translate to Kiro format
-	kiroPayload, err := BuildKiroPayload(&openaiReq, model, credentials)
+	kiroPayload, err := BuildKiroPayload(ctx, &openaiReq, model, credentials)
 	if err != nil {
 		return nil, 400, fmt.Errorf("build kiro payload: %w", err)
 	}

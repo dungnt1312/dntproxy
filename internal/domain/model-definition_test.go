@@ -60,6 +60,7 @@ func TestDefaultModelRegistryIncludesCommandCodeModels(t *testing.T) {
 	models := []string{
 		"commandcode/deepseek/deepseek-v4-pro",
 		"commandcode/deepseek/deepseek-v4-flash",
+		"commandcode/deepseek/deepseek-v4.1-flash",
 		"commandcode/MiniMaxAI/MiniMax-M3",
 		"commandcode/Qwen/Qwen3.7-Max",
 		"commandcode/xiaomi/mimo-v2.5-pro",
@@ -95,7 +96,7 @@ func TestCommandCodeRecommendedModels(t *testing.T) {
 	if cfg.ChatPath != "/alpha/generate" {
 		t.Fatalf("chat path = %q", cfg.ChatPath)
 	}
-	required := []string{"deepseek/deepseek-v4-pro", "MiniMaxAI/MiniMax-M3", "Qwen/Qwen3.7-Max"}
+	required := []string{"deepseek/deepseek-v4-pro", "deepseek/deepseek-v4.1-flash", "MiniMaxAI/MiniMax-M3", "Qwen/Qwen3.7-Max"}
 	have := map[string]bool{}
 	for _, m := range cfg.RecommendedModels {
 		have[m] = true

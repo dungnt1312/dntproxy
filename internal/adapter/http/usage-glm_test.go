@@ -47,6 +47,10 @@ func TestFetchGLMUsage(t *testing.T) {
 		got.ResetAt != "2026-08-28T11:38:48Z" {
 		t.Fatalf("5-hour bucket = %+v", got)
 	}
+	// The shortest window is the primary bucket rows should display.
+	if !result.Quotas[0].Primary || result.Quotas[1].Primary || result.Quotas[2].Primary {
+		t.Fatalf("primary flags = %v/%v/%v, want only the 5-hour bucket", result.Quotas[0].Primary, result.Quotas[1].Primary, result.Quotas[2].Primary)
+	}
 	if got := result.Quotas[1]; got.Key != "week-tokens" || got.Label != "Weekly tokens" ||
 		got.Used != 20 || got.Total != 100 || got.Pct != 20 {
 		t.Fatalf("weekly bucket = %+v", got)
@@ -103,6 +107,36 @@ func TestFetchGLMUsageMarksLimitReached(t *testing.T) {
 	}
 	if !result.LimitReached {
 		t.Fatalf("LimitReached = false, want true for a fully used window")
+	}
+}
+
+// A saturated weekly window beside a healthy 5-hour one must badge the weekly
+// key while rows keep displaying the (primary) 5-hour bucket — the live Pro
+// shape: week exhausted, 5-hour unused because the week cap blocks everything.
+func TestFetchGLMUsageLimitsKeyedByBucket(t *testing.T) {
+	const body = `{"code":200,"data":{"limits":[
+{"type":"TOKENS_LIMIT","unit":3,"number":5,"percentage":0},
+{"type":"TOKENS_LIMIT","unit":6,"number":1,"percentage":100,"nextResetTime":1787917128885},
+{"type":"TIME_LIMIT","unit":5,"number":1,"usage":1000,"currentValue":20,"percentage":2}
+],"level":"pro"},"success":true}`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(body))
+	}))
+	defer server.Close()
+
+	result, err := fetchGLMUsage(&domain.ProviderConnection{APIKey: "k", BaseURL: server.URL})
+	if err != nil {
+		t.Fatalf("fetchGLMUsage() error = %v", err)
+	}
+	if len(result.Limits) != 1 || result.Limits[0] != "week-tokens" {
+		t.Fatalf("limits = %v, want [week-tokens]", result.Limits)
+	}
+	if !result.Quotas[0].Primary {
+		t.Fatal("5-hour bucket must stay primary even when the weekly window is exhausted")
+	}
+	if got := result.Quotas[1]; got.Pct != 100 || got.Primary {
+		t.Fatalf("weekly bucket = %+v, want pct 100 and not primary", got)
 	}
 }
 

@@ -37,6 +37,9 @@ type QuotaBucket struct {
 	Unlimited bool   `json:"unlimited"`
 	Unit      string `json:"unit,omitempty"`
 	Scale     int    `json:"scale,omitempty"`
+	// Primary marks the bucket the list rows should display (the operationally
+	// relevant window). When unset, rows fall back to the worst bucket.
+	Primary bool `json:"primary,omitempty"`
 }
 
 // UsageResponse is the single, canonical response shape for GET /api/usage/:id.
@@ -46,9 +49,12 @@ type UsageResponse struct {
 	LimitReached bool                  `json:"limitReached"`
 	Message      string                `json:"message,omitempty"`
 	Quotas       []QuotaBucket         `json:"quotas"`
-	Overages     *OverageInfo          `json:"overages,omitempty"`
-	History      []BillingHistoryEntry `json:"history,omitempty"`
-	Extras       map[string]any        `json:"extras,omitempty"`
+	// Limits lists hard cap windows the account has hit ("monthly", "weekly"),
+	// so the UI can badge the row even when the displayed bucket looks healthy.
+	Limits      []string              `json:"limits,omitempty"`
+	Overages    *OverageInfo          `json:"overages,omitempty"`
+	History     []BillingHistoryEntry `json:"history,omitempty"`
+	Extras      map[string]any        `json:"extras,omitempty"`
 }
 
 // OverageInfo contains overage / on-demand usage when the plan exposes a cap.
@@ -559,8 +565,10 @@ type commandCodeUsageSummary struct {
 
 type commandCodeCredits struct {
 	Credits struct {
-		BelowThreshold bool    `json:"belowThreshold"`
-		MonthlyCredits float64 `json:"monthlyCredits"`
+		BelowThreshold  bool    `json:"belowThreshold"`
+		MonthlyCredits  float64 `json:"monthlyCredits"`
+		PurchasedCredits float64 `json:"purchasedCredits"`
+		FreeCredits      float64 `json:"freeCredits"`
 	} `json:"credits"`
 	WindowLimits struct {
 		Exceeded bool `json:"exceeded"`
@@ -671,9 +679,27 @@ func fetchCommandCodeUsage(conn *domain.ProviderConnection) (*UsageResponse, err
 	}
 	if credits.WindowLimits.FiveHour.Cap > 0 {
 		result.addBucketWithUnit("five-hour", "5-hour", int(math.Round(credits.WindowLimits.FiveHour.Used*creditScale)), int(math.Round(credits.WindowLimits.FiveHour.Cap*creditScale)), commandCodeResetAt(credits.WindowLimits.FiveHour.ResetAt), false, "credits", creditScale)
+		result.Quotas[len(result.Quotas)-1].Primary = true
 	}
 	if credits.WindowLimits.Weekly.Cap > 0 {
 		result.addBucketWithUnit("weekly", "Weekly", int(math.Round(credits.WindowLimits.Weekly.Used*creditScale)), int(math.Round(credits.WindowLimits.Weekly.Cap*creditScale)), commandCodeResetAt(credits.WindowLimits.Weekly.ResetAt), false, "credits", creditScale)
+	}
+	// Hard-cap detection for the row badge. Weekly has an explicit upstream
+	// flag; monthly does not — the account only stops serving when remaining
+	// credits drop under a request's cost (observed: the 400
+	// "insufficient credits" fired with ~1% left), so treat ≤1% of the period
+	// total as exhausted. Purchased/free credits extend the runway.
+	remainingMilli := int(math.Round((credits.Credits.MonthlyCredits + credits.Credits.PurchasedCredits + credits.Credits.FreeCredits) * creditScale))
+	totalMilli := monthlyUsed + monthlyRemaining
+	monthlyLimited := totalMilli > 0 && remainingMilli*100 <= totalMilli
+	if monthlyLimited {
+		result.Limits = append(result.Limits, "monthly")
+	}
+	if credits.WindowLimits.Weekly.Exceeded {
+		result.Limits = append(result.Limits, "weekly")
+	}
+	if credits.WindowLimits.FiveHour.Exceeded {
+		result.Limits = append(result.Limits, "5-hour")
 	}
 	if credits.Credits.BelowThreshold {
 		result.Message = "Command Code credits are below the configured threshold."

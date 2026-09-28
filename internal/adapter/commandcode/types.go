@@ -37,6 +37,8 @@ type ccToolOutput struct {
 type ccContentPart struct {
 	Type       string        `json:"type"`
 	Text       *string       `json:"text,omitempty"`
+	Image      string        `json:"image,omitempty"`
+	MIMEType   string        `json:"mimeType,omitempty"`
 	ToolCallID *string       `json:"toolCallId,omitempty"`
 	ToolName   *string       `json:"toolName,omitempty"`
 	Input      any           `json:"input,omitempty"`

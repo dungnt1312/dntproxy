@@ -1,7 +1,9 @@
 package commandcode
 
 import (
+	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -15,7 +17,7 @@ func TestBuildRequestExtractsSystemAndMapsModel(t *testing.T) {
 			{"role":"user","content":"hello"}
 		]
 	}`)
-	got, err := buildRequest("deepseek-v4-pro", body)
+	got, err := buildRequest(context.Background(), "deepseek-v4-pro", body)
 	if err != nil {
 		t.Fatalf("buildRequest: %v", err)
 	}
@@ -42,12 +44,32 @@ func TestBuildRequestClampsMaxTokens(t *testing.T) {
 		"max_tokens":1000000,
 		"messages":[{"role":"user","content":"hi"}]
 	}`)
-	got, err := buildRequest("deepseek/deepseek-v4-flash", body)
+	got, err := buildRequest(context.Background(), "deepseek/deepseek-v4-flash", body)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got.Params.MaxTokens != 200000 {
 		t.Fatalf("max_tokens = %d, want 200000", got.Params.MaxTokens)
+	}
+}
+
+func TestBuildRequestConvertsImageURLToCommandCodeVisionPart(t *testing.T) {
+	body := []byte(`{
+		"messages":[{"role":"user","content":[
+			{"type":"text","text":"describe"},
+			{"type":"image_url","image_url":{"url":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL41wAAAABJRU5ErkJggg=="}}
+		]}]
+	}`)
+	got, err := buildRequest(context.Background(), "deepseek-v4.1-flash", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parts := got.Params.Messages[0].Content
+	if len(parts) != 2 || parts[0].Text == nil || *parts[0].Text != "describe" {
+		t.Fatalf("content = %+v", parts)
+	}
+	if parts[1].Type != "image" || parts[1].MIMEType != "image/png" || !strings.HasPrefix(parts[1].Image, "data:image/png;base64,") {
+		t.Fatalf("vision part = %+v", parts[1])
 	}
 }
 
@@ -78,12 +100,15 @@ func TestConvertToolsFlattensOpenAIShape(t *testing.T) {
 }
 
 func TestConvertToolResultMessage(t *testing.T) {
-	msgs := convertMessages([]chatMessage{
+	msgs, err := convertMessages(context.Background(), []chatMessage{
 		{Role: "assistant", ToolCalls: []toolCall{{
 			ID: "call_1", Type: "function", Function: functionCall{Name: "lookup", Arguments: `{"q":"x"}`},
 		}}},
 		{Role: "tool", ToolCallID: "call_1", Content: "ok"},
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(msgs) != 2 {
 		t.Fatalf("len = %d", len(msgs))
 	}

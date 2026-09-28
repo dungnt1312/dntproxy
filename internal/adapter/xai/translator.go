@@ -19,10 +19,10 @@ type chatRequest struct {
 }
 
 type chatMessage struct {
-	Role       string          `json:"role"`
-	Content    interface{}     `json:"content"`
-	ToolCallID string          `json:"tool_call_id,omitempty"`
-	ToolCalls  []chatToolCall  `json:"tool_calls,omitempty"`
+	Role       string         `json:"role"`
+	Content    interface{}    `json:"content"`
+	ToolCallID string         `json:"tool_call_id,omitempty"`
+	ToolCalls  []chatToolCall `json:"tool_calls,omitempty"`
 }
 
 type chatToolCall struct {
@@ -114,7 +114,7 @@ func TranslateChatToResponses(model string, body []byte) ([]byte, error) {
 				out.Instructions += text
 			}
 		case "user":
-			out.Input = append(out.Input, responsesInput{Role: role, Content: msg.Content})
+			out.Input = append(out.Input, responsesInput{Role: role, Content: translateUserContent(msg.Content)})
 		case "assistant":
 			if text := contentToText(msg.Content); text != "" {
 				out.Input = append(out.Input, responsesInput{Role: "assistant", Content: text})
@@ -157,6 +157,39 @@ func TranslateChatToResponses(model string, body []byte) ([]byte, error) {
 	}
 
 	return json.Marshal(out)
+}
+
+func translateUserContent(content interface{}) interface{} {
+	parts, ok := content.([]interface{})
+	if !ok {
+		return content
+	}
+
+	out := make([]map[string]interface{}, 0, len(parts))
+	for _, item := range parts {
+		part, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		switch part["type"] {
+		case "text":
+			if text, ok := part["text"].(string); ok && text != "" {
+				out = append(out, map[string]interface{}{"type": "input_text", "text": text})
+			}
+		case "image_url":
+			var imageURL string
+			switch image := part["image_url"].(type) {
+			case string:
+				imageURL = image
+			case map[string]interface{}:
+				imageURL, _ = image["url"].(string)
+			}
+			if imageURL != "" {
+				out = append(out, map[string]interface{}{"type": "input_image", "image_url": imageURL})
+			}
+		}
+	}
+	return out
 }
 
 func contentToText(content interface{}) string {

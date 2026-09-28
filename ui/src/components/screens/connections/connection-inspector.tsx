@@ -248,9 +248,13 @@ export function ConnectionInspector({
                 </div>
               ) : entry ? (
                 <QuotaPanel data={entry.data} loading={false} onRefresh={() => quotaStore.refresh([c.id])} />
-              ) : (
+              ) : fetching ? (
                 <p className="flex items-center gap-2 rounded-lg border bg-muted/25 p-3 text-xs text-muted-foreground">
                   <Loader2 size={12} className="animate-spin" /> Loading quota…
+                </p>
+              ) : (
+                <p className="rounded-lg border bg-muted/25 p-3 text-xs text-muted-foreground">
+                  Quota not loaded — click the refresh icon above to fetch it.
                 </p>
               )}
             </section>

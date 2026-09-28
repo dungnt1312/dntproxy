@@ -61,8 +61,7 @@ export function ShowKeyDialog({ open, onOpenChange, keyValue, keyName }: ShowKey
           <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
             <ShieldCheck className="size-4 text-amber-600 shrink-0 mt-0.5" />
             <p className="text-xs text-amber-700 dark:text-amber-400">
-              <strong>Important:</strong> This is the only time the full API key will be displayed.
-              Make sure to copy it now. The list screen only shows a masked value.
+              <strong>Tip:</strong> You can copy this key anytime from the API Keys list.
             </p>
           </div>
         </div>

@@ -29,7 +29,7 @@ func (e *Executor) Execute(ctx context.Context, model string, body []byte, crede
 		return nil, http.StatusUnauthorized, fmt.Errorf("commandcode api key required")
 	}
 
-	ccBody, err := buildRequest(model, body)
+	ccBody, err := buildRequest(ctx, model, body)
 	if err != nil {
 		return nil, http.StatusBadRequest, err
 	}

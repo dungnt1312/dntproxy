@@ -16,6 +16,12 @@ const (
 
 func ClassifyUpstream(status int, errorText string) UpstreamClass {
 	lower := strings.ToLower(errorText)
+	// A hard quota-exhaustion body is definitive regardless of HTTP status:
+	// Command Code reports exhausted credits as 400 BAD_REQUEST, and that must
+	// still rotate to other accounts instead of surfacing a client error.
+	if isHardQuotaExhaustion(lower) {
+		return UpstreamQuota
+	}
 	if IsNonFallbackStatus(status) {
 		return UpstreamNonFallback
 	}

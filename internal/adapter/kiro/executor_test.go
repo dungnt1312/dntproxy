@@ -87,7 +87,7 @@ func TestBuildKiroPayloadIncludesToolConfig(t *testing.T) {
 	if err := json.Unmarshal([]byte(body), &req); err != nil {
 		t.Fatal(err)
 	}
-	payload, err := BuildKiroPayload(&req, "claude-sonnet-4.6", &domain.Credentials{})
+	payload, err := BuildKiroPayload(context.Background(), &req, "claude-sonnet-4.6", &domain.Credentials{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +125,7 @@ func TestBuildKiroPayloadNoToolConfigWithoutTools(t *testing.T) {
 	if err := json.Unmarshal([]byte(body), &req); err != nil {
 		t.Fatal(err)
 	}
-	payload, err := BuildKiroPayload(&req, "claude-sonnet-4.6", &domain.Credentials{})
+	payload, err := BuildKiroPayload(context.Background(), &req, "claude-sonnet-4.6", &domain.Credentials{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +143,7 @@ func TestBuildKiroPayloadAttachesInlineDataURLs(t *testing.T) {
 	if err := json.Unmarshal([]byte(body), &req); err != nil {
 		t.Fatal(err)
 	}
-	payload, err := BuildKiroPayload(&req, "claude-sonnet-4.6", &domain.Credentials{})
+	payload, err := BuildKiroPayload(context.Background(), &req, "claude-sonnet-4.6", &domain.Credentials{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,24 +170,17 @@ func TestBuildKiroPayloadAttachesInlineDataURLs(t *testing.T) {
 	}
 }
 
-func TestBuildKiroPayloadRemoteImageKeepsPlaceholder(t *testing.T) {
+func TestBuildKiroPayloadRejectsUnsafeRemoteImageURL(t *testing.T) {
 	body := `{"model":"claude-sonnet-4.6","messages":[{"role":"user","content":[` +
 		`{"type":"text","text":"describe"},` +
-		`{"type":"image_url","image_url":{"url":"https://example.com/cat.png"}}]}]}`
+		`{"type":"image_url","image_url":{"url":"http://127.0.0.1/cat.png"}}]}]}`
 	var req OpenAIRequest
 	if err := json.Unmarshal([]byte(body), &req); err != nil {
 		t.Fatal(err)
 	}
-	payload, err := BuildKiroPayload(&req, "claude-sonnet-4.6", &domain.Credentials{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	msg := payload.ConversationState.CurrentMessage.UserInputMessage
-	if len(msg.Images) != 0 {
-		t.Fatalf("remote URL must not become inline image, got %d", len(msg.Images))
-	}
-	if !strings.Contains(msg.Content, "[Image: https://example.com/cat.png]") {
-		t.Fatalf("placeholder missing: %q", msg.Content)
+	_, err := BuildKiroPayload(context.Background(), &req, "claude-sonnet-4.6", &domain.Credentials{})
+	if err == nil || !strings.Contains(err.Error(), "load image input") {
+		t.Fatalf("error = %v, want safe remote-image rejection", err)
 	}
 }
 

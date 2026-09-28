@@ -36,7 +36,7 @@ import { ConnectionStatusFilter, type IssueQuickAction } from './connections/con
 import { ConnectionList, type RailGroup } from './connections/connection-list';
 import { ConnectionPalette } from './connections/connection-palette';
 import { ConnectionInspector } from './connections/connection-inspector';
-import { quotaStore, useQuotaConnsSync, useQuotaVersion } from './connections/quota-store';
+import { effectiveQuotaPct, quotaStore, useQuotaConnsSync, useQuotaVersion } from './connections/quota-store';
 import { findLegacyModels, loadKnownModelIndex, type KnownModelIndex } from './connections/legacy-models';
 import { useQuotaFetch } from './connections/use-quota-fetch';
 import type { Connection, ConnectionGroup as LegacyConnectionGroup } from '@/types/connections';
@@ -359,6 +359,7 @@ export default function ConnectionsScreen() {
     void quotaVersion;
     if (layout === 'status') {
       const flat = [...filteredConns].sort(compareByAttention);
+      const usage = avgKnownUsage(flat);
       return [
         {
           id: '__flat__',
@@ -366,7 +367,8 @@ export default function ConnectionsScreen() {
           colorClass: '',
           items: flat,
           issueCount: flat.filter(needsAttention).length,
-          avgUsagePct: avgKnownUsage(flat),
+          avgUsagePct: usage.avg,
+          peakUsagePct: usage.peak,
         },
       ];
     }
@@ -380,13 +382,15 @@ export default function ConnectionsScreen() {
     const result: RailGroup[] = [];
     const push = (key: string) => {
       const items = byProvider.get(key)!;
+      const usage = avgKnownUsage(items);
       result.push({
         id: key,
         label: getProviderMeta(key).label,
         colorClass: getProviderMeta(key).colorClass,
         items,
         issueCount: items.filter(needsAttention).length,
-        avgUsagePct: avgKnownUsage(items),
+        avgUsagePct: usage.avg,
+        peakUsagePct: usage.peak,
       });
       byProvider.delete(key);
     };
@@ -862,15 +866,24 @@ function SegmentToggle<T extends string>({
   );
 }
 
-function avgKnownUsage(items: Connection[]): number | null {
+/**
+ * Average of each connection's effective quota across connections with known
+ * quota, plus the peak — the single worst connection — which drives the group
+ * bar color. Effective = the primary window bucket (Command Code: 5-hour),
+ * or 100% when the provider flagged a hard cap (weekly/monthly), so one dead
+ * account is never hidden by healthy neighbors.
+ */
+function avgKnownUsage(items: Connection[]): { avg: number | null; peak: number | null } {
   const pcts: number[] = [];
   for (const c of items) {
-    for (const b of quotaStore.peek(c.id)?.data?.quotas ?? []) {
-      if (!b.unlimited) pcts.push(b.pct);
-    }
+    const pct = effectiveQuotaPct(quotaStore.peek(c.id));
+    if (pct !== null) pcts.push(pct);
   }
-  if (pcts.length === 0) return null;
-  return Math.round(pcts.reduce((a, b) => a + b, 0) / pcts.length);
+  if (pcts.length === 0) return { avg: null, peak: null };
+  return {
+    avg: Math.round(pcts.reduce((a, b) => a + b, 0) / pcts.length),
+    peak: Math.max(...pcts),
+  };
 }
 
 /** Reason buckets over an issue-filtered pool, used by the cleanup dialog. */

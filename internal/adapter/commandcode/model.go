@@ -10,6 +10,8 @@ func MapModel(name string) string {
 		return "deepseek/deepseek-v4-pro"
 	case "deepseek-v4-flash", "deepseek-flash":
 		return "deepseek/deepseek-v4-flash"
+	case "deepseek-v4.1-flash", "deepseek-v4-1-flash", "deepseek-4.1-flash":
+		return "deepseek/deepseek-v4.1-flash"
 	case "minimax-m2.7", "minimax2.7":
 		return "MiniMaxAI/MiniMax-M2.7"
 	case "minimax-m2.5", "minimax2.5", "minimax":

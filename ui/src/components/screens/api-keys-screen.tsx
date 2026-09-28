@@ -45,12 +45,6 @@ function formatDate(dateStr: string) {
   })
 }
 
-function maskKey(key: string) {
-  if (!key) return ''
-  if (key.length <= 12) return key
-  return key.slice(0, 7) + '...' + key.slice(-4)
-}
-
 const containerVariants = {
   hidden: { opacity: 0 },
   visible: {
@@ -77,7 +71,6 @@ export default function ApiKeysScreen() {
   const [deleteTarget, setDeleteTarget] = useState<ApiKey | null>(null)
   const [editTarget, setEditTarget] = useState<ApiKey | null>(null)
   const [deleting, setDeleting] = useState(false)
-  const [revealedKeys, setRevealedKeys] = useState<Set<string>>(new Set())
 
   const fetchData = useCallback(async () => {
     try {
@@ -117,15 +110,6 @@ export default function ApiKeysScreen() {
     const active = keys.filter((k) => k.isActive).length
     return { total, active }
   }, [keys])
-
-  const toggleReveal = (id: string) => {
-    setRevealedKeys((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }
 
   const handleGenerate = async (payload: ApiKeyCreatePayload) => {
     const json = await goApi.createKey(payload)
@@ -250,21 +234,15 @@ export default function ApiKeysScreen() {
                   <>
                     <KeysTable
                       keys={filteredKeys}
-                      revealedKeys={revealedKeys}
-                      onToggleReveal={toggleReveal}
                       onDelete={setDeleteTarget}
                       onEdit={setEditTarget}
                       formatDate={formatDate}
-                      maskKey={maskKey}
                     />
                     <KeysMobile
                       keys={filteredKeys}
-                      revealedKeys={revealedKeys}
-                      onToggleReveal={toggleReveal}
                       onDelete={setDeleteTarget}
                       onEdit={setEditTarget}
                       formatDate={formatDate}
-                      maskKey={maskKey}
                     />
                   </>
                 )}

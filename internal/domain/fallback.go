@@ -117,6 +117,13 @@ func CheckFallbackError(status int, errorText string, backoffLevel int) Fallback
 		}
 		return FallbackResult{ShouldFallback: true, CooldownMs: CooldownUnauthorized, NewBackoffLevel: backoffLevel}
 	case UpstreamQuota:
+		// A monthly/usage-cap/credit exhaustion keeps returning the same error
+		// for a long window; short exponential backoff just burns request budget
+		// re-selecting an account that cannot serve. Sideline it for a long
+		// account-level window, honoring an upstream reset hint when present.
+		if isHardQuotaExhaustion(lower) {
+			return FallbackResult{ShouldFallback: true, CooldownMs: hardQuotaCooldownMs(lower), NewBackoffLevel: BackoffMaxLevel}
+		}
 		// Preserve Command Code's unqualified 402 payment cooldown. A generic
 		// 403 remains a no-penalty failover unless it is model entitlement.
 		if status == 403 {
@@ -133,12 +140,6 @@ func CheckFallbackError(status int, errorText string, backoffLevel int) Fallback
 		}
 		if status == 402 {
 			return FallbackResult{ShouldFallback: true, CooldownMs: CooldownPaymentReq, NewBackoffLevel: backoffLevel}
-		}
-		// A monthly/usage-cap exhaustion keeps returning the same error for a long
-		// window; short exponential backoff just burns request budget re-selecting
-		// an account that cannot serve. Sideline it for a long account-level window.
-		if isHardQuotaExhaustion(lower) {
-			return FallbackResult{ShouldFallback: true, CooldownMs: CooldownQuotaExhausted, NewBackoffLevel: BackoffMaxLevel}
 		}
 		newLevel := min(backoffLevel+1, BackoffMaxLevel)
 		// A server-provided Retry-After is authoritative for a plain rate limit:
@@ -240,6 +241,35 @@ func isHardQuotaExhaustion(lower string) bool {
 		}
 	}
 	return false
+}
+
+// hardQuotaCooldownMs returns the account-level cooldown for a hard quota
+// exhaustion. The default tier applies unless the upstream embedded a reset
+// hint ("Your limit resets at 2026-08-25T07:21:09.207Z." — Command Code sends
+// these on weekly/5-hour windows); when the stated reset is later than the
+// default tier, cool down until then so the account does not re-enter rotation
+// hourly for a multi-day window. Still clamped by MaxCooldownSeconds downstream.
+func hardQuotaCooldownMs(lower string) int {
+	const marker = "resets at "
+	idx := strings.LastIndex(lower, marker)
+	if idx < 0 {
+		return CooldownQuotaExhausted
+	}
+	rest := lower[idx+len(marker):]
+	if cut := strings.IndexAny(rest, " \n\t"); cut >= 0 {
+		rest = rest[:cut]
+	}
+	rest = strings.TrimRight(rest, ".,;:)")
+	// CheckFallbackError lowercases the message; RFC3339 wants uppercase T/Z.
+	t, err := time.Parse(time.RFC3339, strings.ToUpper(rest))
+	if err != nil {
+		return CooldownQuotaExhausted
+	}
+	ms := int(time.Until(t).Milliseconds())
+	if ms <= CooldownQuotaExhausted {
+		return CooldownQuotaExhausted
+	}
+	return ms
 }
 
 func isModelEntitlementError(lower string) bool {

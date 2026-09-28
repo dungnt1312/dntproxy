@@ -108,6 +108,7 @@ func fetchGLMUsage(conn *domain.ProviderConnection) (*UsageResponse, error) {
 	}
 
 	toolUsage := map[string]float64{}
+	primaryIdx, primaryRank := -1, 0
 	for i, limit := range parsed.Data.Limits {
 		key, label := glmWindowName(limit, i)
 		resetAt := ""
@@ -122,17 +123,27 @@ func fetchGLMUsage(conn *domain.ProviderConnection) (*UsageResponse, error) {
 			result.addBucket(key, label, int(math.Round(limit.Percentage)), 100, resetAt, false)
 		}
 
+		// Rows display the shortest window — it is the one that gates day-to-day
+		// rotation (Command Code's primary is its 5-hour window for the same reason).
+		if rank := glmUnitRank(limit.Unit); primaryIdx < 0 || rank < primaryRank {
+			primaryIdx, primaryRank = i, rank
+		}
+
 		for _, detail := range limit.UsageDetails {
 			if detail.ModelCode != "" {
 				toolUsage[detail.ModelCode] = detail.Usage
 			}
 		}
 	}
+	if primaryIdx >= 0 && primaryIdx < len(result.Quotas) {
+		result.Quotas[primaryIdx].Primary = true
+	}
 
 	for _, bucket := range result.Quotas {
 		if bucket.Pct >= 100 {
+			// Keyed by bucket key so the UI tooltip can look the window up.
+			result.Limits = append(result.Limits, bucket.Key)
 			result.LimitReached = true
-			break
 		}
 	}
 	if len(result.Quotas) == 0 {
@@ -183,6 +194,23 @@ var glmUnitAdjectives = map[string]string{
 	"day":   "Daily",
 	"month": "Monthly",
 	"week":  "Weekly",
+}
+
+// glmUnitRank orders windows by length for primary-bucket selection: the
+// shortest window gates rotation first. Unknown units rank last.
+func glmUnitRank(unit int) int {
+	switch unit {
+	case 3: // hour
+		return 1
+	case 4: // day
+		return 2
+	case 6: // week
+		return 3
+	case 5: // month
+		return 4
+	default:
+		return 5
+	}
 }
 
 // glmWindowName builds a stable key and human label for one quota window.

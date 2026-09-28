@@ -13,7 +13,7 @@ import {
   tokenSecondsLeft,
 } from '@/lib/connection-status';
 import { getProviderLabel } from '@/lib/provider-registry';
-import type { QuotaEntry } from './quota-store';
+import { primaryQuotaPct, type QuotaEntry } from './quota-store';
 import type { Connection } from '@/types/connections';
 
 export const ROW_HEIGHT = 44;
@@ -34,14 +34,16 @@ interface ConnectionRowProps {
   onToggleSelect?: (id: string) => void;
 }
 
-function worstPct(entry?: QuotaEntry): number | null {
-  let worst = 0;
-  let any = false;
-  for (const b of entry?.data?.quotas ?? []) {
-    any = true;
-    if (!b.unlimited && b.pct > worst) worst = b.pct;
-  }
-  return any ? Math.min(100, Math.max(0, worst)) : null;
+/** Human line per hard cap for the Limit badge tooltip. */
+function limitTitle(limit: string, entry?: QuotaEntry): string {
+  // Provider limits carry the bucket key (GLM: "week-tokens"); use its label.
+  const bucket = entry?.data?.quotas?.find((b) => b.key === limit);
+  const reset = bucket?.resetAt ? ` · resets ${new Date(bucket.resetAt).toLocaleString()}` : '';
+  if (bucket) return `${bucket.label} limit reached${reset}`;
+  // Command Code has no monthly flag upstream — key is synthesized.
+  if (limit === 'monthly') return `Monthly credits exhausted${reset}`;
+  if (limit === '5-hour') return `5-hour limit reached${reset}`;
+  return `${limit} limit reached`;
 }
 
 function quotaBarColor(pct: number): string {
@@ -160,16 +162,33 @@ function QuotaDisplay({ conn, entry, fetching, nowMs }: { conn: Connection; entr
       </span>
     );
   } else {
-    const pct = worstPct(entry);
+    // Bar shows the primary window bucket (Command Code: 5-hour) and falls
+    // back to the worst bucket; hard caps (weekly/monthly) become the badge.
+    const pct = primaryQuotaPct(entry);
+    const limits = entry.data?.limits ?? [];
     inner =
       pct === null ? (
         <span className="text-[11px] text-muted-foreground/50">—</span>
       ) : (
         <>
-          <div className="h-1.5 w-14 overflow-hidden rounded-full bg-muted">
+          <div className="h-1.5 w-14 shrink-0 overflow-hidden rounded-full bg-muted">
             <div className={cn('h-full rounded-full transition-all', quotaBarColor(pct))} style={{ width: `${pct}%` }} />
           </div>
           <span className="font-mono text-[11px] tabular-nums text-foreground/80">{pct}%</span>
+          {limits.length > 0 && (
+            <Badge
+              variant="outline"
+              className={cn(
+                'h-4 shrink-0 px-1 text-[9px] font-medium',
+                limits.some((l) => l === 'monthly' || l.startsWith('month'))
+                  ? 'border-destructive/30 bg-destructive/10 text-destructive'
+                  : 'border-amber-500/30 bg-amber-500/10 text-amber-600',
+              )}
+              title={limits.map((l) => limitTitle(l, entry)).join('\n')}
+            >
+              Limit
+            </Badge>
+          )}
         </>
       );
   }

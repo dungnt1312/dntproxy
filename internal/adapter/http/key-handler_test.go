@@ -155,7 +155,7 @@ func TestAPIKeyUpdateOmitsAllowlistsLeavesExisting(t *testing.T) {
 	}
 }
 
-func TestAPIKeyListMasksSecrets(t *testing.T) {
+func TestAPIKeyListReturnsPlaintext(t *testing.T) {
 	router, db := newKeyTestRouter(t)
 	create := performJSONRequest(router, http.MethodPost, "/keys", map[string]any{"name": "visible"})
 	if create.Code != http.StatusOK {
@@ -171,8 +171,8 @@ func TestAPIKeyListMasksSecrets(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("list status = %d body = %s", rec.Code, rec.Body.String())
 	}
-	if bytes.Contains(rec.Body.Bytes(), []byte(plain)) {
-		t.Fatal("list returned plaintext API key")
+	if !bytes.Contains(rec.Body.Bytes(), []byte(plain)) {
+		t.Fatal("list must return the full API key so the dashboard can copy it")
 	}
 }
 

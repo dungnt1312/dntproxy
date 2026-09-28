@@ -8,6 +8,8 @@ func TestMapModel(t *testing.T) {
 	}{
 		{"deepseek-v4-pro", "deepseek/deepseek-v4-pro"},
 		{"deepseek-v4", "deepseek/deepseek-v4-pro"},
+		{"deepseek-v4.1-flash", "deepseek/deepseek-v4.1-flash"},
+		{"deepseek-v4-1-flash", "deepseek/deepseek-v4.1-flash"},
 		{"minimax-m3", "MiniMaxAI/MiniMax-M3"},
 		{"MiniMaxAI/MiniMax-M3", "MiniMaxAI/MiniMax-M3"},
 		{"qwen3.7-max", "Qwen/Qwen3.7-Max"},

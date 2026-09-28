@@ -29,7 +29,7 @@ func generateURL(baseURL string) string {
 	return baseURL + generatePath
 }
 
-func buildRequest(model string, body []byte) (ccRequestBody, error) {
+func buildRequest(ctx context.Context, model string, body []byte) (ccRequestBody, error) {
 	var req chatRequest
 	if err := json.Unmarshal(body, &req); err != nil {
 		return ccRequestBody{}, fmt.Errorf("parse request body: %w", err)
@@ -61,6 +61,11 @@ func buildRequest(model string, body []byte) (ccRequestBody, error) {
 		maxTokens = maxAllowedTokens
 	}
 
+	messages, err := convertMessages(ctx, msgs)
+	if err != nil {
+		return ccRequestBody{}, err
+	}
+
 	return ccRequestBody{
 		Config: ccConfig{
 			WorkingDir:    ".",
@@ -78,7 +83,7 @@ func buildRequest(model string, body []byte) (ccRequestBody, error) {
 		Skills: "",
 		Params: ccChatParams{
 			Model:       model,
-			Messages:    convertMessages(msgs),
+			Messages:    messages,
 			Tools:       convertTools(req.Tools),
 			System:      system,
 			MaxTokens:   maxTokens,

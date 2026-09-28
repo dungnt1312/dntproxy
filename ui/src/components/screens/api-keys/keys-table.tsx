@@ -1,4 +1,4 @@
-import { Edit3, Trash2 } from 'lucide-react'
+import { Edit3, Trash2, Copy } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -10,29 +10,32 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { PermissionSummary } from './permission-summary'
 import type { ApiKey } from './types'
 
 interface KeysTableProps {
   keys: ApiKey[]
-  revealedKeys: Set<string>
-  onToggleReveal: (id: string) => void
   onDelete: (key: ApiKey) => void
   onEdit: (key: ApiKey) => void
   formatDate: (dateStr: string) => string
-  maskKey: (key: string) => string
 }
 
 export function KeysTable({
   keys,
-  revealedKeys,
-  onToggleReveal,
   onDelete,
   onEdit,
   formatDate,
-  maskKey,
 }: KeysTableProps) {
+  const copyKey = (apiKey: ApiKey) => {
+    navigator.clipboard.writeText(apiKey.key).then(() => {
+      toast.success(`API key "${apiKey.name}" copied to clipboard`)
+    }).catch(() => {
+      toast.error('Failed to copy to clipboard')
+    })
+  }
+
   return (
     <div className="hidden overflow-x-auto md:block">
       <Table>
@@ -63,8 +66,21 @@ export function KeysTable({
                 <TableCell>
                   <div className="flex items-center gap-1">
                     <code className="text-xs bg-muted px-2 py-1 rounded font-mono max-w-[280px] truncate select-all">
-                      {maskKey(apiKey.key)}
+                      {apiKey.key}
                     </code>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="size-7"
+                          onClick={() => copyKey(apiKey)}
+                        >
+                          <Copy className="size-3.5" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Copy key</TooltipContent>
+                    </Tooltip>
                   </div>
                 </TableCell>
                 <TableCell>

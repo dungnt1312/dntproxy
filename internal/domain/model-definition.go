@@ -1067,6 +1067,17 @@ func DefaultModelRegistry() *ModelRegistry {
 				Capabilities:    []string{"tools", "streaming"},
 				IsActive:        true,
 			},
+			"commandcode/deepseek/deepseek-v4.1-flash": {
+				ID:              "deepseek/deepseek-v4.1-flash",
+				Name:            "DeepSeek V4.1 Flash",
+				Provider:        "commandcode",
+				ContextWindow:   1000000,
+				MaxOutputTokens: 64000,
+				InputPrice:      0.0,
+				OutputPrice:     0.0,
+				Capabilities:    []string{"tools", "streaming", "vision"},
+				IsActive:        true,
+			},
 			"commandcode/MiniMaxAI/MiniMax-M3": {
 				ID:              "MiniMaxAI/MiniMax-M3",
 				Name:            "MiniMax M3",

@@ -1,6 +1,9 @@
 package domain
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 // A short-term rate limit (429 "too many requests") must keep the existing
 // exponential backoff: it recovers in seconds, so a long sideline would waste
@@ -89,5 +92,70 @@ func TestCheckFallbackError_AuthRevokedLongCooldown(t *testing.T) {
 	plain := CheckFallbackError(401, "401 unauthorized", 0)
 	if plain.CooldownMs != CooldownUnauthorized {
 		t.Fatalf("plain 401 cooldown = %d, want short %d", plain.CooldownMs, CooldownUnauthorized)
+	}
+}
+
+// Command Code reports exhausted credits as 400 BAD_REQUEST. The quota body must
+// win over the non-fallback status so the request rotates to another account
+// and the exhausted one is sidelined, instead of surfacing a client error.
+func TestCommandCodeInsufficientCreditsRotatesDespite400(t *testing.T) {
+	body := `commandcode returned 400: {"success":false,"error":{"code":"BAD_REQUEST","status":400,"message":"You have insufficient credits to make this request. Please purchase more credits to continue."}}`
+
+	if got := ClassifyUpstream(400, body); got != UpstreamQuota {
+		t.Fatalf("classification = %s, want quota (400 insufficient credits)", got)
+	}
+	if !IsRetryableUpstream(400, body) {
+		t.Fatal("insufficient-credits 400 must be retryable on another account")
+	}
+	r := CheckFallbackError(400, body, 0)
+	if !r.ShouldFallback {
+		t.Fatal("want fallback to next account")
+	}
+	if r.CooldownMs != CooldownQuotaExhausted {
+		t.Fatalf("cooldown = %d, want long quota-exhausted %d", r.CooldownMs, CooldownQuotaExhausted)
+	}
+	if r.NewBackoffLevel != BackoffMaxLevel {
+		t.Fatalf("NewBackoffLevel = %d, want max %d", r.NewBackoffLevel, BackoffMaxLevel)
+	}
+
+	// Guard the false-positive direction: genuine 400 client errors stay
+	// non-fallback (same reply on every account).
+	ctxLen := "This model's maximum context length is 1048576 tokens. However, you requested 1186975 tokens. Please reduce your prompt."
+	if got := ClassifyUpstream(400, ctxLen); got != UpstreamNonFallback {
+		t.Fatalf("context-length 400 classification = %s, want non_fallback", got)
+	}
+	if IsRetryableUpstream(400, ctxLen) {
+		t.Fatal("context-length 400 must not rotate accounts")
+	}
+}
+
+// An upstream that states when the quota window resets (Command Code weekly and
+// 5-hour limits) gets a cooldown that covers the stated window instead of
+// re-entering rotation hourly for days.
+func TestHardQuotaCooldownHonorsResetHint(t *testing.T) {
+	reset := time.Now().UTC().Add(6 * time.Hour).Format("2006-01-02T15:04:05.000Z")
+	msg := `You've reached your weekly usage limit for your plan. Your limit resets at ` + reset + `. Please wait for the window to reset or upgrade your plan to continue.`
+
+	r := CheckFallbackError(429, msg, 0)
+	if !r.ShouldFallback {
+		t.Fatal("want fallback")
+	}
+	if r.CooldownMs <= CooldownQuotaExhausted {
+		t.Fatalf("cooldown = %d, want > default tier %d (should cover the reset window)", r.CooldownMs, CooldownQuotaExhausted)
+	}
+	if want := int((6 * time.Hour).Milliseconds()); r.CooldownMs < want-60_000 {
+		t.Fatalf("cooldown = %d, want ≈ %d", r.CooldownMs, want)
+	}
+
+	// A reset time already in the past falls back to the default tier.
+	past := `You've reached your 5-hour usage limit. Your limit resets at 2020-01-01T00:00:00Z. Please wait.`
+	r = CheckFallbackError(429, past, 0)
+	if r.CooldownMs != CooldownQuotaExhausted {
+		t.Fatalf("past-reset cooldown = %d, want default tier %d", r.CooldownMs, CooldownQuotaExhausted)
+	}
+
+	// No hint at all: default tier.
+	if r := CheckFallbackError(402, "payment required, top up your balance", 0); r.CooldownMs != CooldownPaymentReq {
+		t.Fatalf("unqualified 402 cooldown = %d, want %d", r.CooldownMs, CooldownPaymentReq)
 	}
 }

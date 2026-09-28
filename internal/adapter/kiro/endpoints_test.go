@@ -1,6 +1,7 @@
 package kiro
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"testing"
@@ -186,7 +187,7 @@ func TestBuildKiroPayloadOmitsProfileArnForAPIKey(t *testing.T) {
 		Model:    "claude-sonnet-5",
 		Messages: []OpenAIMessage{{Role: "user", Content: []byte(`"hello"`)}},
 	}
-	payload, err := BuildKiroPayload(req, "claude-sonnet-5", apiKeyCreds(""))
+	payload, err := BuildKiroPayload(context.Background(), req, "claude-sonnet-5", apiKeyCreds(""))
 	if err != nil {
 		t.Fatalf("BuildKiroPayload: %v", err)
 	}

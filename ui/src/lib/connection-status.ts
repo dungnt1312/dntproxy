@@ -93,10 +93,25 @@ export function healthBucket(c: ConnectionStatusInput): HealthBucket {
   return needsAttention(c) ? 'attention' : 'healthy';
 }
 
-/** Compare two connections by severity then name — pass straight to sort(). */
+/**
+ * Compare two connections by severity then routing order then name — pass
+ * straight to sort(). Routing order mirrors the backend selector: lower
+ * priority value first (0 = default tier), then higher weight (0/unset
+ * normalizes to the default 100, same as DefaultWeight), so healthy accounts
+ * display in the order the router actually tries them.
+ */
 export function compareByAttention(a: Connection, b: Connection): number {
   const rank = attentionRank(a) - attentionRank(b);
-  return rank !== 0 ? rank : a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+  if (rank !== 0) return rank;
+  const prio = (a.priority ?? 0) - (b.priority ?? 0);
+  if (prio !== 0) return prio;
+  const weight = normalizeWeight(b.weight) - normalizeWeight(a.weight);
+  if (weight !== 0) return weight;
+  return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+}
+
+function normalizeWeight(weight: number | undefined): number {
+  return !weight || weight <= 0 ? 100 : weight;
 }
 
 /**

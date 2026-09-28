@@ -1,8 +1,13 @@
 package commandcode
 
 import (
+	"context"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"strings"
+
+	"github.com/dungnt/dntproxy/internal/adapter/shared"
 )
 
 func extractSystem(msgs []chatMessage) (string, []chatMessage) {
@@ -21,7 +26,7 @@ func extractSystem(msgs []chatMessage) (string, []chatMessage) {
 	return system.String(), rest
 }
 
-func convertMessages(msgs []chatMessage) []ccMessage {
+func convertMessages(ctx context.Context, msgs []chatMessage) ([]ccMessage, error) {
 	out := make([]ccMessage, 0, len(msgs))
 	toolNames := map[string]string{}
 	for _, m := range msgs {
@@ -36,10 +41,14 @@ func convertMessages(msgs []chatMessage) []ccMessage {
 		case m.Role == "assistant" && len(m.ToolCalls) > 0:
 			out = append(out, convertAssistantTools(m, toolNames))
 		default:
-			out = append(out, ccMessage{Role: m.Role, Content: parseContent(m.Content)})
+			parts, err := parseContent(ctx, m.Content)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, ccMessage{Role: m.Role, Content: parts})
 		}
 	}
-	return out
+	return out, nil
 }
 
 func convertToolResult(m chatMessage, toolNames map[string]string) ccMessage {
@@ -67,7 +76,7 @@ func convertToolResult(m chatMessage, toolNames map[string]string) ccMessage {
 }
 
 func convertAssistantTools(m chatMessage, toolNames map[string]string) ccMessage {
-	parts := parseContent(m.Content)
+	parts := parseTextContent(m.Content)
 	seen := map[string]bool{}
 	for _, p := range parts {
 		if p.Type == "tool-call" && p.ToolCallID != nil {
@@ -137,32 +146,65 @@ func parseToolInput(arguments string) any {
 	return input
 }
 
-func parseContent(content any) []ccContentPart {
+func parseContent(ctx context.Context, content any) ([]ccContentPart, error) {
 	switch v := content.(type) {
 	case nil:
-		return nil
+		return nil, nil
 	case string:
 		if v == "" {
-			return nil
+			return nil, nil
 		}
-		return []ccContentPart{{Type: "text", Text: strPtr(v)}}
+		return []ccContentPart{{Type: "text", Text: strPtr(v)}}, nil
 	case []any:
-		var parts []ccContentPart
+		parts := make([]ccContentPart, 0, len(v))
 		for _, item := range v {
 			part, ok := item.(map[string]any)
 			if !ok {
+				continue
+			}
+			if imageURL := contentPartImageURL(part); imageURL != "" {
+				data, mimeType, err := shared.LoadImageInput(ctx, imageURL)
+				if err != nil {
+					return nil, fmt.Errorf("load image input: %w", err)
+				}
+				parts = append(parts, ccContentPart{
+					Type:     "image",
+					Image:    "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(data),
+					MIMEType: mimeType,
+				})
 				continue
 			}
 			if text := contentPartText(part); text != "" {
 				parts = append(parts, ccContentPart{Type: "text", Text: strPtr(text)})
 			}
 		}
-		return parts
+		return parts, nil
 	default:
 		if s := contentToString(v); s != "" {
-			return []ccContentPart{{Type: "text", Text: strPtr(s)}}
+			return []ccContentPart{{Type: "text", Text: strPtr(s)}}, nil
 		}
-		return nil
+		return nil, nil
+	}
+}
+
+func parseTextContent(content any) []ccContentPart {
+	parts, _ := parseContent(context.Background(), content)
+	return parts
+}
+
+func contentPartImageURL(part map[string]any) string {
+	imageURL, ok := part["image_url"]
+	if !ok {
+		return ""
+	}
+	switch value := imageURL.(type) {
+	case string:
+		return value
+	case map[string]any:
+		url, _ := value["url"].(string)
+		return url
+	default:
+		return ""
 	}
 }
 

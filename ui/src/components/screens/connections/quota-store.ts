@@ -29,12 +29,37 @@ const MAX_CONCURRENT = 3;
 const FAIL_BASE_MS = 30_000;
 const FAIL_MAX_MS = 10 * 60_000;
 
-function worstUsedPct(data: UsageData | null): number {
+/** Highest non-unlimited bucket usage in [0,100]; 0 when there is no bucket data. */
+export function worstUsedPct(data: UsageData | null): number {
   let worst = 0;
   for (const b of data?.quotas ?? []) {
     if (!b.unlimited && b.pct > worst) worst = b.pct;
   }
   return Math.min(100, Math.max(0, worst));
+}
+
+/**
+ * The pct a list row should display: the provider-marked primary bucket (the
+ * operationally relevant window, e.g. Command Code's 5-hour), falling back to
+ * the worst bucket. Null when the entry has no known quota buckets.
+ */
+export function primaryQuotaPct(entry: QuotaEntry | undefined): number | null {
+  const buckets = entry?.data?.quotas ?? [];
+  const known = buckets.filter((b) => !b.unlimited);
+  if (known.length === 0) return null;
+  const primary = known.find((b) => b.primary);
+  return primary ? primary.pct : worstUsedPct(entry?.data ?? null);
+}
+
+/**
+ * The pct aggregation should treat a connection as: a hard-capped account
+ * (weekly/monthly/5-hour limit flagged by the provider) counts as fully used
+ * even when its displayed window bucket still looks healthy.
+ */
+export function effectiveQuotaPct(entry: QuotaEntry | undefined): number | null {
+  const pct = primaryQuotaPct(entry);
+  if (pct === null) return null;
+  return (entry?.data?.limits?.length ?? 0) > 0 ? 100 : pct;
 }
 
 class QuotaStore {
@@ -83,10 +108,9 @@ class QuotaStore {
   }
 
   setInspected(id: string | null) {
-    const prev = this.inspectedId;
     this.inspectedId = id;
-    if (id && id !== prev) this.queueFetch(id, false);
-    this.pump();
+    // No fetch here: opening a connection must never move the viewport.
+    // Quota loads on explicit refresh, or via the Quota-auto watch tier.
   }
 
   /** Rows entering the viewport do NOT trigger fetches — quota is load-on-request. */

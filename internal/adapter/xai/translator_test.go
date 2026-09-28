@@ -40,6 +40,32 @@ func TestTranslateChatToResponses(t *testing.T) {
 	}
 }
 
+func TestTranslateChatToResponsesConvertsVisionBlocks(t *testing.T) {
+	body := []byte(`{"messages":[{"role":"user","content":[
+		{"type":"text","text":"describe"},
+		{"type":"image_url","image_url":{"url":"data:image/png;base64,cG5n"}}
+	]}]}`)
+	got, err := TranslateChatToResponses("grok-4.3", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Input []struct {
+			Content []map[string]any `json:"content"`
+		} `json:"input"`
+	}
+	if err := json.Unmarshal(got, &payload); err != nil {
+		t.Fatal(err)
+	}
+	parts := payload.Input[0].Content
+	if len(parts) != 2 || parts[0]["type"] != "input_text" || parts[1]["type"] != "input_image" {
+		t.Fatalf("parts = %#v", parts)
+	}
+	if parts[1]["image_url"] != "data:image/png;base64,cG5n" {
+		t.Fatalf("image URL = %#v", parts[1])
+	}
+}
+
 func TestTranslateChatToResponsesRejectsUnsupportedTool(t *testing.T) {
 	body := []byte(`{"model":"grok/grok-4.3","messages":[{"role":"user","content":"hi"}],"tools":[{"type":"web_search"}]}`)
 

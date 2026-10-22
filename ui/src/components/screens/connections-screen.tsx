@@ -83,6 +83,8 @@ export default function ConnectionsScreen() {
     // Bootstrap fetch — state settles asynchronously after the await inside load().
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
+    // Show the last known quotas right away from the server cache (no provider calls).
+    void quotaStore.loadCached();
   }, [load]);
 
   // ── Counts & filtering ──────────────────────────────────────────────────────

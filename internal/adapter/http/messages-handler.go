@@ -181,6 +181,11 @@ func handleStreamingMessages(c *gin.Context, stream io.ReadCloser, model string,
 	})
 	c.Writer.Flush()
 
+	// Keep the connection visibly alive while the upstream is silent (e.g. a
+	// model thinking before its first token). Every write below runs under hb.
+	hb := startSSEHeartbeat(c.Writer, sseKeepAliveInterval)
+	defer hb.Stop()
+
 	// State tracking
 	contentBlockStarted := false
 	blockIndex := 0
@@ -188,6 +193,9 @@ func handleStreamingMessages(c *gin.Context, stream io.ReadCloser, model string,
 	outputTokens := 0
 
 	streamErr := readOpenAISSEData(stream, func(data string) error {
+		hb.Lock()
+		defer hb.Unlock()
+
 		var chunk openaiSSEChunk
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 			return nil
@@ -326,6 +334,7 @@ func handleStreamingMessages(c *gin.Context, stream io.ReadCloser, model string,
 		}
 		return nil
 	})
+	hb.Stop() // the writer is ours alone again
 
 	if streamErr != nil {
 		if errors.Is(streamErr, context.Canceled) {

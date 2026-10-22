@@ -55,6 +55,10 @@ type UsageResponse struct {
 	Overages    *OverageInfo          `json:"overages,omitempty"`
 	History     []BillingHistoryEntry `json:"history,omitempty"`
 	Extras      map[string]any        `json:"extras,omitempty"`
+	// FetchedAt is when the provider was last asked (RFC3339); Cached is true
+	// when this answer came from the server-side quota cache.
+	FetchedAt string `json:"fetchedAt,omitempty"`
+	Cached    bool   `json:"cached,omitempty"`
 }
 
 // OverageInfo contains overage / on-demand usage when the plan exposes a cap.
@@ -104,6 +108,8 @@ func (r *UsageResponse) addBucketWithUnit(key, label string, used, total int, re
 // UsageHandler handles usage/quota API requests.
 type UsageHandler struct {
 	store port.CredentialStore
+	// fetch overrides the provider call in tests; nil means h.fetchUsage.
+	fetch func(*domain.ProviderConnection) (*UsageResponse, error)
 }
 
 // NewUsageHandler creates a new UsageHandler.
@@ -111,7 +117,11 @@ func NewUsageHandler(store port.CredentialStore) *UsageHandler {
 	return &UsageHandler{store: store}
 }
 
-// GetUsage handles GET /api/usage/:connectionId
+// GetUsage handles GET /api/usage/:connectionId.
+//
+// Answers from the server-side quota cache while the last fetch is younger than
+// usageCacheTTL; ?refresh=1 always asks the provider (the dashboard's Refresh
+// buttons). Concurrent misses for one connection share a single provider call.
 func (h *UsageHandler) GetUsage(c *gin.Context) {
 	connectionID := c.Param("connectionId")
 
@@ -132,7 +142,31 @@ func (h *UsageHandler) GetUsage(c *gin.Context) {
 		return
 	}
 
-	// Refresh token proactively if needed.
+	force := c.Query("refresh") == "1" || c.Query("refresh") == "true"
+	if !force {
+		if e, ok := sharedUsageCache.fresh(conn.ID); ok {
+			c.JSON(http.StatusOK, e.view(true))
+			return
+		}
+	}
+
+	v, err, _ := sharedUsageCache.sf.Do(conn.ID, func() (interface{}, error) {
+		resp, err := h.fetchFresh(conn)
+		if err != nil {
+			return nil, err // failures are never cached: the last good entry stays
+		}
+		return sharedUsageCache.put(conn.ID, resp), nil
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, v.(usageCacheEntry).view(false))
+}
+
+// fetchFresh asks the provider, refreshing the token first when it is about to
+// expire and once more on an auth error.
+func (h *UsageHandler) fetchFresh(conn *domain.ProviderConnection) (*UsageResponse, error) {
 	refreshSvc := auth.NewTokenRefreshService(h.store)
 	if refreshSvc.NeedsRefresh(conn) {
 		log.Printf("[USAGE] Token expiring soon for %s, refreshing...", conn.Name)
@@ -142,25 +176,25 @@ func (h *UsageHandler) GetUsage(c *gin.Context) {
 		}
 	}
 
-	resp, err := h.fetchUsage(conn)
-	log.Printf("[USAGE] Fetched usage for %s: %+v (err=%v)", conn.Name, resp, err)
-	if err != nil {
-		// Try a forced refresh on auth errors.
-		if isAuthExpiredError(err) && conn.RefreshToken != "" {
-			log.Printf("[USAGE] Auth expired, force refreshing for %s", conn.Name)
-			if refreshed, rerr := refreshSvc.Refresh(conn); rerr == nil {
-				conn = refreshed
-				h.store.UpdateConnection(conn)
-				resp, err = h.fetchUsage(conn)
-			}
-		}
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
+	fetch := h.fetch
+	if fetch == nil {
+		fetch = h.fetchUsage
+	}
+	resp, err := fetch(conn)
+	if err != nil && isAuthExpiredError(err) && conn.RefreshToken != "" {
+		log.Printf("[USAGE] Auth expired, force refreshing for %s", conn.Name)
+		if refreshed, rerr := refreshSvc.Refresh(conn); rerr == nil {
+			conn = refreshed
+			h.store.UpdateConnection(conn)
+			resp, err = fetch(conn)
 		}
 	}
-
-	c.JSON(http.StatusOK, resp)
+	if err != nil {
+		log.Printf("[USAGE] Fetch failed for %s: %v", conn.Name, err)
+		return nil, err
+	}
+	log.Printf("[USAGE] Fetched usage for %s (%s)", conn.Name, conn.Provider)
+	return resp, nil
 }
 
 // fetchUsage dispatches to the provider-specific fetcher.

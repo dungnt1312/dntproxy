@@ -1,7 +1,6 @@
 package http
 
 import (
-	"fmt"
 	"time"
 
 	"github.com/dungnt/dntproxy/internal/adapter/auth"
@@ -82,18 +81,13 @@ func authKiroAPIKey(store port.CredentialStore) gin.HandlerFunc {
 			TenantID:  GetTenantID(c),
 		}
 
+		resolveKiroEmail(c, &conn)
+
 		if err := store.Update(func(cfg *domain.AppConfig) {
-			name := req.Name
-			if name == "" {
-				count := 0
-				for _, x := range cfg.ProviderConnections {
-					if x.Provider == "kiro" {
-						count++
-					}
-				}
-				name = fmt.Sprintf("Kiro API Key %d", count+1)
+			conn.Name = req.Name
+			if conn.Name == "" {
+				conn.Name = auth.KiroConnectionName(&conn, cfg.ProviderConnections)
 			}
-			conn.Name = name
 			cfg.ProviderConnections = append(cfg.ProviderConnections, conn)
 		}); err != nil {
 			c.JSON(500, gin.H{"error": "Failed to save: " + err.Error()})

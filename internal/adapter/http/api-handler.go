@@ -110,7 +110,8 @@ func RegisterAPIRoutes(r *gin.Engine, store port.CredentialStore, providers port
 		api.GET("/usage/chart", apiGetUsageChart)
 		api.GET("/usage/request-details", apiGetRequestDetails)
 
-		// Usage/Quota (per-connection)
+		// Usage/Quota (per-connection). /usage/cached only reads the server cache.
+		api.GET("/usage/cached", apiGetCachedUsage(store))
 		api.GET("/usage/:connectionId", apiGetUsage(store))
 
 		// Backup

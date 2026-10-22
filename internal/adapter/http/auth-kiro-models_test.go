@@ -17,11 +17,23 @@ import (
 type fakeCatalog struct {
 	mu       sync.Mutex
 	models   []string
-	status   int    // non-zero: answer every request with this status
-	pageSize int    // >0: paginate
-	validTok string // if set, any other bearer gets 403
-	requests []string
+	status   int      // non-zero: answer every request with this status
+	pageSize int      // >0: paginate
+	validTok string   // if set, any other bearer gets 403
+	requests []string // model catalog requests only
 	headers  []http.Header
+
+	// getUsageLimits (account email lookup) is served separately so it never
+	// counts as a model-catalog request.
+	email      string // "" answers userInfo.email = null
+	usageFail  int    // non-zero: answer getUsageLimits with this status
+	usageCalls []string
+}
+
+func (f *fakeCatalog) usageRequests() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.usageCalls...)
 }
 
 func (f *fakeCatalog) set(models ...string) {
@@ -45,6 +57,19 @@ func (f *fakeCatalog) calls() int {
 func (f *fakeCatalog) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if strings.HasSuffix(r.URL.Path, "/getUsageLimits") {
+		f.usageCalls = append(f.usageCalls, r.URL.RawQuery+"|TokenType="+r.Header.Get("TokenType"))
+		if f.usageFail != 0 {
+			w.WriteHeader(f.usageFail)
+			return
+		}
+		var email interface{}
+		if f.email != "" && r.URL.Query().Get("isEmailRequired") == "true" {
+			email = f.email
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"userInfo": map[string]any{"email": email, "userId": "d-1.u-1"}})
+		return
+	}
 	f.requests = append(f.requests, r.URL.String())
 	f.headers = append(f.headers, r.Header.Clone())
 	if !strings.HasSuffix(r.URL.Path, "/List-Available-Models") && !strings.HasSuffix(r.URL.Path, "/ListAvailableModels") {
@@ -294,6 +319,42 @@ func TestSyncModelsEndpointIsGone(t *testing.T) {
 	}
 	if e.catalog.calls() != before {
 		t.Fatal("a removed endpoint must not reach upstream")
+	}
+}
+
+func TestNewLoginIsNamedAfterAccountEmail(t *testing.T) {
+	e := newKiroTestEnv(t)
+	e.catalog.email = "dev@example.com"
+	t.Setenv("KIRO_AUTH_PORTAL_URL", "")
+
+	_, start := e.post(t, "/api/auth/kiro/start-social", `{"provider":"github"}`, nil)
+	cb := "http://localhost:3128/oauth/callback?login_option=github&code=C&state=" + start["state"].(string)
+	_, done := e.post(t, "/api/auth/kiro/exchange-social", `{"sessionId":"`+start["sessionId"].(string)+`","callbackUrl":"`+cb+`"}`, nil)
+	if done["email"] != "dev@example.com" || done["name"] != "dev@example.com" {
+		t.Fatalf("exchange = %v", done)
+	}
+	got := e.conn(t, done["id"].(string))
+	if got.Email != "dev@example.com" || got.Name != "dev@example.com" {
+		t.Fatalf("conn name=%q email=%q", got.Name, got.Email)
+	}
+	if reqs := e.catalog.usageRequests(); len(reqs) != 1 || !strings.Contains(reqs[0], "isEmailRequired=true") {
+		t.Fatalf("email lookup requests = %v", reqs)
+	}
+}
+
+func TestNewLoginFallsBackToReadableNameWhenEmailUnavailable(t *testing.T) {
+	e := newKiroTestEnv(t)
+	e.catalog.usageFail = 500
+	t.Setenv("KIRO_AUTH_PORTAL_URL", "")
+
+	_, start := e.post(t, "/api/auth/kiro/start-social", `{"provider":"google"}`, nil)
+	cb := "http://localhost:3128/oauth/callback?login_option=google&code=C&state=" + start["state"].(string)
+	code, done := e.post(t, "/api/auth/kiro/exchange-social", `{"sessionId":"`+start["sessionId"].(string)+`","callbackUrl":"`+cb+`"}`, nil)
+	if code != 200 || done["id"] == nil {
+		t.Fatalf("a failed email lookup must not fail the login: %d %v", code, done)
+	}
+	if name, _ := done["name"].(string); name != "Kiro Google" {
+		t.Fatalf("fallback name = %q, want %q", name, "Kiro Google")
 	}
 }
 

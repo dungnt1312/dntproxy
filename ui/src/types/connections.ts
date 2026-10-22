@@ -66,6 +66,10 @@ export interface UsageData {
   };
   history?: BillingHistoryEntry[];
   error?: string;
+  /** When the server last asked the provider (RFC3339). */
+  fetchedAt?: string;
+  /** True when served from the server-side quota cache. */
+  cached?: boolean;
 }
 
 export interface TestConnectionResult {

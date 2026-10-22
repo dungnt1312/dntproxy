@@ -160,7 +160,10 @@ export const api = {
     request(`/combos/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteCombo: (id: string) => request(`/combos/${id}`, { method: 'DELETE' }),
   checkQuota: (id: string) => request(`/connections/${id}/check-quota`, { method: 'POST' }),
-  getUsage: (id: string) => request(`/usage/${id}`),
+  // Served from the server's quota cache unless refresh=true (hard re-fetch).
+  getUsage: (id: string, refresh = false) => request(`/usage/${id}${refresh ? '?refresh=1' : ''}`),
+  // Last known quota of every visible connection; never calls a provider.
+  getCachedUsage: () => request('/usage/cached'),
 
   // Aliases
   getAliases: () => request('/aliases'),

@@ -220,8 +220,6 @@ func apiImportConnection(store port.CredentialStore) gin.HandlerFunc {
 			return
 		}
 
-		email := auth.ExtractEmailFromJWT(result.AccessToken)
-
 		cfg, err := store.Load()
 		var settings *domain.Settings
 		if err == nil && cfg != nil {
@@ -256,7 +254,6 @@ func apiImportConnection(store port.CredentialStore) gin.HandlerFunc {
 			RefreshToken:    result.RefreshToken,
 			ExpiresAt:       time.Now().Add(time.Duration(expiresIn) * time.Second).UTC().Format(time.RFC3339),
 			ExpiresIn:       expiresIn,
-			Email:           email,
 			TestStatus:      "active",
 			SupportedModels: domain.GetDefaultConnectionModels(settings, "kiro"),
 			ProviderSpecificData: map[string]interface{}{
@@ -281,20 +278,17 @@ func apiImportConnection(store port.CredentialStore) gin.HandlerFunc {
 			conn.ProviderSpecificData["region"] = result.Region
 		}
 
+		resolveKiroEmail(c, &conn)
+
 		if err := store.Update(func(cfg *domain.AppConfig) {
-			name := email
-			if name == "" {
-				name = providerLabel + " Account"
-				name += fmt.Sprintf(" %d", len(cfg.ProviderConnections)+1)
-			}
-			conn.Name = name
+			conn.Name = auth.KiroConnectionName(&conn, cfg.ProviderConnections)
 			cfg.ProviderConnections = append(cfg.ProviderConnections, conn)
 		}); err != nil {
 			c.JSON(500, gin.H{"error": "Failed to save: " + err.Error()})
 			return
 		}
 
-		c.JSON(200, gin.H{"id": conn.ID, "name": conn.Name, "email": email})
+		c.JSON(200, gin.H{"id": conn.ID, "name": conn.Name, "email": conn.Email})
 	}
 }
 

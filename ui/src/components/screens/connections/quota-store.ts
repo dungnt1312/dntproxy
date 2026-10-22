@@ -22,6 +22,12 @@ export interface QuotaEntry {
   fetchedAt: number;
 }
 
+/** Server timestamp of a usage answer, falling back to "now" for older servers. */
+function serverFetchedAt(data: UsageData | null | undefined): number {
+  const t = data?.fetchedAt ? Date.parse(data.fetchedAt) : NaN;
+  return Number.isFinite(t) ? t : Date.now();
+}
+
 const WATCH_MS = 45_000;
 const HOT_MS = 2 * 60_000;
 const SWEEP_MS = 15_000;
@@ -67,6 +73,8 @@ class QuotaStore {
   private listeners = new Set<() => void>();
   private version = 0;
   private hiQueue: string[] = [];
+  /** Queued ids that must bypass the server cache (explicit Refresh). */
+  private forceIds = new Set<string>();
   private inflight = new Set<string>();
   private failCount = new Map<string, number>();
   private nextOkAt = new Map<string, number>();
@@ -82,6 +90,25 @@ class QuotaStore {
   };
 
   getVersion = (): number => this.version;
+
+  /**
+   * Fills rows from the server's quota cache on page load. This never reaches a
+   * provider; entries already fetched in this tab are not overwritten.
+   */
+  async loadCached() {
+    try {
+      const res = (await api.getCachedUsage()) as { entries?: Record<string, UsageData> } | null;
+      let changed = false;
+      for (const [id, data] of Object.entries(res?.entries ?? {})) {
+        if (this.entries.has(id) || this.inflight.has(id)) continue;
+        this.entries.set(id, { data, fetchedAt: serverFetchedAt(data) });
+        changed = true;
+      }
+      if (changed) this.emit();
+    } catch {
+      // Optional warm-up: rows stay "not loaded" until a Refresh.
+    }
+  }
 
   private emit() {
     this.version++;
@@ -108,7 +135,7 @@ class QuotaStore {
 
   /** Rows entering the viewport do NOT trigger fetches — quota is load-on-request. */
 
-  /** Manual refresh: force-bypasses staleness and failure backoff. */
+  /** Manual refresh: asks the provider (bypasses the server cache and failure backoff). */
   refresh(ids: string[]) {
     ids.forEach((id) => this.queueFetch(id, true));
     this.pump();
@@ -158,6 +185,7 @@ class QuotaStore {
   private queueFetch(id: string, force: boolean) {
     if (!force && (this.nextOkAt.get(id) ?? 0) > Date.now()) return;
     if (this.inflight.has(id)) return;
+    if (force) this.forceIds.add(id);
     this.pushUnique(this.hiQueue, id);
   }
 
@@ -173,13 +201,16 @@ class QuotaStore {
       // Skip only connections known to be ineligible. A connection missing from
       // the snapshot (e.g. created a moment ago, before the list reloaded) is
       // still fetched — the request was explicit.
+      const force = this.forceIds.delete(id);
       const conn = this.connsProvider?.().find((c) => c.id === id);
       if (conn && (conn.supportsQuota === false || !conn.isActive)) continue;
       this.inflight.add(id);
+      // Explicit refreshes go to the provider; automatic tiers may be answered
+      // from the server cache (shared by every tab), which is what stops spam.
       api
-        .getUsage(id)
-        .then((data) => {
-          this.entries.set(id, { data, fetchedAt: Date.now() });
+        .getUsage(id, force)
+        .then((data: UsageData) => {
+          this.entries.set(id, { data, fetchedAt: serverFetchedAt(data) });
           this.failCount.delete(id);
           this.nextOkAt.delete(id);
         })

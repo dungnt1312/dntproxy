@@ -81,7 +81,9 @@ type ResponseTransformer struct {
 	toolCallIdx   int
 	seenToolIDs   map[string]int
 	usage         *SSEUsage
-	totalContent  int
+	totalContent  int // visible assistant text bytes (drives truncation detection)
+	toolArgBytes  int // tool-call name + argument bytes (billed output, not visible text)
+	reasoning     int // reasoningContentEvent text bytes (billed output, not forwarded)
 	ctxPct        float64
 	hasCtxUsage   bool
 	hasMetering   bool
@@ -154,6 +156,13 @@ func (t *ResponseTransformer) TransformFrame(frame *EventFrame) [][]byte {
 	case "metricsEvent":
 		t.handleMetricsEvent(frame)
 
+	case "reasoningContentEvent":
+		// Extended-thinking text, streamed in small fragments (the last carries
+		// a signature). It is not forwarded to the client, but Kiro bills it as
+		// output, so it counts toward the usage estimate. Not logged: one line
+		// per fragment flooded the log and wrote model reasoning to disk.
+		t.handleReasoning(frame)
+
 	default:
 		if eventType != "" {
 			log.Printf("[KIRO] unknown event=%s payload=%s", eventType, string(frame.Payload))
@@ -193,7 +202,7 @@ func (t *ResponseTransformer) Flush() [][]byte {
 			log.Printf("[KIRO] truncated stream: model=%s contentBytes=%d stopReceived=%v metering=%v — finishing as length",
 				t.model, t.totalContent, t.stopReceived, t.hasMetering)
 		}
-		if t.usage == nil && t.totalContent > 0 {
+		if t.usage == nil && t.outputBytes() > 0 {
 			t.estimateUsage()
 		}
 		chunk := t.buildChunk(SSEDelta{}, &finishReason)
@@ -307,6 +316,7 @@ func (t *ResponseTransformer) emitToolUse(toolCallID, toolName string, toolInput
 	// Check if this is a new tool call
 	toolIndex, seen := t.seenToolIDs[toolCallID]
 	if !seen {
+		t.toolArgBytes += len(toolName)
 		toolIndex = t.toolCallIdx
 		t.seenToolIDs[toolCallID] = toolIndex
 		t.toolCallIdx++
@@ -341,6 +351,7 @@ func (t *ResponseTransformer) emitToolUse(toolCallID, toolName string, toolInput
 		}
 
 		t.capturePayloadText(fmt.Sprintf("\n[tool:%s] %s", toolName, argsStr))
+		t.toolArgBytes += len(argsStr)
 
 		delta := SSEDelta{
 			ToolCalls: []SSEToolCall{{
@@ -472,10 +483,28 @@ func (t *ResponseTransformer) emitFinalChunk() []byte {
 	return t.marshalSSE(chunk)
 }
 
+// handleReasoning counts the text of a reasoningContentEvent fragment. The
+// signature-only fragment carries no text and adds nothing.
+func (t *ResponseTransformer) handleReasoning(frame *EventFrame) {
+	var payload struct {
+		Text string `json:"text"`
+	}
+	if err := frame.ParsePayloadAs(&payload); err == nil {
+		t.reasoning += len(payload.Text)
+	}
+}
+
+// outputBytes is everything the model generated for this turn: visible text,
+// tool-call names and arguments, and hidden reasoning. Kiro reports no token
+// counts, so usage is estimated from it.
+func (t *ResponseTransformer) outputBytes() int {
+	return t.totalContent + t.toolArgBytes + t.reasoning
+}
+
 func (t *ResponseTransformer) estimateUsage() {
 	outputTokens := 0
-	if t.totalContent > 0 {
-		outputTokens = max(1, t.totalContent/4)
+	if n := t.outputBytes(); n > 0 {
+		outputTokens = max(1, n/4)
 	}
 	inputTokens := 0
 	if t.ctxPct > 0 {

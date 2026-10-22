@@ -89,6 +89,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	go runLogRetention(logStore, logRetentionDone)
 	oauthRefreshDone := make(chan struct{})
 	go service.RunOAuthAutoRefresh(store, oauthRefreshDone)
+	go service.BackfillKiroEmailsOnce(store, oauthRefreshDone)
 
 	cfg, err := store.Load()
 	if err != nil {

@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -16,8 +17,6 @@ import (
 // returns it. The same shape is produced by every login flow so refresh and
 // routing treat them alike.
 func saveKiroLogin(c *gin.Context, store port.CredentialStore, cred *auth.KiroCredential) (*domain.ProviderConnection, string, error) {
-	email := auth.ExtractEmailFromJWT(cred.AccessToken)
-
 	cfg, err := store.Load()
 	if err != nil {
 		return nil, "", fmt.Errorf("load config: %w", err)
@@ -39,7 +38,6 @@ func saveKiroLogin(c *gin.Context, store port.CredentialStore, cred *auth.KiroCr
 		RefreshToken:         cred.RefreshToken,
 		ExpiresAt:            time.Now().Add(time.Duration(expiresIn) * time.Second).UTC().Format(time.RFC3339),
 		ExpiresIn:            expiresIn,
-		Email:                email,
 		TestStatus:           "active",
 		SupportedModels:      domain.GetDefaultConnectionModels(settings, "kiro"),
 		ProviderSpecificData: cred.ProviderData(),
@@ -48,16 +46,24 @@ func saveKiroLogin(c *gin.Context, store port.CredentialStore, cred *auth.KiroCr
 		TenantID:             GetTenantID(c),
 	}
 
+	resolveKiroEmail(c, &conn)
+
 	if err := store.Update(func(cfg *domain.AppConfig) {
-		conn.Name = email
-		if conn.Name == "" {
-			conn.Name = fmt.Sprintf("%s Account %d", cred.ProviderLabel(), len(cfg.ProviderConnections)+1)
-		}
+		conn.Name = auth.KiroConnectionName(&conn, cfg.ProviderConnections)
 		cfg.ProviderConnections = append(cfg.ProviderConnections, conn)
 	}); err != nil {
 		return nil, "", fmt.Errorf("save: %w", err)
 	}
-	return &conn, email, nil
+	return &conn, conn.Email, nil
+}
+
+// resolveKiroEmail looks up the account email for a new Kiro connection. Kiro
+// tokens are opaque, so this is a GetUsageLimits call; it is bounded so a slow
+// lookup never holds up the login, and a failure just means no email.
+func resolveKiroEmail(c *gin.Context, conn *domain.ProviderConnection) {
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+	defer cancel()
+	auth.ResolveKiroEmail(ctx, conn)
 }
 
 // loginFlowMode returns "auth-code" or "device-code" for a Builder ID / IDC

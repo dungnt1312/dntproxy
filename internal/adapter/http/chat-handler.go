@@ -105,7 +105,12 @@ func chatHandler(chatService port.ChatService, store port.CredentialStore, comp 
 			events := streamChunks(done, result.Stream)
 			timeout := time.NewTimer(streamReadTimeout)
 			defer timeout.Stop()
+			// Keep the connection visibly alive while the upstream is silent
+			// (e.g. a model thinking before its first token).
+			hb := startSSEHeartbeat(c.Writer, sseKeepAliveInterval)
+			defer hb.Stop()
 			writeSSEEnd := func(msg string) {
+				hb.Stop()
 				if msg != "" {
 					_, _ = c.Writer.Write([]byte("data: {\"error\":{\"message\":\"" + msg + "\"}}\n\n"))
 				}
@@ -126,11 +131,16 @@ func chatHandler(chatService port.ChatService, store port.CredentialStore, comp 
 						return
 					}
 					if len(ev.data) > 0 {
-						if _, writeErr := c.Writer.Write(ev.data); writeErr != nil {
+						hb.Lock()
+						_, writeErr := c.Writer.Write(ev.data)
+						if writeErr == nil {
+							c.Writer.Flush()
+						}
+						hb.Unlock()
+						if writeErr != nil {
 							result.Stream.Close()
 							return
 						}
-						c.Writer.Flush()
 						bytesReceived += int64(len(ev.data))
 					}
 					if ev.err == io.EOF {

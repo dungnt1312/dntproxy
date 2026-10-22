@@ -10,23 +10,9 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { getModelProviderId } from '@/lib/provider-registry';
+import { cn } from '@/lib/utils';
 import type { Connection } from '@/types/connections';
-
-/**
- * Strips the provider/route prefix from a "prefix/model" string so it can be
- * stored in a connection's supportedModels (same semantics as EditModelsModal).
- */
-export function stripModelForConnection(model: string, conn: Connection): string {
-    const trimmed = model.trim();
-    const prefix =
-        conn.provider === 'openai-compatible' && conn.routePrefix
-            ? conn.routePrefix
-            : getModelProviderId(conn.provider);
-    if (trimmed.startsWith(prefix + '/')) return trimmed.slice(prefix.length + 1);
-    const slash = trimmed.indexOf('/');
-    return slash >= 0 ? trimmed.slice(slash + 1) : trimmed;
-}
+import { withModelPrefix } from './model-prefix';
 
 type Mode = 'replace' | 'clear';
 
@@ -48,20 +34,19 @@ export function BulkModelsModal({ connections, busy, onApply, onClose }: BulkMod
     const [text, setText] = useState(() => {
         const providers = new Set(connections.map((c) => c.provider));
         if (providers.size !== 1) return '';
-        const conn = connections[0];
-        const prefix = getModelProviderId(conn.provider);
         const sets = connections.map((c) => new Set(c.supportedModels || []));
         if (sets.length === 0) return '';
         const shared = [...sets[0]].filter((m) => sets.every((s) => s.has(m)));
-        return shared.sort().map((m) => (m.includes('/') ? m : `${prefix}/${m}`)).join('\n');
+        return withModelPrefix(shared.sort(), connections[0]).join('\n');
     });
     const [mode, setMode] = useState<Mode>('replace');
+    const [confirmClear, setConfirmClear] = useState(false);
 
     const lines = text
         .split('\n')
         .map((s) => s.trim())
         .filter(Boolean);
-    const canApply = mode === 'clear' || lines.length > 0;
+    const canApply = (mode === 'clear' && confirmClear) || (mode === 'replace' && lines.length > 0);
 
     return (
         <Dialog open onOpenChange={(open) => { if (!open && !busy) onClose(); }}>
@@ -73,9 +58,9 @@ export function BulkModelsModal({ connections, busy, onApply, onClose }: BulkMod
                         </div>
                         <div>
                             <DialogTitle className="text-lg">
-                                Update Models — {connections.length} connections
+                                Replace models — {connections.length} connections
                             </DialogTitle>
-                            <DialogDescription className="text-xs mt-1">
+                            <DialogDescription className="mt-1">
                                 One model per line (e.g. <code>kr/claude-sonnet-4-5</code>). Provider
                                 prefixes are stripped per connection on save.
                             </DialogDescription>
@@ -94,11 +79,10 @@ export function BulkModelsModal({ connections, busy, onApply, onClose }: BulkMod
                         ).map(([value, label]) => (
                             <label
                                 key={value}
-                                className="flex flex-1 cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-xs font-medium transition-colors"
-                                style={{
-                                    borderColor: mode === value ? 'hsl(var(--primary) / 0.4)' : undefined,
-                                    background: mode === value ? 'hsl(var(--primary) / 0.05)' : undefined,
-                                }}
+                                className={cn(
+                                    'flex flex-1 cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-colors',
+                                    mode === value ? 'border-primary/40 bg-primary/5' : 'hover:bg-muted/50',
+                                )}
                             >
                                 <input
                                     type="radio"
@@ -107,7 +91,7 @@ export function BulkModelsModal({ connections, busy, onApply, onClose }: BulkMod
                                     checked={mode === value}
                                     onChange={() => setMode(value)}
                                     disabled={busy}
-                                    className="accent-[hsl(var(--primary))]"
+                                    className="accent-primary"
                                 />
                                 {label}
                             </label>
@@ -116,7 +100,7 @@ export function BulkModelsModal({ connections, busy, onApply, onClose }: BulkMod
 
                     {mode === 'replace' && (
                         <div className="space-y-1">
-                            <label htmlFor="bulk-models-list" className="text-xs font-medium">
+                            <label htmlFor="bulk-models-list" className="text-sm font-medium">
                                 Supported Models{' '}
                                 <span className="font-normal text-muted-foreground">
                                     (one per line, replaces each connection's list)
@@ -131,9 +115,25 @@ export function BulkModelsModal({ connections, busy, onApply, onClose }: BulkMod
                                 autoComplete="off"
                                 spellCheck={false}
                                 disabled={busy}
-                                className="text-xs font-mono"
+                                className="font-mono text-sm"
                             />
                         </div>
+                    )}
+
+                    {mode === 'clear' && (
+                        <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-warning/30 bg-warning/10 p-3 text-sm">
+                            <input
+                                type="checkbox"
+                                checked={confirmClear}
+                                onChange={(e) => setConfirmClear(e.target.checked)}
+                                disabled={busy}
+                                className="mt-0.5 accent-primary"
+                            />
+                            <span>
+                                Remove the model restriction from all {connections.length} selected connections.
+                                They will accept any model.
+                            </span>
+                        </label>
                     )}
                 </div>
 

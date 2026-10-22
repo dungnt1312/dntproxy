@@ -1,33 +1,23 @@
 package auth
 
-// IDC (AWS IAM Identity Center) uses the same device code flow as Builder ID,
-// but with a custom startUrl and region provided by the enterprise admin.
+// IDC (AWS IAM Identity Center) device-code helpers. This is the fallback
+// path; the primary Kiro-faithful flow is IdCLogin (kiro-idc-login.go).
 //
-// The functions in builder-id.go (RegisterClient, StartDeviceAuthorization,
-// PollDeviceToken, RefreshTokenSSO) all accept region parameter and work
-// for both Builder ID and IDC.
-//
-// The difference is:
-// - Builder ID: startUrl = "https://view.awsapps.com/start", region = "us-east-1"
-// - IDC: startUrl = custom (e.g. "https://mycompany.awsapps.com/start"), region = custom
-//
-// Enterprise IDC accounts may not have a profileArn. In that case, the Q API
-// endpoint is used instead of the standard CodeWhisperer endpoint.
+// Enterprise IDC accounts may not have a profileArn. ResolveProfileArn looks it
+// up through ListAvailableProfiles after a successful login.
 
 // StartIDCDeviceAuth starts device authorization for an IDC enterprise account.
 // startURL is the enterprise SSO start URL (e.g. "https://mycompany.awsapps.com/start").
 func StartIDCDeviceAuth(startURL, region string) (*RegisterClientResult, *DeviceAuthResult, error) {
 	if region == "" {
-		region = "us-east-1"
+		region = DefaultIdCRegion
 	}
 
-	// Register client
-	client, err := RegisterClient(region)
+	client, err := registerDeviceClient(region)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	// Start device authorization with custom startUrl
 	deviceAuth, err := StartDeviceAuthorization(client.ClientID, client.ClientSecret, startURL, region)
 	if err != nil {
 		return client, nil, err
@@ -38,5 +28,5 @@ func StartIDCDeviceAuth(startURL, region string) (*RegisterClientResult, *Device
 
 // StartBuilderIDDeviceAuth starts device authorization for AWS Builder ID.
 func StartBuilderIDDeviceAuth() (*RegisterClientResult, *DeviceAuthResult, error) {
-	return StartIDCDeviceAuth(KiroConfig.StartURL, "us-east-1")
+	return StartIDCDeviceAuth(KiroConfig.StartURL, DefaultIdCRegion)
 }

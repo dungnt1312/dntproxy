@@ -3,7 +3,7 @@ import { Layers, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '../../api'
 import { ProviderLogo } from './ProviderLogo'
-import { stripModelForConnection } from './BulkModelsModal'
+import { stripModelForConnection } from './model-prefix'
 import { getProviderLabel } from '@/lib/provider-registry'
 import type { Connection } from '@/types/connections'
 import {
@@ -63,8 +63,8 @@ export function BulkApplyModelsModal({ source, connections, models, onApplied, o
           setModels: true,
         })
         done++
-      } catch (e: any) {
-        errors.push(`${target.name}: ${e.message || 'failed'}`)
+      } catch (e: unknown) {
+        errors.push(`${target.name}: ${e instanceof Error && e.message ? e.message : 'failed'}`)
       }
     }
     setApplying(false)
@@ -88,8 +88,8 @@ export function BulkApplyModelsModal({ source, connections, models, onApplied, o
               <Layers className="h-5 w-5 text-primary" />
             </div>
             <div>
-              <DialogTitle className="text-lg">Apply to connections</DialogTitle>
-              <DialogDescription className="text-xs mt-1">
+              <DialogTitle className="text-lg">Copy models to other connections</DialogTitle>
+              <DialogDescription className="mt-1">
                 Copy the {models.length} model{models.length === 1 ? '' : 's'} currently selected for{' '}
                 <span className="font-medium text-foreground">{source.name}</span> to other connections.
                 Prefixes are stripped per connection on apply.
@@ -101,7 +101,7 @@ export function BulkApplyModelsModal({ source, connections, models, onApplied, o
         <div className="flex-1 overflow-y-auto space-y-4 py-2">
           {/* Model list preview */}
           <div className="space-y-1.5">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Models to apply</span>
+            <span className="text-sm font-medium">Models to apply</span>
             <div className="flex max-h-28 flex-wrap gap-1.5 overflow-y-auto rounded-lg border border-border bg-muted/20 p-2.5">
               {models.length === 0 ? (
                 <span className="text-xs text-muted-foreground">
@@ -111,7 +111,7 @@ export function BulkApplyModelsModal({ source, connections, models, onApplied, o
                 models.map((m) => (
                   <code
                     key={m}
-                    className="rounded-md border border-border bg-background px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground"
+                    className="rounded-md border border-border bg-background px-1.5 py-0.5 font-mono text-xs text-muted-foreground"
                   >
                     {m}
                   </code>
@@ -123,7 +123,7 @@ export function BulkApplyModelsModal({ source, connections, models, onApplied, o
           {/* Connection multi-select */}
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+              <span className="text-sm font-medium">
                 Target connections
               </span>
               <div className="flex items-center gap-3 text-xs font-medium">
@@ -156,7 +156,7 @@ export function BulkApplyModelsModal({ source, connections, models, onApplied, o
                     checked={selectedIds.has(target.id)}
                     onChange={() => toggle(target.id)}
                     disabled={applying}
-                    className="accent-[hsl(var(--primary))]"
+                    className="accent-primary"
                   />
                   <ProviderLogo provider={target.provider} size={16} />
                   <span className="min-w-0 flex-1 truncate font-medium">{target.name}</span>

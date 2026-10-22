@@ -76,9 +76,6 @@ class QuotaStore {
   /** Latest connections snapshot pushed by the screen — used for tier classification. */
   private connsProvider: (() => Connection[]) | null = null;
 
-  /** Optional side-effect hook wired by the screen (e.g. clear stale errors on healthy data). */
-  onSuccess?: (id: string, data: UsageData) => void;
-
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
@@ -101,10 +98,6 @@ class QuotaStore {
 
   isFetching(id: string): boolean {
     return this.inflight.has(id);
-  }
-
-  getAuto(): boolean {
-    return this.autoEnabled;
   }
 
   setInspected(id: string | null) {
@@ -177,8 +170,11 @@ class QuotaStore {
       const id = this.hiQueue.shift();
       if (!id) break;
       if (this.inflight.has(id)) continue;
+      // Skip only connections known to be ineligible. A connection missing from
+      // the snapshot (e.g. created a moment ago, before the list reloaded) is
+      // still fetched — the request was explicit.
       const conn = this.connsProvider?.().find((c) => c.id === id);
-      if (!conn || conn.supportsQuota === false || !conn.isActive) continue;
+      if (conn && (conn.supportsQuota === false || !conn.isActive)) continue;
       this.inflight.add(id);
       api
         .getUsage(id)
@@ -186,7 +182,6 @@ class QuotaStore {
           this.entries.set(id, { data, fetchedAt: Date.now() });
           this.failCount.delete(id);
           this.nextOkAt.delete(id);
-          this.onSuccess?.(id, data);
         })
         .catch((e: unknown) => {
           const message = e instanceof Error ? e.message : 'Failed to load quota';

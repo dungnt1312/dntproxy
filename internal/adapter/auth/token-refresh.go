@@ -50,7 +50,11 @@ func (s *TokenRefreshService) shouldRefresh(conn *domain.ProviderConnection, inc
 	if includeExpired && !expiresAt.After(time.Now().UTC()) {
 		return true
 	}
-	return time.Until(expiresAt) < tokenExpiryBuffer
+	buffer := tokenExpiryBuffer
+	if isKiroConn(conn) {
+		buffer = kiroRefreshBeforeExpiry
+	}
+	return time.Until(expiresAt) < buffer
 }
 
 // Refresh performs token refresh for a connection (Kiro or OpenAI).
@@ -77,50 +81,13 @@ func (s *TokenRefreshService) Refresh(conn *domain.ProviderConnection) (*domain.
 		return s.refreshXAI(conn)
 	}
 
-	// Kiro refresh
-	authMethod := getStringFromMap(conn.ProviderSpecificData, "authMethod")
-	clientID := getStringFromMap(conn.ProviderSpecificData, "clientId")
-	clientSecret := getStringFromMap(conn.ProviderSpecificData, "clientSecret")
-	region := getStringFromMap(conn.ProviderSpecificData, "region")
-	if region == "" {
-		region = "us-east-1"
-	}
-
-	var result *TokenResult
-	var err error
-
-	// AWS SSO OIDC refresh (Builder ID or IDC)
-	if clientID != "" && clientSecret != "" {
-		log.Printf("[TOKEN] Refreshing via SSO OIDC (method=%s)", authMethod)
-		result, err = RefreshTokenSSO(conn.RefreshToken, clientID, clientSecret, region)
-	} else {
-		// Social auth refresh (Google/GitHub)
-		log.Printf("[TOKEN] Refreshing via social auth (method=%s)", authMethod)
-		result, err = RefreshTokenSocial(conn.RefreshToken)
-	}
-
+	// Kiro refresh (SSO OIDC for Builder ID / IdC, auth service for social)
+	log.Printf("[TOKEN] Refreshing Kiro token (method=%s)", getStringFromMap(conn.ProviderSpecificData, "authMethod"))
+	result, err := refreshKiroConnection(conn)
 	if err != nil {
 		return nil, fmt.Errorf("token refresh failed: %w", err)
 	}
-
-	// Update connection
-	conn.AccessToken = result.AccessToken
-	if result.RefreshToken != "" {
-		conn.RefreshToken = result.RefreshToken
-	}
-	conn.ExpiresAt = time.Now().Add(time.Duration(result.ExpiresIn) * time.Second).UTC().Format(time.RFC3339)
-	conn.ExpiresIn = result.ExpiresIn
-
-	// Update profileArn if returned
-	if result.ProfileArn != "" {
-		if conn.ProviderSpecificData == nil {
-			conn.ProviderSpecificData = make(map[string]interface{})
-		}
-		conn.ProviderSpecificData["profileArn"] = result.ProfileArn
-	}
-
-	conn.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
-
+	applyKiroRefresh(conn, result)
 	return conn, nil
 }
 
@@ -246,12 +213,36 @@ func (s *TokenRefreshService) checkAndRefresh(conn *domain.ProviderConnection, f
 			return latest, nil
 		}
 
+		kiro := isKiroConn(latest)
+		usedRefreshToken := latest.RefreshToken
+		if kiro {
+			// Cooling down after consecutive failures: reject from cache.
+			if cooldownErr := kiroBackoff.cooldownErr(latest.ID, usedRefreshToken); cooldownErr != nil {
+				return latest, fmt.Errorf("auto-refresh failed: %w", cooldownErr)
+			}
+		}
+
 		updated, refreshErr := s.Refresh(latest)
 		if refreshErr != nil {
+			if kiro {
+				if cur := supersededBy(s.store, latest.ID, usedRefreshToken); cur != nil {
+					log.Printf("[TOKEN] Kiro refresh superseded by a concurrent refresh for %s; using stored token", cur.Name)
+					kiroBackoff.reset(latest.ID)
+					return cur, nil
+				}
+				kiroBackoff.fail(latest.ID, usedRefreshToken, refreshErr)
+			}
 			return latest, fmt.Errorf("auto-refresh failed: %w", refreshErr)
 		}
 
-		if err := s.store.UpdateConnection(updated); err != nil {
+		var err error
+		if kiro {
+			kiroBackoff.reset(updated.ID)
+			err = persistKiroRefresh(s.store, updated, usedRefreshToken)
+		} else {
+			err = s.store.UpdateConnection(updated)
+		}
+		if err != nil {
 			log.Printf("[TOKEN] Failed to persist refreshed token: %s", err)
 		} else {
 			log.Printf("[TOKEN] Token refreshed and persisted for %s", updated.Name)

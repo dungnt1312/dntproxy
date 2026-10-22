@@ -1,5 +1,3 @@
-import type { ReactNode } from 'react';
-
 export interface Connection {
   id: string;
   name: string;
@@ -76,10 +74,3 @@ export interface TestConnectionResult {
   loading?: boolean;
 }
 
-export interface ConnectionGroup {
-  id: string;
-  label: string;
-  items: Connection[];
-  icon: ReactNode;
-  colorClass: string;
-}

@@ -7,7 +7,7 @@ import type { Connection } from '@/types/connections'
 
 interface InlineNameProps {
   conn: Connection
-  onRename: (id: string, name: string) => Promise<void>
+  onRename: (name: string) => Promise<void>
 }
 
 export default function InlineName({ conn, onRename }: InlineNameProps) {
@@ -16,16 +16,19 @@ export default function InlineName({ conn, onRename }: InlineNameProps) {
   const [saving, setSaving] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  useEffect(() => { if (editing) inputRef.current?.focus() }, [editing])
+  useEffect(() => { if (editing) inputRef.current?.select() }, [editing])
+
+  const startEditing = () => { setValue(conn.name); setEditing(true) }
 
   const save = async () => {
-    if (!value.trim() || value === conn.name) { setEditing(false); return }
+    const next = value.trim()
+    if (!next || next === conn.name) { setEditing(false); setValue(conn.name); return }
     setSaving(true)
     try {
-      await onRename(conn.id, value.trim())
+      await onRename(next)
       setEditing(false)
-    } catch (e: any) {
-      toast.error(e.message || 'Failed to rename connection')
+    } catch (e: unknown) {
+      toast.error(e instanceof Error && e.message ? e.message : 'Failed to rename connection')
     } finally {
       setSaving(false)
     }
@@ -35,37 +38,43 @@ export default function InlineName({ conn, onRename }: InlineNameProps) {
 
   if (editing) {
     return (
-      <div className="flex items-center gap-1">
+      <form
+        className="flex items-center gap-1"
+        onSubmit={e => { e.preventDefault(); void save() }}
+      >
         <Input
           ref={inputRef}
           value={value}
           onChange={e => setValue(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') cancel() }}
-          onClick={e => e.stopPropagation()}
-          className="h-6 w-44 text-sm px-2 py-0"
+          onKeyDown={e => { if (e.key === 'Escape') { e.preventDefault(); cancel() } }}
+          aria-label="Connection name"
+          className="h-8 w-48 text-sm"
+          disabled={saving}
+          autoComplete="off"
+          data-1p-ignore
         />
-        <Button variant="ghost" size="icon" className="h-5 w-5" onClick={e => { e.stopPropagation(); save() }} disabled={saving}>
-          {saving ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} className="text-emerald-500" />}
+        <Button type="submit" variant="ghost" size="icon" className="size-8" disabled={saving} aria-label="Save name">
+          {saving ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4 text-success" />}
         </Button>
-        <Button variant="ghost" size="icon" className="h-5 w-5" onClick={e => { e.stopPropagation(); cancel() }}>
-          <X size={11} className="text-muted-foreground" />
+        <Button type="button" variant="ghost" size="icon" className="size-8" onClick={cancel} disabled={saving} aria-label="Cancel rename">
+          <X className="size-4" />
         </Button>
-      </div>
+      </form>
     )
   }
 
   return (
-    <div className="flex items-center gap-1 group/name">
-      <span className="font-semibold text-sm truncate">{conn.name}</span>
+    <div className="group/name flex min-w-0 items-center gap-1">
+      <h2 className="truncate text-base font-semibold">{conn.name}</h2>
       <Button
         variant="ghost"
         size="icon"
-        className="h-5 w-5 opacity-0 group-hover/name:opacity-100 transition-opacity"
-        onClick={e => { e.stopPropagation(); setEditing(true) }}
+        className="size-7 shrink-0 text-muted-foreground opacity-60 transition-opacity hover:opacity-100 focus-visible:opacity-100 group-hover/name:opacity-100"
+        onClick={startEditing}
         title="Rename"
         aria-label="Rename connection"
       >
-        <Pencil size={10} className="text-muted-foreground" />
+        <Pencil className="size-3.5" />
       </Button>
     </div>
   )

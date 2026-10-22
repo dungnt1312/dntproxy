@@ -1,19 +1,23 @@
 package http
 
 import (
-	"fmt"
-	"net/url"
-	"strings"
+	"context"
 	"time"
 
 	"github.com/dungnt/dntproxy/internal/adapter/auth"
-	"github.com/dungnt/dntproxy/internal/domain"
 	"github.com/dungnt/dntproxy/internal/port"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
 
-// === Social Login (Google/GitHub PKCE) ===
+// === Social Login (Google/GitHub via the Kiro auth portal) ===
+//
+// Kiro sends every social sign-in through https://app.kiro.dev/signin; the
+// portal lets the user pick Google or GitHub and redirects the browser to
+// http://localhost:<port>/oauth/callback?login_option=…&code=…&state=….
+// The dashboard keeps its "open page, paste callback URL" panel: the redirect
+// target is not served by dntproxy, so the pasted address-bar URL carries the
+// code. The provider the user chose on the portal comes back as login_option.
 
 func authStartSocial() gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -29,15 +33,9 @@ func authStartSocial() gin.HandlerFunc {
 			return
 		}
 
-		codeVerifier, codeChallenge, state, err := auth.GeneratePKCE()
+		login, err := auth.StartPortalLogin()
 		if err != nil {
-			c.JSON(500, gin.H{"error": "Failed to generate PKCE: " + err.Error()})
-			return
-		}
-
-		loginURL, err := auth.BuildSocialLoginURL(req.Provider, codeChallenge, state)
-		if err != nil {
-			c.JSON(500, gin.H{"error": "Failed to build login URL: " + err.Error()})
+			c.JSON(500, gin.H{"error": "Failed to start portal login: " + auth.UserMessage(err)})
 			return
 		}
 
@@ -50,8 +48,9 @@ func authStartSocial() gin.HandlerFunc {
 			return
 		}
 		authSessions[sessionID] = &authSession{
-			CodeVerifier: codeVerifier,
-			State:        state,
+			PortalLogin:  login,
+			CodeVerifier: login.CodeVerifier,
+			State:        login.State,
 			Provider:     req.Provider,
 			AuthMethod:   req.Provider,
 			TenantID:     starterTenant,
@@ -62,8 +61,8 @@ func authStartSocial() gin.HandlerFunc {
 
 		c.JSON(200, gin.H{
 			"sessionId": sessionID,
-			"loginUrl":  loginURL,
-			"state":     state,
+			"loginUrl":  login.URL,
+			"state":     login.State,
 		})
 	}
 }
@@ -84,93 +83,47 @@ func authExchangeSocial(store port.CredentialStore) gin.HandlerFunc {
 		session, ok := authSessions[req.SessionID]
 		authSessionsMu.Unlock()
 
-		if !ok {
+		if !ok || session.PortalLogin == nil {
 			c.JSON(404, gin.H{"error": "Session not found or expired"})
 			return
 		}
-
 		if !authSessionAllowed(c, session.TenantID, session.APIKeyID) {
 			c.JSON(403, gin.H{"error": "Access denied"})
 			return
 		}
 
-		// Extract code from callback URL if not provided directly
-		code := req.Code
-		if code == "" && req.CallbackURL != "" {
-			parsed, err := url.Parse(strings.Replace(req.CallbackURL, "kiro://", "https://", 1))
-			if err == nil {
-				code = parsed.Query().Get("code")
+		var cb *auth.PortalCallback
+		switch {
+		case req.CallbackURL != "":
+			parsed, err := auth.ParsePortalCallback(req.CallbackURL, session.State)
+			if err != nil {
+				c.JSON(400, gin.H{"error": auth.UserMessage(err)})
+				return
 			}
-		}
-		if code == "" {
+			cb = parsed
+		case req.Code != "":
+			// Bare code: the state cannot be checked, but the code is bound to
+			// this session's PKCE verifier at the auth service.
+			cb = &auth.PortalCallback{Code: req.Code}
+		default:
 			c.JSON(400, gin.H{"error": "No authorization code found. Paste the full callback URL or the code parameter."})
 			return
 		}
 
-		// Exchange code for tokens
-		tokens, err := auth.ExchangeSocialCode(code, session.CodeVerifier)
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+		defer cancel()
+		cred, err := auth.ExchangePortalCallback(ctx, cb, session.PortalLogin, session.Provider)
 		if err != nil {
-			c.JSON(400, gin.H{"error": "Failed to exchange code: " + err.Error()})
+			c.JSON(400, gin.H{"error": "Failed to exchange code: " + auth.UserMessage(err)})
 			return
 		}
 
-		email := auth.ExtractEmailFromJWT(tokens.AccessToken)
-		providerLabel := "Google"
-		if session.Provider == "github" {
-			providerLabel = "GitHub"
-		}
-
-		name := email
-		cfg, err := store.Load()
+		conn, email, err := saveKiroLogin(c, store, cred)
 		if err != nil {
-			c.JSON(500, gin.H{"error": "Failed to load config"})
-			return
-		}
-		settings := &cfg.Settings
-		if name == "" {
-			name = providerLabel + " Account"
-			name += fmt.Sprintf(" %d", len(cfg.ProviderConnections)+1)
-		}
-
-		now := time.Now().UTC().Format(time.RFC3339)
-		expiresIn := tokens.ExpiresIn
-		if expiresIn == 0 {
-			expiresIn = 3600
-		}
-
-		conn := domain.ProviderConnection{
-			ID:              uuid.New().String(),
-			Provider:        "kiro",
-			AuthType:        "oauth",
-			Name:            name,
-			Weight:          100,
-			IsActive:        true,
-			AccessToken:     tokens.AccessToken,
-			RefreshToken:    tokens.RefreshToken,
-			ExpiresAt:       time.Now().Add(time.Duration(expiresIn) * time.Second).UTC().Format(time.RFC3339),
-			ExpiresIn:       expiresIn,
-			Email:           email,
-			TestStatus:      "active",
-			SupportedModels: domain.GetDefaultConnectionModels(settings, "kiro"),
-			ProviderSpecificData: map[string]interface{}{
-				"profileArn": tokens.ProfileArn,
-				"authMethod": session.Provider,
-				"provider":   providerLabel,
-			},
-			CreatedAt: now,
-			UpdatedAt: now,
-			TenantID:  GetTenantID(c),
-		}
-
-		cfg.ProviderConnections = append(cfg.ProviderConnections, conn)
-		if err := store.Save(cfg); err != nil {
 			c.JSON(500, gin.H{"error": "Failed to save: " + err.Error()})
 			return
 		}
-
-		authSessionsMu.Lock()
-		delete(authSessions, req.SessionID)
-		authSessionsMu.Unlock()
+		dropAuthSession(req.SessionID)
 
 		c.JSON(200, gin.H{
 			"id":    conn.ID,

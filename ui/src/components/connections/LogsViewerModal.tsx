@@ -1,6 +1,7 @@
 import { Terminal } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import LogsScreen from '../screens/logs-screen';
+import type { LogFilters } from '@/types/logs';
 
 export interface LogFilter {
     connectionId?: string;
@@ -25,8 +26,7 @@ export default function LogsViewerModal({ isOpen, onClose, title, filter }: Logs
         ...((filter.model || filter.comboName || filter.aliasName) ? { q: filter.model || filter.comboName || filter.aliasName } : {}),
     }
 
-    const hiddenFilters: any[] = [];
-    if (filter.connectionId) hiddenFilters.push("connectionId");
+    const hiddenFilters: (keyof LogFilters)[] = filter.connectionId ? ['connectionId'] : [];
 
     return (
         <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>

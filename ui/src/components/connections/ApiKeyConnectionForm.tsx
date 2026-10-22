@@ -2,8 +2,6 @@ import { useMemo, useState, useId } from 'react';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { cn } from '@/lib/utils';
-import { getProviderMeta } from '@/lib/provider-registry';
 import type { CreateConnectionPayload, ProviderConfigMeta } from '@/types/provider-metadata';
 import { DynamicFormField } from './DynamicFormField';
 
@@ -63,7 +61,6 @@ export function ApiKeyConnectionForm({ provider, loading, onSubmit }: Props) {
     await onSubmit(payload);
   };
 
-  const accent = getProviderMeta(provider.id).accentClass;
   const showModels = provider.ui.supportsModelSelect;
   const modelsInputId = useId();
 
@@ -72,7 +69,7 @@ export function ApiKeyConnectionForm({ provider, loading, onSubmit }: Props) {
 
   return (
     <form
-      className="space-y-3 w-full"
+      className="w-full space-y-4"
       onSubmit={(e) => {
         e.preventDefault();
         if (!loading && canSubmit) void handleSubmit();
@@ -82,9 +79,9 @@ export function ApiKeyConnectionForm({ provider, loading, onSubmit }: Props) {
         <DynamicFormField key={f.name} field={f} value={values[f.name] ?? ''} onChange={(v) => set(f.name, v)} />
       ))}
       {showModels && (
-        <div className="space-y-1">
-          <label htmlFor={modelsInputId} className="text-xs font-medium">
-            Supported Models{' '}
+        <div className="space-y-1.5">
+          <label htmlFor={modelsInputId} className="text-sm font-medium">
+            Supported models{' '}
             <span className="font-normal text-muted-foreground">(one per line, optional)</span>
           </label>
           <Textarea
@@ -96,19 +93,13 @@ export function ApiKeyConnectionForm({ provider, loading, onSubmit }: Props) {
             autoComplete="off"
             spellCheck={false}
             rows={3}
-            className="text-xs font-mono"
+            className="font-mono text-sm"
           />
         </div>
       )}
-      <Button type="submit" disabled={loading || !canSubmit} size="sm" className={cn('w-full', accent)}>
-        {loading ? (
-          <>
-            <Loader2 size={13} className="animate-spin mr-2" />
-            Adding…
-          </>
-        ) : (
-          `Add ${provider.name} Connection`
-        )}
+      <Button type="submit" disabled={loading || !canSubmit} className="w-full gap-2">
+        {loading && <Loader2 className="size-4 animate-spin" />}
+        {loading ? 'Adding…' : `Add ${provider.name} connection`}
       </Button>
     </form>
   );

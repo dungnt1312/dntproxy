@@ -1,145 +1,89 @@
-import { AlertTriangle, CheckCircle2, CircleOff, Eraser, Layers3, MoreHorizontal, RefreshCw, Trash2 } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { ChevronDown, Eraser, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import {
-    DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuLabel,
-    DropdownMenuSeparator,
-    DropdownMenuTrigger,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 
-export type ConnectionStatusFilter = 'all' | 'active' | 'inactive' | 'issues' | 'legacy';
+export type ConnectionStatusFilter = 'all' | 'active' | 'inactive' | 'issues';
 
-export type IssueQuickAction = 'clear-errors' | 'reset-cooldowns' | 'cleanup';
-
-interface StatusFilterOption {
-    value: ConnectionStatusFilter;
-    label: string;
-    count: number;
-    icon: ReactNode;
-}
+export type IssueQuickAction = 'clear-errors' | 'reset-cooldowns';
 
 interface ConnectionStatusFilterProps {
-    value: ConnectionStatusFilter;
-    total: number;
-    active: number;
-    inactive: number;
-    issues: number;
-    /** Connections whose models are missing from the current catalog (0 hides the chip). */
-    legacy?: number;
-    /** Counts powering the Issues-chip quick actions; actions hidden when omitted/zero-able. */
-    issueQuickActions?: {
-        clearErrors: number;
-        resetCooldowns: number;
-        cleanupCandidates: number;
-        onRun: (action: IssueQuickAction) => void;
-    };
-    onChange: (value: ConnectionStatusFilter) => void;
+  value: ConnectionStatusFilter;
+  counts: Record<ConnectionStatusFilter, number>;
+  quickActions: { clearErrors: number; resetCooldowns: number; onRun: (action: IssueQuickAction) => void };
+  onChange: (value: ConnectionStatusFilter) => void;
 }
 
-export function ConnectionStatusFilter({
-    value,
-    total,
-    active,
-    inactive,
-    issues,
-    legacy = 0,
-    issueQuickActions,
-    onChange,
-}: ConnectionStatusFilterProps) {
-    const options: StatusFilterOption[] = [
-        { value: 'all', label: 'All', count: total, icon: <Layers3 className="h-3.5 w-3.5" /> },
-        { value: 'active', label: 'Active', count: active, icon: <CheckCircle2 className="h-3.5 w-3.5" /> },
-        { value: 'inactive', label: 'Idle', count: inactive, icon: <CircleOff className="h-3.5 w-3.5" /> },
-        { value: 'issues', label: 'Issues', count: issues, icon: <AlertTriangle className="h-3.5 w-3.5" /> },
-    ];
-    if (legacy > 0) {
-        options.push({ value: 'legacy', label: 'Legacy', count: legacy, icon: <AlertTriangle className="h-3.5 w-3.5 text-amber-500" /> });
-    }
+const OPTIONS: Array<{ value: ConnectionStatusFilter; label: string }> = [
+  { value: 'all', label: 'All' },
+  { value: 'active', label: 'Enabled' },
+  { value: 'inactive', label: 'Disabled' },
+  { value: 'issues', label: 'Issues' },
+];
 
-    const showIssueMenu =
-        issueQuickActions !== undefined &&
-        (issueQuickActions.clearErrors > 0 || issueQuickActions.resetCooldowns > 0 || issueQuickActions.cleanupCandidates > 0);
+export function ConnectionStatusFilter({ value, counts, quickActions, onChange }: ConnectionStatusFilterProps) {
+  const hasQuickActions = quickActions.clearErrors > 0 || quickActions.resetCooldowns > 0;
 
-    return (
-        <div className="flex w-full flex-wrap gap-1 rounded-lg border bg-background p-1 sm:w-auto">
-            {options.map((option) => {
-                const isSelected = option.value === value;
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <div role="radiogroup" aria-label="Filter by status" className="inline-flex rounded-lg border bg-background p-0.5">
+        {OPTIONS.map((option) => {
+          const selected = option.value === value;
+          const isIssues = option.value === 'issues';
+          return (
+            <button
+              key={option.value}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              onClick={() => onChange(option.value)}
+              className={cn(
+                'inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md px-3 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                selected ? 'bg-secondary font-medium text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              {option.label}
+              <span
+                className={cn(
+                  'min-w-5 rounded px-1 text-xs tabular-nums',
+                  isIssues && counts.issues > 0 ? 'bg-destructive/10 text-destructive' : 'bg-muted text-muted-foreground',
+                )}
+              >
+                {counts[option.value]}
+              </span>
+            </button>
+          );
+        })}
+      </div>
 
-                return (
-                    <div key={option.value} className={cn('relative flex-1 sm:flex-none', isSelected && 'rounded-md shadow-sm')}>
-                        <Button
-                            type="button"
-                            variant={isSelected ? 'secondary' : 'ghost'}
-                            size="sm"
-                            className={cn(
-                                'h-8 w-full gap-1.5 px-2 text-xs',
-                                option.value === 'issues' && showIssueMenu && 'pr-6',
-                            )}
-                            aria-pressed={isSelected}
-                            onClick={() => onChange(option.value)}
-                        >
-                            {option.icon}
-                            <span>{option.label}</span>
-                            <Badge variant="outline" className="h-4 min-w-5 px-1 text-[10px] tabular-nums">
-                                {option.count}
-                            </Badge>
-                        </Button>
-
-                        {/* Split-button caret exposing preset ops over the issue set */}
-                        {option.value === 'issues' && showIssueMenu && (
-                            <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
-                                    <button
-                                        type="button"
-                                        aria-label="Quick actions for problem connections"
-                                        title="Quick actions"
-                                        className="absolute right-0.5 top-1/2 flex h-7 -translate-y-1/2 cursor-pointer items-center rounded-md px-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-                                    >
-                                        <MoreHorizontal size={12} />
-                                    </button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent align="end" className="w-60">
-                                    <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                                        Apply to {issues} results
-                                    </DropdownMenuLabel>
-                                    {issueQuickActions.clearErrors > 0 && (
-                                        <DropdownMenuItem
-                                            onClick={() => issueQuickActions.onRun('clear-errors')}
-                                            className="cursor-pointer gap-2 text-xs"
-                                        >
-                                            <Eraser size={13} /> Clear errors ({issueQuickActions.clearErrors})
-                                        </DropdownMenuItem>
-                                    )}
-                                    {issueQuickActions.resetCooldowns > 0 && (
-                                        <DropdownMenuItem
-                                            onClick={() => issueQuickActions.onRun('reset-cooldowns')}
-                                            className="cursor-pointer gap-2 text-xs"
-                                        >
-                                            <RefreshCw size={13} /> Reset cooldowns ({issueQuickActions.resetCooldowns})
-                                        </DropdownMenuItem>
-                                    )}
-                                    {issueQuickActions.cleanupCandidates > 0 && (
-                                        <>
-                                            <DropdownMenuSeparator />
-                                            <DropdownMenuItem
-                                                onClick={() => issueQuickActions.onRun('cleanup')}
-                                                className="cursor-pointer gap-2 text-xs text-destructive focus:text-destructive focus:bg-destructive/10"
-                                            >
-                                                <Trash2 size={13} /> Clean up broken… ({issueQuickActions.cleanupCandidates})
-                                            </DropdownMenuItem>
-                                        </>
-                                    )}
-                                </DropdownMenuContent>
-                            </DropdownMenu>
-                        )}
-                    </div>
-                );
-            })}
-        </div>
-    );
+      {hasQuickActions && (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="sm" className="h-9 gap-1.5">
+              Fix issues <ChevronDown className="size-3.5" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-60">
+            <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">Applies to the current filter</DropdownMenuLabel>
+            {quickActions.clearErrors > 0 && (
+              <DropdownMenuItem onClick={() => quickActions.onRun('clear-errors')} className="gap-2">
+                <Eraser className="size-4" /> Clear errors ({quickActions.clearErrors})
+              </DropdownMenuItem>
+            )}
+            {quickActions.resetCooldowns > 0 && (
+              <DropdownMenuItem onClick={() => quickActions.onRun('reset-cooldowns')} className="gap-2">
+                <RefreshCw className="size-4" /> Reset cooldowns ({quickActions.resetCooldowns})
+              </DropdownMenuItem>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
+    </div>
+  );
 }

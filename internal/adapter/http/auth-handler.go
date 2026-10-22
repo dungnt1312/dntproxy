@@ -4,6 +4,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/dungnt/dntproxy/internal/adapter/auth"
 	"github.com/dungnt/dntproxy/internal/port"
 	"github.com/dungnt/dntproxy/internal/service/autologin"
 	"github.com/gin-gonic/gin"
@@ -27,16 +28,22 @@ var (
 )
 
 type authSession struct {
-	// Builder ID / IDC device code flow
-	ClientID     string
-	ClientSecret string
-	DeviceCode   string
-	Region       string
-	StartURL     string
-	Interval     int
-	AuthMethod   string // "builder-id" or "idc"
+	// Builder ID / IDC device code flow (fallback when the browser cannot
+	// reach dntproxy's loopback listener)
+	ClientID              string
+	ClientSecret          string
+	ClientSecretExpiresAt string // RFC3339
+	DeviceCode            string
+	Region                string
+	StartURL              string
+	Interval              int
+	AuthMethod            string // "builder-id" or "idc"
 
-	// Social login (PKCE)
+	// Builder ID / IDC authorization-code + PKCE flow (Kiro's own flow)
+	Login *auth.IdCLogin
+
+	// Social login via the Kiro auth portal (PKCE)
+	PortalLogin  *auth.PortalLogin
 	CodeVerifier string
 	State        string
 	Provider     string // "google" or "github"
@@ -65,6 +72,9 @@ func cleanupAuthSessions() {
 	now := time.Now()
 	for id, s := range authSessions {
 		if now.Sub(s.CreatedAt) > 15*time.Minute {
+			if s.Login != nil {
+				s.Login.Cancel() // free the loopback listener
+			}
 			delete(authSessions, id)
 		}
 	}
@@ -86,8 +96,9 @@ func cleanupOpenAISessions() {
 // stored credentials, so they require a valid dashboard API key.
 //
 // Handler implementations are split across separate files:
-//   - auth-kiro-handler.go    — Builder ID, IDC, device code polling
-//   - auth-social-handler.go  — Google/GitHub PKCE
+//   - auth-kiro-handler.go    — Builder ID, IDC (auth-code+PKCE, device-code fallback), polling
+//   - auth-kiro-save.go       — persists a Kiro login as a provider connection
+//   - auth-social-handler.go  — Google/GitHub via the Kiro auth portal (PKCE)
 //   - auth-openai-handler.go  — OpenAI OAuth (PKCE + callback server)
 //   - auth-qwen-handler.go    — Qwen OAuth (device code)
 //   - auth-xai-handler.go     — xAI/Grok OAuth + import

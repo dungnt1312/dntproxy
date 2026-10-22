@@ -1,8 +1,11 @@
-export const LEAVE_SETUP_MESSAGE =
-    'Connection setup is not finished (OAuth pending or unsaved input). Leave anyway?';
-
-export function confirmLeaveSetup(): boolean {
-    return window.confirm(LEAVE_SETUP_MESSAGE);
+/** Clipboard write that reports whether it actually succeeded. */
+export async function copyText(text: string): Promise<boolean> {
+    try {
+        await navigator.clipboard.writeText(text);
+        return true;
+    } catch {
+        return false;
+    }
 }
 
 export function errorMessage(error: unknown, fallback: string): string {

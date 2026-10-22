@@ -2,13 +2,11 @@ import { useEffect, useState } from 'react';
 import { KeyRound, Loader2, Play, Search, Upload } from 'lucide-react';
 import { api } from '../../api';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { SecretInput } from '@/components/ui/secret-input';
-import { ProviderLogoIcon } from './helpers';
 import type { CreateConnectionPayload } from '@/types/provider-metadata';
-import { parseCommandCodeAuthFile } from './CommandCodeAuthImport';
 import { AuthMethodSelector } from './add/auth-method-selector';
 import { FileDropzone } from './add/file-dropzone';
+import { errorMessage, type OnSuccess } from './add/helpers';
 
 type Mode = 'detect' | 'file' | 'manual';
 
@@ -18,28 +16,39 @@ type DetectResult = {
   duplicate?: boolean;
   error?: string;
   path?: string;
+  id?: string;
   name?: string;
 };
 
 type Props = {
   loading: boolean;
   onCreate: (payload: CreateConnectionPayload) => Promise<void>;
-  onSuccess: (message: string) => void;
+  onSuccess: OnSuccess;
   onError: (message: string) => void;
   onBusyChange?: (busy: boolean) => void;
 };
 
-export function CommandCodeConnectionForm({
-  loading,
-  onCreate,
-  onSuccess,
-  onError,
-  onBusyChange,
-}: Props) {
+/** Parse a Command Code CLI auth.json into a create payload. */
+function parseCommandCodeAuthFile(raw: string): CreateConnectionPayload {
+  let data: { apiKey?: unknown; userName?: unknown; keyName?: unknown };
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    throw new Error('The selected file is not valid JSON.');
+  }
+  const apiKey = typeof data.apiKey === 'string' ? data.apiKey.trim() : '';
+  if (!apiKey) throw new Error('auth.json is missing apiKey');
+  const name =
+    (typeof data.userName === 'string' && data.userName.trim()) ||
+    (typeof data.keyName === 'string' && data.keyName.trim()) ||
+    'Command Code';
+  return { provider: 'commandcode', name, apiKey };
+}
+
+export function CommandCodeConnectionForm({ loading, onCreate, onSuccess, onError, onBusyChange }: Props) {
   const [mode, setMode] = useState<Mode>('detect');
   const [busy, setBusy] = useState(false);
   const [apiKey, setApiKey] = useState('');
-  const [name, setName] = useState('');
   const working = loading || busy;
 
   useEffect(() => {
@@ -53,16 +62,16 @@ export function CommandCodeConnectionForm({
     try {
       const res = (await api.detectCommandCodeAuth({ import: true })) as DetectResult;
       if (res.found && res.duplicate) {
-        onSuccess(`Command Code already connected as ${res.name || 'existing account'}`);
+        onError(`This Command Code account is already connected as “${res.name || 'an existing connection'}”.`);
         return;
       }
       if (res.found && res.imported) {
-        onSuccess(`Command Code imported from ${res.path || 'auth.json'}`);
+        onSuccess(`Imported from ${res.path || 'auth.json'}`, { id: res.id, name: res.name });
         return;
       }
-      onError(res.error || 'No Command Code auth.json found.');
+      onError(res.error || 'No Command Code auth.json found on this machine.');
     } catch (e: unknown) {
-      onError(e instanceof Error ? e.message : 'Failed to detect Command Code auth');
+      onError(errorMessage(e, 'Failed to detect Command Code auth'));
     } finally {
       setBusy(false);
     }
@@ -75,19 +84,10 @@ export function CommandCodeConnectionForm({
     try {
       await onCreate(parseCommandCodeAuthFile(await file.text()));
     } catch (e: unknown) {
-      onError(e instanceof Error ? e.message : 'Failed to import auth.json');
+      onError(errorMessage(e, 'Failed to import auth.json'));
     } finally {
       setBusy(false);
     }
-  };
-
-  const handleManual = async () => {
-    if (!apiKey.trim()) return;
-    await onCreate({
-      provider: 'commandcode',
-      name: name.trim() || undefined,
-      apiKey: apiKey.trim(),
-    });
   };
 
   return (
@@ -99,45 +99,31 @@ export function CommandCodeConnectionForm({
           onError('');
         }}
         primary={[
-          { id: 'detect', label: 'Auto Detect', description: 'Scan local auth.json', icon: <Search size={13} />, recommended: true },
-          { id: 'file', label: 'Import File', description: 'Upload auth.json', icon: <Upload size={13} /> },
+          { id: 'detect', label: 'Auto detect', description: 'Scan local auth.json', icon: <Search size={14} />, recommended: true },
+          { id: 'file', label: 'Import file', description: 'Upload auth.json', icon: <Upload size={14} /> },
         ]}
-        more={[{ id: 'manual', label: 'Manual', description: 'Paste API key', icon: <Play size={13} /> }]}
+        more={[{ id: 'manual', label: 'Manual', description: 'Paste API key', icon: <Play size={14} /> }]}
       />
 
       <div className="border-t pt-5">
         {mode === 'detect' && (
-          <div className="text-center space-y-4 max-w-sm mx-auto">
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 mx-auto">
-              <Search size={20} className="text-primary" />
-            </div>
-            <div>
-              <p className="font-medium text-sm mb-1">Auto Detect & Import</p>
-              <p className="text-xs text-muted-foreground">
-                Scan for Command Code credentials from{' '}
-                <code className="bg-muted px-1.5 py-0.5 rounded text-[11px]">~/.commandcode/auth.json</code> on this
-                machine.
-              </p>
-            </div>
-            <Button onClick={() => void handleDetect()} disabled={working} size="sm" className="gap-2">
-              {working ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
-              {working ? 'Detecting…' : 'Scan & Import'}
+          <div className="mx-auto max-w-sm space-y-4 text-center">
+            <p className="text-sm text-muted-foreground">
+              Scan for Command Code credentials in{' '}
+              <code className="rounded bg-muted px-1.5 py-0.5 text-xs">~/.commandcode/auth.json</code> on this machine.
+            </p>
+            <Button onClick={() => void handleDetect()} disabled={working} className="gap-2">
+              {working ? <Loader2 className="size-4 animate-spin" /> : <Search className="size-4" />}
+              {working ? 'Scanning…' : 'Scan & import'}
             </Button>
           </div>
         )}
 
         {mode === 'file' && (
-          <div className="text-center space-y-4 max-w-sm mx-auto">
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 mx-auto">
-              <Upload size={20} className="text-primary" />
-            </div>
-            <div>
-              <p className="font-medium text-sm mb-1">Import from File</p>
-              <p className="text-xs text-muted-foreground">
-                Upload your <code className="bg-muted px-1.5 py-0.5 rounded text-[11px]">auth.json</code> from the
-                Command Code CLI.
-              </p>
-            </div>
+          <div className="mx-auto max-w-sm space-y-3 text-center">
+            <p className="text-sm text-muted-foreground">
+              Upload <code className="rounded bg-muted px-1.5 py-0.5 text-xs">auth.json</code> from the Command Code CLI.
+            </p>
             <FileDropzone
               disabled={working}
               title={working ? 'Importing…' : 'Click to select auth.json'}
@@ -148,17 +134,16 @@ export function CommandCodeConnectionForm({
         )}
 
         {mode === 'manual' && (
-          <div className="space-y-4 max-w-md mx-auto">
-            <div className="text-center">
-              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-muted mx-auto">
-                <ProviderLogoIcon provider="commandcode" size={20} />
-              </div>
-              <p className="font-medium text-sm mt-3 mb-1">Manual API Key</p>
-              <p className="text-xs text-muted-foreground">Paste the Command Code key from Studio or auth.json.</p>
-            </div>
-            <div className="space-y-1">
-              <label htmlFor="commandcode-api-key" className="text-xs font-medium">
-                API Key <span className="text-destructive">*</span>
+          <form
+            className="mx-auto max-w-md space-y-4"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (apiKey.trim()) void onCreate({ provider: 'commandcode', apiKey: apiKey.trim() });
+            }}
+          >
+            <div className="space-y-1.5">
+              <label htmlFor="commandcode-api-key" className="text-sm font-medium">
+                API key <span className="text-destructive" aria-hidden>*</span>
               </label>
               <SecretInput
                 id="commandcode-api-key"
@@ -167,28 +152,16 @@ export function CommandCodeConnectionForm({
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
                 placeholder="user_…"
-                className="text-xs font-mono"
+                className="font-mono"
+                required
               />
+              <p className="text-xs text-muted-foreground">From Command Code Studio or the CLI's auth.json.</p>
             </div>
-            <div className="space-y-1">
-              <label htmlFor="commandcode-name" className="text-xs font-medium">
-                Display Name{' '}
-                <span className="font-normal text-muted-foreground">(optional)</span>
-              </label>
-              <Input
-                id="commandcode-name"
-                autoComplete="off"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="My Command Code account…"
-                className="text-xs"
-              />
-            </div>
-            <Button onClick={() => void handleManual()} disabled={working || !apiKey.trim()} size="sm" className="w-full gap-2">
-              {working ? <Loader2 size={13} className="animate-spin" /> : <KeyRound size={13} />}
-              {working ? 'Adding…' : 'Add Command Code Connection'}
+            <Button type="submit" disabled={working || !apiKey.trim()} className="w-full gap-2">
+              {working ? <Loader2 className="size-4 animate-spin" /> : <KeyRound className="size-4" />}
+              {working ? 'Adding…' : 'Add connection'}
             </Button>
-          </div>
+          </form>
         )}
       </div>
     </div>

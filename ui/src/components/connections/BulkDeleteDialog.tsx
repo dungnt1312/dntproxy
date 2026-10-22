@@ -25,7 +25,7 @@ export function BulkDeleteDialog({ names, busy, onConfirm, onClose }: BulkDelete
         <AlertDialog open onOpenChange={(open) => { if (!open && !busy) onClose(); }}>
             <AlertDialogContent>
                 <AlertDialogHeader>
-                    <AlertDialogTitle>Remove {names.length} Connections</AlertDialogTitle>
+                    <AlertDialogTitle>Delete {names.length} connection{names.length === 1 ? '' : 's'}</AlertDialogTitle>
                     <AlertDialogDescription asChild>
                         <div className="space-y-2">
                             <span>
@@ -35,7 +35,7 @@ export function BulkDeleteDialog({ names, busy, onConfirm, onClose }: BulkDelete
                                 </span>
                                 ? All tokens, settings, and quota data will be lost.
                             </span>
-                            <ul className="list-disc pl-5 text-xs text-muted-foreground">
+                            <ul className="list-disc pl-5 text-sm text-muted-foreground">
                                 {preview.map((n) => (
                                     <li key={n} className="truncate">
                                         {n}
@@ -52,7 +52,7 @@ export function BulkDeleteDialog({ names, busy, onConfirm, onClose }: BulkDelete
                     </Button>
                     <Button variant="destructive" onClick={onConfirm} disabled={busy} className="gap-2">
                         {busy ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
-                        {busy ? 'Removing…' : `Remove ${names.length}`}
+                        {busy ? 'Deleting…' : `Delete ${names.length}`}
                     </Button>
                 </AlertDialogFooter>
             </AlertDialogContent>

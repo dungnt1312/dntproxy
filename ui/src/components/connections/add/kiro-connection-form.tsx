@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { ExternalLink, Globe, KeyRound, Loader2, Play, Search, Shield, Upload } from 'lucide-react';
 import { api } from '../../../api';
 import { DeviceCodePanel } from '../DeviceCodePanel';
@@ -9,15 +9,10 @@ import { SecretInput } from '@/components/ui/secret-input';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { FileDropzone } from './file-dropzone';
-import {
-    DEVICE_CODE_FALLBACK_SECS,
-    errorMessage,
-    pickResultId,
-    type CreateResult,
-    type OnSuccess,
-} from './helpers';
+import { errorMessage, pickResultId, type CreateResult, type OnSuccess } from './helpers';
 import { OAuthWaitingPanel } from './oauth-waiting-panel';
 import { SetupIntro } from './setup-intro';
+import { useDeviceCodePoll } from './use-device-code-poll';
 
 type Props = {
     onSuccess: OnSuccess;
@@ -73,28 +68,20 @@ export function KiroConnectionForm({ onSuccess, onError, onBusyChange, initialMe
         authMethod: 'builder-id',
     });
     const [idcForm, setIdcForm] = useState({ startUrl: '', region: '' });
-    const [deviceCode, setDeviceCode] = useState<DeviceCodeState | null>(null);
-    const [codeExpired, setCodeExpired] = useState(false);
-    const [polling, setPolling] = useState(false);
     const [socialLogin, setSocialLogin] = useState<SocialLoginState | null>(null);
     const [socialCallbackUrl, setSocialCallbackUrl] = useState('');
-    const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const [pollExpiresAt, setPollExpiresAt] = useState<number | null>(null);
 
-    const clearPolling = useCallback(() => {
-        if (pollTimerRef.current) {
-            clearTimeout(pollTimerRef.current);
-            pollTimerRef.current = null;
-        }
-        setPollExpiresAt(null);
-        setDeviceCode(null);
-        setPolling(false);
-        setCodeExpired(false);
-    }, []);
+    const device = useDeviceCodePoll({
+        poll: (sessionId) => api.pollAuth(sessionId),
+        onSuccess: (res) => onSuccess(`Connected${res.email ? ` (${res.email})` : ''}`, pickResultId(res)),
+        onError,
+    });
+    const { deviceCode, polling, expired: codeExpired, expiresAt: pollExpiresAt, cancel: clearPolling, start: startPolling, ticket } = device;
 
-    useEffect(() => () => {
-        if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
-    }, []);
+    // Switching method (e.g. Builder ID → IDC) abandons any in-progress device login.
+    useEffect(() => {
+        clearPolling();
+    }, [mode, clearPolling]);
 
     const formDirty =
         Boolean(form.refreshToken.trim()) ||
@@ -107,45 +94,6 @@ export function KiroConnectionForm({ onSuccess, onError, onBusyChange, initialMe
         onBusyChange(busy);
         return () => onBusyChange(false);
     }, [busy, onBusyChange]);
-
-    /** Polls until success/failure/expiry. Expiry stops polling and flips recovery UI. */
-    const startPolling = useCallback(
-        (sessionId: string, interval: number, expiresInSecs?: number) => {
-            const ms = Math.max(interval, 3) * 1000;
-            const deadline = Date.now() + Math.max(30, expiresInSecs ?? DEVICE_CODE_FALLBACK_SECS) * 1000;
-            setPollExpiresAt(deadline);
-            const poll = async () => {
-                if (Date.now() >= deadline) {
-                    setPolling(false);
-                    setCodeExpired(true);
-                    return;
-                }
-                try {
-                    const res = await api.pollAuth(sessionId);
-                    if (res.status === 'pending') {
-                        pollTimerRef.current = setTimeout(poll, ms);
-                        return;
-                    }
-                    if (res.status === 'success') {
-                        onSuccess(`Connected! ${res.email ? `(${res.email})` : res.name ?? ''}`, {
-                            id: res.id,
-                            name: res.name,
-                        });
-                        clearPolling();
-                        return;
-                    }
-                    onError(res.errorDescription || res.error || 'Authorization failed');
-                    clearPolling();
-                } catch (error: unknown) {
-                    // Network hiccup mid-poll: keep the session alive for manual callback instead of nuking progress.
-                    onError(`${errorMessage(error, 'Authorization failed')} — retrying…`);
-                    pollTimerRef.current = setTimeout(poll, Math.max(ms * 2, 10_000));
-                }
-            };
-            pollTimerRef.current = setTimeout(poll, ms);
-        },
-        [onError, onSuccess, clearPolling],
-    );
 
     const run = async (fn: () => Promise<void>) => {
         setLoading(true);
@@ -169,16 +117,31 @@ export function KiroConnectionForm({ onSuccess, onError, onBusyChange, initialMe
         },
         message = 'Imported!',
     ) => {
-        const res = (await api.importConnection(data)) as CreateResult & { email?: string };
-        onSuccess(message, { id: res.id, name: res.name });
+        const res = (await api.importConnection(data)) as CreateResult;
+        onSuccess(message, pickResultId(res));
     };
 
     const startBuilderIdFlow = () =>
         run(async () => {
+            clearPolling();
+            const t = ticket();
             const res: DeviceCodeState = await api.startBuilderID();
-            setDeviceCode(res);
-            setPolling(true);
-            startPolling(res.sessionId, res.interval, res.expiresIn);
+            startPolling(res, t);
+        });
+
+    const startIdcFlow = () =>
+        run(async () => {
+            if (!idcForm.startUrl.trim()) {
+                onError('Start URL is required');
+                return;
+            }
+            clearPolling();
+            const t = ticket();
+            const res: DeviceCodeState = await api.startIDC({
+                startUrl: idcForm.startUrl.trim(),
+                region: idcForm.region.trim() || undefined,
+            });
+            startPolling(res, t);
         });
 
     return (
@@ -218,8 +181,8 @@ export function KiroConnectionForm({ onSuccess, onError, onBusyChange, initialMe
                                 placeholder="us-east-1"
                                 className="text-xs"
                             />
-                            <p className="text-[11px] leading-snug text-muted-foreground">
-                                Leave empty for <code className="rounded bg-muted px-1 text-[10px]">us-east-1</code>.
+                            <p className="text-xs leading-snug text-muted-foreground">
+                                Leave empty for <code className="rounded bg-muted px-1 text-xs">us-east-1</code>.
                             </p>
                         </div>
                         <Button
@@ -253,7 +216,7 @@ export function KiroConnectionForm({ onSuccess, onError, onBusyChange, initialMe
                         description={
                             <>
                                 Reuse a Kiro login from{' '}
-                                <code className="rounded bg-muted px-1.5 py-0.5 text-[11px]">kiro-auth-token.json</code>.
+                                <code className="rounded bg-muted px-1.5 py-0.5 text-xs">kiro-auth-token.json</code>.
                             </>
                         }
                     />
@@ -415,7 +378,7 @@ export function KiroConnectionForm({ onSuccess, onError, onBusyChange, initialMe
             {mode === 'builder-id' && (
                 <div className="space-y-4">
                     <SetupIntro
-                        icon={<ExternalLink size={20} className="text-orange-500" />}
+                        icon={<ExternalLink size={20} className="text-primary" />}
                         title="AWS Builder ID"
                         description="Authenticate via AWS Builder ID using the device-code flow."
                     />
@@ -437,10 +400,7 @@ export function KiroConnectionForm({ onSuccess, onError, onBusyChange, initialMe
                                 clearPolling();
                                 onError('');
                             }}
-                            onRestart={() => {
-                                clearPolling();
-                                void startBuilderIdFlow();
-                            }}
+                            onRestart={() => void startBuilderIdFlow()}
                         />
                     )}
                 </div>
@@ -450,7 +410,7 @@ export function KiroConnectionForm({ onSuccess, onError, onBusyChange, initialMe
             {mode === 'idc' && (
                 <div className="space-y-4">
                     <SetupIntro
-                        icon={<Shield size={20} className="text-blue-500" />}
+                        icon={<Shield size={20} className="text-primary" />}
                         title="IAM Identity Center"
                         description="Enterprise SSO with a custom start URL."
                     />
@@ -483,22 +443,8 @@ export function KiroConnectionForm({ onSuccess, onError, onBusyChange, initialMe
                                 />
                             </div>
                             <Button
-                                onClick={() =>
-                                    void run(async () => {
-                                        if (!idcForm.startUrl) {
-                                            onError('Start URL is required');
-                                            return;
-                                        }
-                                        const res: DeviceCodeState = await api.startIDC({
-                                            startUrl: idcForm.startUrl,
-                                            region: idcForm.region || undefined,
-                                        });
-                                        setDeviceCode(res);
-                                        setPolling(true);
-                                        startPolling(res.sessionId, res.interval, res.expiresIn);
-                                    })
-                                }
-                                disabled={loading || !idcForm.startUrl}
+                                onClick={() => void startIdcFlow()}
+                                disabled={loading || !idcForm.startUrl.trim()}
                                 size="sm"
                                 className="w-full gap-2"
                             >
@@ -519,17 +465,7 @@ export function KiroConnectionForm({ onSuccess, onError, onBusyChange, initialMe
                                 clearPolling();
                                 onError('');
                             }}
-                            onRestart={() =>
-                                void run(async () => {
-                                    const res: DeviceCodeState = await api.startIDC({
-                                        startUrl: idcForm.startUrl,
-                                        region: idcForm.region || undefined,
-                                    });
-                                    setDeviceCode(res);
-                                    setPolling(true);
-                                    startPolling(res.sessionId, res.interval, res.expiresIn);
-                                })
-                            }
+                            onRestart={() => void startIdcFlow()}
                         />
                     )}
                 </div>
@@ -541,7 +477,7 @@ export function KiroConnectionForm({ onSuccess, onError, onBusyChange, initialMe
                     {!socialLogin ? (
                         <>
                             <SetupIntro
-                                icon={<Globe size={20} className="text-green-500" />}
+                                icon={<Globe size={20} className="text-primary" />}
                                 title="Social login"
                                 description="Google or GitHub via Kiro Identity."
                             />
@@ -585,7 +521,7 @@ export function KiroConnectionForm({ onSuccess, onError, onBusyChange, initialMe
                                 <li>Open the sign-in page and authenticate with Google/GitHub.</li>
                                 <li>
                                     After signing in, copy the callback URL{' '}
-                                    <code className="rounded bg-muted px-1 text-[10px]">kiro://</code>.
+                                    <code className="rounded bg-muted px-1 text-xs">kiro://</code>.
                                 </li>
                                 <li>Paste it below to finish.</li>
                             </ol>

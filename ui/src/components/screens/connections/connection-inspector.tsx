@@ -1,22 +1,22 @@
 import { useEffect, useState } from 'react';
 import {
-  AlertTriangle,
+  CheckCircle2,
+  Download,
   Eraser,
-  ExternalLink,
   Loader2,
+  Pencil,
   RefreshCw,
   Settings2,
-  TestTube,
   TerminalSquare,
+  TestTube,
+  Trash2,
+  XCircle,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/api';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
-import { cn } from '@/lib/utils';
+import { modelCount } from '@/components/connections/model-fetch';
 import InlineName from '@/components/connections/InlineName';
 import { ProviderLogoIcon } from '@/components/connections/helpers';
 import LogsViewerModal from '@/components/connections/LogsViewerModal';
@@ -33,68 +33,69 @@ import {
   tokenSecondsLeft,
 } from '@/lib/connection-status';
 import { quotaStore, useNow, useQuotaEntry } from './quota-store';
+import { StatusBadge } from './status-ui';
+import { errMessage } from './status-tone';
+import { downloadConnectionsExport } from './export';
 import type { Connection } from '@/types/connections';
 
 interface ConnectionInspectorProps {
   conn: Connection;
-  /** Stripped model ids missing from the current catalog, e.g. ["claude-3-sonnet"]. */
-  legacyModels?: string[];
-  onReload: () => void;
-  onDelete: (id: string, name: string) => void;
+  onReload: () => Promise<void> | void;
+  onDelete: (conn: Connection) => void;
   onEditModels: (conn: Connection) => void;
-  onEditConnection?: (conn: Connection) => void;
+  onEditConnection: (conn: Connection) => void;
 }
 
-function Row({ label, value }: { label: string; value?: string | number | null }) {
+function Row({ label, value, mono }: { label: string; value?: string | number | null; mono?: boolean }) {
   return (
-    <div className="grid grid-cols-[110px_1fr] gap-3 text-xs">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="min-w-0 break-all font-medium">{value || '—'}</span>
+    <div className="grid grid-cols-[120px_1fr] gap-3 text-sm">
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className={mono ? 'min-w-0 break-all font-mono text-xs leading-5' : 'min-w-0 break-words'}>{value || '—'}</dd>
     </div>
   );
 }
 
-function errMessage(e: unknown, fallback: string): string {
-  return e instanceof Error && e.message ? e.message : fallback;
+function Section({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <section className="space-y-3 border-b p-4 last:border-b-0">
+      <div className="flex min-h-8 items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold">{title}</h3>
+        {action}
+      </div>
+      {children}
+    </section>
+  );
 }
 
-export function ConnectionInspector({
-  conn: c,
-  legacyModels = [],
-  onReload,
-  onDelete,
-  onEditModels,
-  onEditConnection,
-}: ConnectionInspectorProps) {
-  const [testResult, setTestResult] = useState<{ loading?: boolean; status?: string; message?: string } | null>(null);
+/** Render with `key={conn.id}` so per-connection state (test result, busy flags) resets on switch. */
+export function ConnectionInspector({ conn: c, onReload, onDelete, onEditModels, onEditConnection }: ConnectionInspectorProps) {
+  const [testState, setTestState] = useState<{ loading: boolean; ok?: boolean; message?: string }>({ loading: false });
   const [toggleLoading, setToggleLoading] = useState(false);
+  const [busyAction, setBusyAction] = useState<string | null>(null);
   const [isLogOpen, setIsLogOpen] = useState(false);
+  const now = useNow();
 
-  // The open inspector *is* the watch trigger for the watched quota tier.
+  // The open inspector is the watch trigger for the Quota-auto watched tier.
   useEffect(() => {
     quotaStore.setInspected(c.id);
     return () => quotaStore.setInspected(null);
   }, [c.id]);
 
-  useNow(); // keeps age labels honest
   const entry = useQuotaEntry(c.id);
-  const fetching = !entry && quotaStore.isFetching(c.id);
+  const fetching = quotaStore.isFetching(c.id);
 
   const rl = isRateLimited(c);
   const expired = isExpired(c);
   const backoff = hasBackoff(c);
   const locks = lockedModelCount(c);
+  const secsLeft = tokenSecondsLeft(c);
+  const hasIssue = rl || expired || backoff || locks > 0 || Boolean(c.lastError);
 
-  const handleRename = async (_id: string, name: string) => {
-    await api.updateConnection(c.id, { name });
-    onReload();
-  };
-
-  const handleToggle = async () => {
+  const handleToggle = async (next: boolean) => {
     setToggleLoading(true);
     try {
-      await api.updateConnection(c.id, { isActive: !c.isActive });
-      toast.success(`${c.name} ${c.isActive ? 'disabled' : 'enabled'}`);
+      await api.updateConnection(c.id, { isActive: next });
+      toast.success(`${c.name} ${next ? 'enabled' : 'disabled'}`);
       await onReload();
     } catch (e: unknown) {
       toast.error(errMessage(e, 'Failed to update connection'));
@@ -104,235 +105,213 @@ export function ConnectionInspector({
   };
 
   const handleTest = async () => {
-    setTestResult({ loading: true });
+    setTestState({ loading: true });
     try {
       const res = await api.testConnection(c.id);
-      setTestResult(res);
-      if (res.status === 'ok') toast.success(`${c.name} test passed`);
-      else toast.error(res.message || `${c.name} test failed`);
-      await onReload();
+      const ok = res.status === 'ok';
+      setTestState({ loading: false, ok, message: res.message });
+      if (ok) toast.success(`${c.name}: test passed`);
+      else toast.error(res.message || `${c.name}: test failed`);
     } catch (e: unknown) {
       const message = errMessage(e, 'Connection test failed');
-      setTestResult({ status: 'error', message });
+      setTestState({ loading: false, ok: false, message });
       toast.error(message);
-      await onReload();
     }
+    await onReload();
   };
 
-  const clearIssue = async (action: () => Promise<unknown>, successMsg: string) => {
+  const runAction = async (key: string, action: () => Promise<unknown>, successMsg: string) => {
+    setBusyAction(key);
     try {
       await action();
       toast.success(successMsg);
       await onReload();
     } catch (e: unknown) {
-      toast.error(errMessage(e, 'Failed'));
+      toast.error(errMessage(e, 'Action failed'));
+    } finally {
+      setBusyAction(null);
     }
   };
 
-  const secsLeft = tokenSecondsLeft(c);
-
-  const now = useNow();
+  const handleExport = () =>
+    runAction('export', () => downloadConnectionsExport([c.id]), `Exported ${c.name}`);
 
   return (
     <>
       <div className="flex h-full flex-col">
         {/* Header */}
         <div className="flex items-start gap-3 border-b p-4">
-          <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg border bg-muted">
-            <ProviderLogoIcon provider={c.provider} size={36} className="h-full w-full object-cover" />
+          <div className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-lg border bg-background">
+            <ProviderLogoIcon provider={c.provider} size={28} />
           </div>
           <div className="min-w-0 flex-1">
-            <InlineName conn={c} onRename={handleRename} />
-            <p className="truncate text-[11px] text-muted-foreground">
-              {getProviderLabel(c.provider)} · {c.email || c.baseUrl || c.authMethod || 'Connection'}
+            <InlineName
+              conn={c}
+              onRename={async (name) => {
+                await api.updateConnection(c.id, { name });
+                await onReload();
+              }}
+            />
+            <p className="truncate text-sm text-muted-foreground">
+              {getProviderLabel(c.provider)}
+              {(c.email || c.baseUrl) && ` · ${c.email || c.baseUrl}`}
             </p>
           </div>
-          <Switch
-            checked={c.isActive}
-            disabled={toggleLoading}
-            onCheckedChange={handleToggle}
-            aria-label={c.isActive ? 'Disable connection' : 'Enable connection'}
-            className="data-[state=checked]:bg-emerald-500"
-          />
+          <label className="flex shrink-0 items-center gap-2 pt-1 text-sm text-muted-foreground">
+            {c.isActive ? 'Enabled' : 'Disabled'}
+            <Switch checked={c.isActive} disabled={toggleLoading} onCheckedChange={handleToggle} aria-label="Enable connection" />
+          </label>
         </div>
 
-        <ScrollArea className="flex-1">
-          <div className="space-y-4 p-4">
-            {/* Status */}
-            <section className="space-y-2">
-              <div className="flex flex-wrap items-center gap-1.5">
-                <Badge variant="outline" className={cn(c.isActive ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-600' : 'bg-muted text-muted-foreground')}>
-                  {c.isActive ? 'Active' : 'Idle'}
-                </Badge>
-                {rl && (
-                  <Badge variant="outline" className="border-amber-500/25 bg-amber-500/10 text-amber-600">
-                    Rate-limited · {secsToHuman(rateLimitSecondsLeft(c))}
-                  </Badge>
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          {/* Status */}
+          <Section title="Status">
+            <div className="flex flex-wrap gap-1.5">
+              {!c.isActive && <StatusBadge tone="neutral">Disabled</StatusBadge>}
+              {c.isActive && !hasIssue && <StatusBadge tone="success" icon={<CheckCircle2 className="size-3" />}>Healthy</StatusBadge>}
+              {expired && <StatusBadge tone="danger">Token expired</StatusBadge>}
+              {!expired && secsLeft !== null && <StatusBadge tone="neutral">Token expires in {secsToHuman(secsLeft)}</StatusBadge>}
+              {rl && <StatusBadge tone="warning">Rate-limited · {secsToHuman(rateLimitSecondsLeft(c))}</StatusBadge>}
+              {backoff && <StatusBadge tone="warning">Backoff {c.backoffLevel}/7</StatusBadge>}
+              {locks > 0 && <StatusBadge tone="warning">{locks} locked model{locks > 1 ? 's' : ''}</StatusBadge>}
+            </div>
+
+            {c.lastError && (
+              <p role="status" className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm break-words text-destructive">
+                {c.lastError}
+              </p>
+            )}
+
+            {(c.lastError || rl || backoff) && (
+              <div className="flex flex-wrap gap-2">
+                {c.lastError && (
+                  <Button size="sm" variant="outline" className="gap-1.5" disabled={busyAction !== null}
+                    onClick={() => runAction('clear', () => api.clearConnectionError(c.id), 'Error cleared')}>
+                    {busyAction === 'clear' ? <Loader2 className="size-3.5 animate-spin" /> : <Eraser className="size-3.5" />} Clear error
+                  </Button>
                 )}
-                {expired && (
-                  <Badge variant="outline" className="border-destructive/25 bg-destructive/10 text-destructive">
-                    Token expired
-                  </Badge>
-                )}
-                {!expired && secsLeft !== null && (
-                  <Badge variant="outline" className="border-border bg-muted/40 tabular-nums text-muted-foreground">
-                    Token expires in {secsToHuman(secsLeft)}
-                  </Badge>
-                )}
-                {backoff && (
-                  <Badge variant="outline" className="border-amber-500/25 bg-amber-500/10 text-amber-600">
-                    Backoff L{c.backoffLevel}/7
-                  </Badge>
-                )}
-                {locks > 0 && (
-                  <Badge variant="outline" className="border-amber-500/25 bg-amber-500/10 text-amber-600">
-                    {locks} locked models
-                  </Badge>
+                {(rl || backoff) && (
+                  <Button size="sm" variant="outline" className="gap-1.5" disabled={busyAction !== null}
+                    onClick={() => runAction('cooldown', () => api.resetCooldown(c.id), 'Cooldown reset')}>
+                    {busyAction === 'cooldown' ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />} Reset cooldown
+                  </Button>
                 )}
               </div>
+            )}
 
-              {(rl || expired || c.lastError) && (
-                <div className="rounded-lg border border-amber-500/25 bg-amber-500/10 p-2.5 text-xs">
-                  <p className="break-words text-muted-foreground">{c.lastError || 'Connection has active runtime error signals.'}</p>
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    {c.lastError && (
-                      <Button size="sm" variant="outline" className="h-6 gap-1 px-2 text-[11px]" onClick={() => clearIssue(() => api.clearConnectionError(c.id), 'Error state cleared')}>
-                        <Eraser size={11} /> Clear error
-                      </Button>
-                    )}
-                    {(rl || backoff) && (
-                      <Button size="sm" variant="outline" className="h-6 gap-1 px-2 text-[11px]" onClick={() => clearIssue(() => api.resetCooldown(c.id), 'Cooldown reset')}>
-                        <RefreshCw size={11} /> Reset cooldown
-                      </Button>
-                    )}
-                    <Button size="sm" variant="ghost" className="h-6 gap-1 px-2 text-[11px]" onClick={() => setIsLogOpen(true)}>
-                      <TerminalSquare size={11} /> View logs
-                    </Button>
-                  </div>
-                </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button size="sm" variant="secondary" className="gap-1.5" onClick={handleTest} disabled={testState.loading}>
+                {testState.loading ? <Loader2 className="size-3.5 animate-spin" /> : <TestTube className="size-3.5" />} Test connection
+              </Button>
+              <Button size="sm" variant="ghost" className="gap-1.5" onClick={() => setIsLogOpen(true)}>
+                <TerminalSquare className="size-3.5" /> Logs
+              </Button>
+              {!testState.loading && testState.ok !== undefined && (
+                <StatusBadge
+                  tone={testState.ok ? 'success' : 'danger'}
+                  icon={testState.ok ? <CheckCircle2 className="size-3" /> : <XCircle className="size-3" />}
+                  title={testState.message}
+                >
+                  {testState.ok ? 'Passed' : 'Failed'}
+                </StatusBadge>
               )}
-            </section>
+            </div>
+          </Section>
 
-            <Separator />
-
-            {/* Quota — auto-loaded & watched while this connection is selected */}
-            <section className="space-y-2">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-semibold">Quota</h3>
+          {/* Quota */}
+          <Section
+            title="Quota"
+            action={
+              c.supportsQuota !== false && (
                 <div className="flex items-center gap-2">
                   {entry && !fetching && (
-                    <span className="text-[10px] text-muted-foreground">{secsAgoHuman(Math.floor((now - entry.fetchedAt) / 1000))}</span>
+                    <span className="text-xs text-muted-foreground">{secsAgoHuman(Math.floor((now - entry.fetchedAt) / 1000))}</span>
                   )}
-                  {fetching && <Loader2 size={12} className="animate-spin text-muted-foreground" />}
-                  <button
-                    type="button"
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 gap-1.5"
                     onClick={() => quotaStore.refresh([c.id])}
-                    title="Refresh quota"
-                    aria-label="Refresh quota"
-                    className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    disabled={fetching || !c.isActive}
+                    title={c.isActive ? 'Refresh quota' : 'Enable the connection to load quota'}
                   >
-                    <RefreshCw size={12} className={cn(fetching && 'animate-spin')} />
-                  </button>
-                </div>
-              </div>
-              {c.supportsQuota === false ? (
-                <p className="rounded-lg border bg-muted/25 p-3 text-xs text-muted-foreground">
-                  This provider does not support quota checks.
-                </p>
-              ) : entry?.error ? (
-                <div className="flex items-center justify-between gap-2 rounded-lg border border-destructive/20 bg-destructive/5 p-3">
-                  <p className="text-xs text-destructive">{entry.error}</p>
-                  <Button size="sm" variant="outline" className="h-7 shrink-0" onClick={() => quotaStore.refresh([c.id])}>
-                    Retry
+                    <RefreshCw className={fetching ? 'size-3.5 animate-spin' : 'size-3.5'} />
+                    {entry ? 'Refresh' : 'Load'}
                   </Button>
                 </div>
-              ) : entry ? (
-                <QuotaPanel data={entry.data} loading={false} onRefresh={() => quotaStore.refresh([c.id])} />
-              ) : fetching ? (
-                <p className="flex items-center gap-2 rounded-lg border bg-muted/25 p-3 text-xs text-muted-foreground">
-                  <Loader2 size={12} className="animate-spin" /> Loading quota…
-                </p>
-              ) : (
-                <p className="rounded-lg border bg-muted/25 p-3 text-xs text-muted-foreground">
-                  Quota not loaded — click the refresh icon above to fetch it.
-                </p>
-              )}
-            </section>
+              )
+            }
+          >
+            {c.supportsQuota === false ? (
+              <p className="text-sm text-muted-foreground">This provider does not report quota.</p>
+            ) : entry?.error ? (
+              <p role="alert" className="text-sm text-destructive">{entry.error}</p>
+            ) : entry?.data ? (
+              <QuotaPanel data={entry.data} />
+            ) : fetching ? (
+              <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="size-3.5 animate-spin" /> Loading quota…
+              </p>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                {c.isActive ? 'Quota not loaded yet.' : 'Connection is disabled.'}
+              </p>
+            )}
+          </Section>
 
-            <Separator />
-
-            {/* Models */}
-            <section className="space-y-2">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-semibold">Models</h3>
-                <Badge variant="secondary" className="tabular-nums">
-                  {c.supportedModels?.length ? `${c.supportedModels.length} configured` : 'allow-all'}
-                </Badge>
-              </div>
-              {legacyModels.length > 0 && (
-                <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-2.5">
-                  <p className="mb-1 flex items-center gap-1.5 text-xs font-medium text-amber-700 dark:text-amber-300">
-                    <AlertTriangle size={13} /> {legacyModels.length} model(s) missing from the current catalog
-                  </p>
-                  <p className="font-mono text-[10px] leading-relaxed text-muted-foreground">{legacyModels.join(', ')}</p>
-                </div>
-              )}
-              {c.supportedModels?.length ? (
-                <div className="flex max-h-40 flex-wrap gap-1.5 overflow-auto rounded-lg border bg-muted/25 p-2.5">
+          {/* Models */}
+          <Section
+            title="Models"
+            action={
+              <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => onEditModels(c)}>
+                <Settings2 className="size-3.5" /> Edit models
+              </Button>
+            }
+          >
+            {c.supportedModels?.length ? (
+              <>
+                <p className="text-sm text-muted-foreground">{modelCount(c.supportedModels.length)} allowed</p>
+                <div className="flex max-h-48 flex-wrap gap-1.5 overflow-y-auto">
                   {c.supportedModels.map((m) => (
-                    <code key={m} className="rounded border bg-background px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
+                    <code key={m} className="rounded border bg-muted/40 px-1.5 py-0.5 font-mono text-xs">
                       {m}
                     </code>
                   ))}
                 </div>
-              ) : (
-                <p className="text-xs text-muted-foreground">Unrestricted — the connection serves any model using provider defaults.</p>
-              )}
-              <div className="flex flex-wrap gap-2 pt-1">
-                <Button variant="outline" size="sm" className="h-8 gap-2" onClick={() => onEditModels(c)}>
-                  <Settings2 size={14} /> Edit models
-                </Button>
-                {(c.authType === 'apikey' || c.apiKey) && onEditConnection && (
-                  <Button variant="outline" size="sm" className="h-8 gap-2" onClick={() => onEditConnection(c)}>
-                    <ExternalLink size={14} /> Edit connection
-                  </Button>
-                )}
-              </div>
-            </section>
+              </>
+            ) : (
+              <p className="text-sm text-muted-foreground">All models allowed (no restriction).</p>
+            )}
+          </Section>
 
-            <Separator />
-
-            {/* Routing details */}
-            <section className="space-y-2.5">
-              <h3 className="text-sm font-semibold">Routing details</h3>
-              <Row label="Connection ID" value={c.id} />
-              <Row label="Auth method" value={c.authMethod || c.authType} />
-              <Row label="Route prefix" value={c.routePrefix || c.modelPrefix} />
-              <Row label="Expires at" value={c.expiresAt ? new Date(c.expiresAt).toLocaleString() : null} />
-              <Row label="Priority / weight" value={[c.priority ?? '—', c.weight ?? '—'].join(' / ')} />
-            </section>
-          </div>
-        </ScrollArea>
+          {/* Configuration */}
+          <Section
+            title="Configuration"
+            action={
+              <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => onEditConnection(c)}>
+                <Pencil className="size-3.5" /> Edit
+              </Button>
+            }
+          >
+            <dl className="space-y-2">
+              <Row label="Auth" value={c.authMethod || c.authType} />
+              <Row label="Priority / weight" value={`${c.priority ?? 0} / ${c.weight || 100}`} />
+              {(c.routePrefix || c.modelPrefix) && <Row label="Route prefix" value={c.routePrefix || c.modelPrefix} mono />}
+              {c.baseUrl && <Row label="Base URL" value={c.baseUrl} mono />}
+              <Row label="Expires" value={c.expiresAt ? new Date(c.expiresAt).toLocaleString() : null} />
+              <Row label="ID" value={c.id} mono />
+            </dl>
+          </Section>
+        </div>
 
         {/* Footer actions */}
         <div className="flex items-center gap-2 border-t p-3">
-          <Button variant="secondary" size="sm" className="gap-1.5" onClick={handleTest} disabled={testResult?.loading}>
-            {testResult?.loading ? <Loader2 size={13} className="animate-spin" /> : <TestTube size={13} />} Test
+          <Button variant="outline" size="sm" className="gap-1.5" onClick={handleExport} disabled={busyAction !== null}>
+            {busyAction === 'export' ? <Loader2 className="size-3.5 animate-spin" /> : <Download className="size-3.5" />} Export
           </Button>
-          {testResult && !testResult.loading && (
-            <span
-              className={cn(
-                'rounded-md px-2 py-0.5 text-[10px] font-medium',
-                testResult.status === 'ok' ? 'bg-emerald-500/10 text-emerald-600' : 'bg-destructive/10 text-destructive',
-              )}
-              title={testResult.message}
-            >
-              {testResult.status === 'ok' ? '✓ OK' : '✗ Fail'}
-            </span>
-          )}
           <span className="flex-1" />
-          <Button variant="ghost" size="sm" className="text-xs text-muted-foreground" onClick={() => onDelete(c.id, c.name)}>
-            Delete…
+          <Button variant="ghost" size="sm" className="gap-1.5 text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={() => onDelete(c)}>
+            <Trash2 className="size-3.5" /> Delete
           </Button>
         </div>
       </div>

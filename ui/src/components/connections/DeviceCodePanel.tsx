@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Check, Copy, ExternalLink, Loader2, RotateCcw, TimerOff } from 'lucide-react';
+import { Check, Copy, ExternalLink, Loader2, RotateCcw, Timer, TimerOff } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { copyText } from './add/helpers';
 
 type DeviceCodePanelProps = {
     /** Instruction shown above the code, e.g. "Enter this code on qwen.ai:" */
@@ -17,8 +18,6 @@ type DeviceCodePanelProps = {
     /** Restart callback shown when expired (e.g. "Get new code"). */
     onRestart?: () => void;
     waiting: boolean;
-    codeClassName?: string;
-    buttonClassName?: string;
     onCancel: () => void;
 };
 
@@ -29,10 +28,9 @@ function fmtRemain(totalSecs: number): string {
 }
 
 /**
- * Shared device-code authorization panel (Kiro / Qwen): big select-all code,
- * link to the authorization page, expiry countdown, waiting spinner, and a
- * Cancel button. When the code expires an explicit restart action appears
- * instead of leaving an indefinite "waiting" state.
+ * Shared device-code authorization panel (Kiro / Qwen): big code with copy,
+ * link to the authorization page, expiry countdown and Cancel. On expiry an
+ * explicit restart action replaces the indefinite "waiting" state.
  */
 export function DeviceCodePanel({
     prompt = 'Enter this code on the authorization page:',
@@ -43,11 +41,8 @@ export function DeviceCodePanel({
     expired = false,
     onRestart,
     waiting,
-    codeClassName,
-    buttonClassName,
     onCancel,
 }: DeviceCodePanelProps) {
-    // Ticker drives a seconds-remaining counter — no impure Date.now() in render.
     const [secsLeft, setSecsLeft] = useState<number | null>(null);
     const [codeCopied, setCodeCopied] = useState(false);
     const countdownActive = expiresAtMs !== undefined && !expired;
@@ -61,98 +56,85 @@ export function DeviceCodePanel({
 
     if (expired) {
         return (
-            <div className="mt-4 space-y-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-5 text-center">
-                <TimerOff size={22} className="mx-auto text-amber-600" />
+            <div role="status" className="space-y-3 rounded-xl border border-warning/30 bg-warning/10 p-5 text-center">
+                <TimerOff className="mx-auto size-6 text-warning" />
                 <p className="text-sm font-medium">Authorization code expired</p>
-                <p className="text-xs text-muted-foreground">
-                    The waiting session ended without confirmation. Request a new code — your selected method stays unchanged.
-                </p>
+                <p className="text-sm text-muted-foreground">The session ended without confirmation. Request a new code to try again.</p>
                 <div className="flex gap-2 pt-1">
-                    <Button variant="outline" size="sm" className="flex-1" onClick={onCancel}>
+                    <Button variant="outline" className="flex-1" onClick={onCancel}>
                         Cancel
                     </Button>
-                    <Button size="sm" className={cn('flex-1 gap-1.5', buttonClassName)} onClick={onRestart}>
-                        <RotateCcw size={13} /> Get new code
-                    </Button>
+                    {onRestart && (
+                        <Button className="flex-1 gap-1.5" onClick={onRestart}>
+                            <RotateCcw className="size-4" /> Get new code
+                        </Button>
+                    )}
                 </div>
             </div>
         );
     }
 
     const href = verificationUriComplete || verificationUri;
-    if (!href) return null;
 
-    const copyCode = () => {
-        void navigator.clipboard?.writeText(userCode);
-        setCodeCopied(true);
-        toast.success('Code copied');
-        setTimeout(() => setCodeCopied(false), 1500);
+    const copyCode = async () => {
+        if (await copyText(userCode)) {
+            setCodeCopied(true);
+            setTimeout(() => setCodeCopied(false), 1500);
+        } else {
+            toast.error('Could not copy — select the code manually');
+        }
     };
 
     return (
-        <div className="mt-4 space-y-3 rounded-xl border bg-muted/40 p-5">
-            <div className="text-center">
-                <p className="mb-2 text-xs text-muted-foreground">{prompt}</p>
-                <div className="mb-4 flex items-center justify-center gap-2">
-                    <div
-                        className={cn(
-                            'select-all font-mono text-3xl font-bold tracking-[0.25em] text-primary',
-                            codeClassName,
-                        )}
-                    >
-                        {userCode}
-                    </div>
-                    <button
-                        type="button"
-                        onClick={copyCode}
-                        aria-label="Copy code"
-                        title="Copy code"
-                        className="shrink-0 cursor-pointer rounded-md border bg-background p-1.5 text-muted-foreground transition-colors hover:text-foreground"
-                    >
-                        {codeCopied ? <Check size={14} className="text-emerald-500" /> : <Copy size={14} />}
-                    </button>
-                </div>
+        <div className="space-y-4 rounded-xl border bg-muted/40 p-5 text-center">
+            <p className="text-sm text-muted-foreground">{prompt}</p>
+            <div className="flex items-center justify-center gap-2">
+                <output aria-label="Device code" className="select-all font-mono text-3xl font-bold tracking-[0.25em]">
+                    {userCode}
+                </output>
+                <Button variant="outline" size="icon" className="size-9 shrink-0" onClick={() => void copyCode()} aria-label="Copy code" title="Copy code">
+                    {codeCopied ? <Check className="size-4 text-success" /> : <Copy className="size-4" />}
+                </Button>
+            </div>
+
+            {href ? (
                 <div className="flex flex-wrap items-center justify-center gap-2">
-                    <Button asChild size="sm" className={cn('gap-2', buttonClassName)}>
+                    <Button asChild className="gap-2">
                         <a href={href} target="_blank" rel="noopener noreferrer">
-                            <ExternalLink size={14} /> Open authorization page
+                            <ExternalLink className="size-4" /> Open authorization page
                         </a>
                     </Button>
                     <Button
                         variant="outline"
-                        size="sm"
                         className="gap-1.5"
-                        onClick={() => {
-                            void navigator.clipboard?.writeText(href);
-                            toast.success('Authorization URL copied');
+                        onClick={async () => {
+                            if (await copyText(href)) toast.success('Authorization URL copied');
+                            else toast.error('Could not copy the URL');
                         }}
-                        title="Copy URL (paste into another browser if needed)"
+                        title="Copy URL to open in another browser"
                     >
-                        <Copy size={13} /> Copy URL
+                        <Copy className="size-4" /> Copy URL
                     </Button>
                 </div>
-            </div>
+            ) : (
+                <p className="text-sm text-warning">The provider did not return an authorization URL. Cancel and try again.</p>
+            )}
+
             {(waiting || (countdownActive && secsLeft !== null)) && (
-                <div className="mt-3 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 border-t pt-3 text-xs text-muted-foreground">
-                    {countdownActive && secsLeft !== null && (
-                        <span
-                            className={cn(
-                                'inline-flex items-center gap-1 rounded bg-background px-1.5 py-0.5 font-mono tabular-nums',
-                                secsLeft <= 60 && 'text-amber-600',
-                            )}
-                            title="Code expires in"
-                        >
-                            ⏱ {fmtRemain(secsLeft)}
-                        </span>
-                    )}
+                <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 border-t pt-3 text-sm text-muted-foreground" aria-live="polite">
                     {waiting && (
                         <span className="inline-flex items-center gap-1.5">
-                            <Loader2 size={12} className="animate-spin" /> Waiting for authorization…
+                            <Loader2 className="size-4 animate-spin" /> Waiting for authorization…
+                        </span>
+                    )}
+                    {countdownActive && secsLeft !== null && (
+                        <span className={cn('inline-flex items-center gap-1 font-mono tabular-nums', secsLeft <= 60 && 'text-warning')} title="Code expires in">
+                            <Timer className="size-4" /> {fmtRemain(secsLeft)}
                         </span>
                     )}
                 </div>
             )}
-            <Button variant="outline" size="sm" className="w-full" onClick={onCancel}>
+            <Button variant="outline" className="w-full" onClick={onCancel}>
                 Cancel
             </Button>
         </div>

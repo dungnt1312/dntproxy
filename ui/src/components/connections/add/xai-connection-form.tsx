@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { ExternalLink, ShieldCheck } from 'lucide-react';
+import { ExternalLink, Loader2, ShieldCheck } from 'lucide-react';
+import { toast } from 'sonner';
 import { api } from '../../../api';
 import { ProviderLogoIcon } from '../helpers';
 import { Button } from '@/components/ui/button';
@@ -52,8 +53,13 @@ export function XaiConnectionForm({ mode, onSuccess, onError, onBusyChange }: Pr
         const errors: string[] = [];
         for (const file of files) {
             try {
-                const data = JSON.parse(await file.text());
-                const res = (await api.importXAIAuthFile(data)) as CreateResult & { duplicate?: boolean };
+                let data: unknown;
+                try {
+                    data = JSON.parse(await file.text());
+                } catch {
+                    throw new Error('not valid JSON');
+                }
+                const res = (await api.importXAIAuthFile(data as object)) as CreateResult & { duplicate?: boolean };
                 if (res.duplicate) skipped++;
                 else {
                     imported++;
@@ -67,16 +73,18 @@ export function XaiConnectionForm({ mode, onSuccess, onError, onBusyChange }: Pr
             }
         }
         setLoading(false);
-        if (imported > 0 || skipped > 0) {
-            const parts = [
-                imported > 0 ? `${imported} imported` : '',
-                skipped > 0 ? `${skipped} skipped (duplicate)` : '',
-                errors.length > 0 ? `${errors.length} failed` : '',
-            ].filter(Boolean);
-            onSuccess(
-                `Grok batch import: ${parts.join(', ')}`,
-                firstNewId ? { id: firstNewId, name: firstName } : undefined,
-            );
+        if (errors.length > 0) {
+            // Always surface per-file failures, even when other files imported fine.
+            toast.error(`${errors.length} file${errors.length > 1 ? 's' : ''} failed to import`, {
+                description: errors.slice(0, 5).join('\n') + (errors.length > 5 ? `\n+${errors.length - 5} more` : ''),
+            });
+        }
+        if (imported > 0) {
+            onSuccess(`Grok import: ${imported} imported`, firstNewId ? { id: firstNewId, name: firstName } : undefined);
+            return;
+        }
+        if (skipped > 0 && errors.length === 0) {
+            onError(`All ${skipped} file${skipped > 1 ? 's are' : ' is'} already connected — nothing new to import.`);
             return;
         }
         if (errors.length > 0) onError(errors.join('\n'));
@@ -90,7 +98,7 @@ export function XaiConnectionForm({ mode, onSuccess, onError, onBusyChange }: Pr
                 description={
                     <>
                         Connect your Grok Build account. Models route as{' '}
-                        <code className="rounded bg-muted px-1.5 py-0.5 text-[11px]">grok/&lt;model&gt;</code>.
+                        <code className="rounded bg-muted px-1.5 py-0.5 text-xs">grok/&lt;model&gt;</code>.
                     </>
                 }
             />
@@ -110,14 +118,13 @@ export function XaiConnectionForm({ mode, onSuccess, onError, onBusyChange }: Pr
                             })
                         }
                         disabled={loading}
-                        size="sm"
-                        className="gap-2 bg-slate-900 text-white hover:bg-slate-800"
+                        className="gap-2"
                     >
-                        <ExternalLink size={13} />
+                        {loading ? <Loader2 className="size-4 animate-spin" /> : <ExternalLink className="size-4" />}
                         {loading ? 'Starting…' : 'Connect Grok Build'}
                     </Button>
-                    <p className="text-[10px] text-muted-foreground">
-                        Open the xAI OAuth page from the panel below, then paste the callback URL here after authorizing.
+                    <p className="text-sm text-muted-foreground">
+                        You'll open the xAI sign-in page, then paste the callback URL here after authorizing.
                     </p>
                 </div>
             )}
@@ -130,7 +137,7 @@ export function XaiConnectionForm({ mode, onSuccess, onError, onBusyChange }: Pr
                     callbackPlaceholder="http://127.0.0.1:56121/callback?code=...&state=..."
                     callbackValue={callback}
                     onCallbackChange={setCallback}
-                    submitLabel="Submit Callback"
+                    submitLabel="Finish"
                     onSubmit={() =>
                         void run(async () => {
                             const res = await api.exchangeXAIOAuth(session.sessionId, callback.trim());
@@ -148,12 +155,11 @@ export function XaiConnectionForm({ mode, onSuccess, onError, onBusyChange }: Pr
 
             {mode === 'file' && (
                 <div className="space-y-4">
-                    <p className="text-xs text-muted-foreground">
-                        <ShieldCheck size={13} className="mr-1 inline text-emerald-500" />
-                        Upload a Grok auth JSON. Expected fields:{' '}
-                        <code className="rounded bg-muted px-1 text-[11px]">access_token</code>,{' '}
-                        <code className="rounded bg-muted px-1 text-[11px]">refresh_token</code>,{' '}
-                        <code className="rounded bg-muted px-1 text-[11px]">email</code>. Select multiple files for batch import (duplicates are skipped).
+                    <p className="text-sm text-muted-foreground">
+                        <ShieldCheck className="mr-1 inline size-4 text-success" />
+                        Upload Grok auth JSON files with <code className="rounded bg-muted px-1 text-xs">access_token</code>,{' '}
+                        <code className="rounded bg-muted px-1 text-xs">refresh_token</code> and{' '}
+                        <code className="rounded bg-muted px-1 text-xs">email</code>. Multiple files are imported in one go; duplicates are skipped.
                     </p>
                     <FileDropzone
                         multiple

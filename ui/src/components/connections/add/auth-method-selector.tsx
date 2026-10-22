@@ -36,7 +36,7 @@ function MethodTile<T extends string>({
             aria-pressed={selected}
             onClick={onSelect}
             className={cn(
-                'flex cursor-pointer items-center gap-2 rounded-lg border text-left text-xs font-medium transition',
+                'flex cursor-pointer items-center gap-2 rounded-lg border text-left text-sm font-medium transition',
                 compact ? 'min-h-11 px-3 py-2' : 'min-h-16 flex-col items-center justify-center p-3 text-center',
                 selected
                     ? 'border-primary/30 bg-primary/5 text-primary ring-1 ring-primary/10'
@@ -47,13 +47,13 @@ function MethodTile<T extends string>({
             <span className="flex items-center gap-1">
                 {option.label}
                 {option.recommended && (
-                    <Badge variant="secondary" className="h-4 px-1 text-[9px]">
+                    <Badge variant="secondary" className="h-5 px-1.5 text-xs">
                         Recommended
                     </Badge>
                 )}
             </span>
             {!compact && (
-                <span className="text-[10px] font-normal text-muted-foreground">{option.description}</span>
+                <span className="text-xs font-normal text-muted-foreground">{option.description}</span>
             )}
         </button>
     );
@@ -84,7 +84,7 @@ export function AuthMethodSelector<T extends string>({
                                 aria-pressed={selected}
                                 onClick={() => onChange(option.id)}
                                 className={cn(
-                                    'flex cursor-pointer items-center gap-1.5 rounded-md px-4 py-2 text-xs font-medium transition',
+                                    'flex cursor-pointer items-center gap-1.5 rounded-md px-4 py-2 text-sm font-medium transition',
                                     selected
                                         ? 'bg-background text-foreground shadow-sm'
                                         : 'text-muted-foreground hover:text-foreground',
@@ -93,7 +93,7 @@ export function AuthMethodSelector<T extends string>({
                                 {option.icon}
                                 {option.label}
                                 {option.recommended && (
-                                    <Badge variant="secondary" className="h-4 px-1 text-[9px]">
+                                    <Badge variant="secondary" className="h-5 px-1.5 text-xs">
                                         Recommended
                                     </Badge>
                                 )}
@@ -118,10 +118,10 @@ export function AuthMethodSelector<T extends string>({
                 <Collapsible open={moreOpen} onOpenChange={setMoreOpen}>
                     <CollapsibleTrigger
                         type="button"
-                        className="mx-auto flex cursor-pointer items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                        className="mx-auto flex h-8 cursor-pointer items-center gap-1 rounded px-2 text-sm text-muted-foreground hover:text-foreground"
                     >
                         More ways
-                        <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', moreOpen && 'rotate-180')} />
+                        <ChevronDown className={cn('size-4 transition-transform motion-reduce:transition-none', moreOpen && 'rotate-180')} />
                     </CollapsibleTrigger>
                     <CollapsibleContent>
                         <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">

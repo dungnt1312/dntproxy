@@ -46,7 +46,7 @@ func authKiroAPIKey(store port.CredentialStore) gin.HandlerFunc {
 		// Routing uses the same default model set as every other Kiro flow. The
 		// ids returned by ListAvailableModels are an upstream catalog and do not
 		// necessarily match the registry naming, so they are reported back for
-		// display but not used to gate routing.
+		// display; the operator picks what to keep with "Edit models → Fetch".
 		supportedModels := req.SupportedModels
 		if len(supportedModels) == 0 {
 			cfg, _ := store.Load()

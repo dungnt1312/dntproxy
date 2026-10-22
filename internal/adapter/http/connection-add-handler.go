@@ -274,6 +274,9 @@ func apiImportConnection(store port.CredentialStore) gin.HandlerFunc {
 		if result.ClientSecret != "" {
 			conn.ProviderSpecificData["clientSecret"] = result.ClientSecret
 		}
+		if result.ClientSecretExpiresAt != "" {
+			conn.ProviderSpecificData["clientSecretExpiresAt"] = result.ClientSecretExpiresAt
+		}
 		if result.Region != "" {
 			conn.ProviderSpecificData["region"] = result.Region
 		}

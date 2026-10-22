@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ExternalLink } from 'lucide-react';
+import { ExternalLink, Loader2 } from 'lucide-react';
 import { api } from '../../../api';
 import { ApiKeyConnectionForm } from '../ApiKeyConnectionForm';
 import { Button } from '@/components/ui/button';
@@ -42,22 +42,26 @@ export function OpenAIConnectionForm({
     const [callback, setCallback] = useState('');
     const [starting, setStarting] = useState(false);
     const [pollTimedOut, setPollTimedOut] = useState(false);
-    const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-    const pollDeadlineRef = useRef<number | null>(null);
+    const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    // Bumped on every start/cancel/finish; stale in-flight polls compare and bail.
+    const genRef = useRef(0);
+
+    const stopPolling = () => {
+        genRef.current++;
+        if (pollRef.current) clearTimeout(pollRef.current);
+        pollRef.current = null;
+    };
 
     const clearSession = () => {
-        if (pollRef.current) {
-            clearInterval(pollRef.current);
-            pollRef.current = null;
-        }
-        pollDeadlineRef.current = null;
+        stopPolling();
         setSession(null);
         setCallback('');
         setPollTimedOut(false);
     };
 
     useEffect(() => () => {
-        if (pollRef.current) clearInterval(pollRef.current);
+        genRef.current++;
+        if (pollRef.current) clearTimeout(pollRef.current);
     }, []);
 
     useEffect(() => {
@@ -68,37 +72,44 @@ export function OpenAIConnectionForm({
     // The browser tab is NOT auto-opened here: window.open after `await` loses
     // user activation and gets popup-blocked. OAuthWaitingPanel owns the CTA.
     const startLogin = async () => {
+        clearSession();
         setStarting(true);
         onError('');
-        setPollTimedOut(false);
         try {
             const res = await api.startOpenAIOAuth();
             setSession({ sessionId: res.sessionId, authUrl: res.authUrl });
-            pollDeadlineRef.current = Date.now() + DEVICE_CODE_FALLBACK_SECS * 1000;
-            pollRef.current = setInterval(async () => {
-                if (pollDeadlineRef.current !== null && Date.now() >= pollDeadlineRef.current) {
-                    if (pollRef.current) clearInterval(pollRef.current);
-                    pollRef.current = null;
+            const gen = ++genRef.current;
+            const deadline = Date.now() + DEVICE_CODE_FALLBACK_SECS * 1000;
+            let hadError = false;
+            // Sequential setTimeout loop: never more than one request in flight.
+            const tick = async () => {
+                if (gen !== genRef.current) return;
+                if (Date.now() >= deadline) {
                     setPollTimedOut(true);
                     return;
                 }
                 try {
                     const poll = await api.pollOpenAIOAuth(res.sessionId);
-                    if (poll.status === 'pending') return;
-                    if (pollRef.current) clearInterval(pollRef.current);
-                    pollRef.current = null;
-                    if (poll.status === 'success') {
-                        onSuccess(`Connected! ${poll.email || poll.name || ''}`, pickResultId(poll));
-                        clearSession();
-                    } else {
-                        onError(poll.error || 'Authorization failed');
-                        clearSession();
+                    if (gen !== genRef.current) return;
+                    if (hadError) {
+                        hadError = false;
+                        onError('');
                     }
+                    if (poll.status === 'pending') {
+                        pollRef.current = setTimeout(tick, OPENAI_POLL_INTERVAL_MS);
+                        return;
+                    }
+                    clearSession();
+                    if (poll.status === 'success') onSuccess(`Connected${poll.email ? ` (${poll.email})` : ''}`, pickResultId(poll));
+                    else onError(poll.error || 'Authorization failed');
                 } catch (error: unknown) {
-                    // Transient errors keep the interval running; deadline stops it.
-                    onError(`${errorMessage(error, 'Authorization failed')} — retrying…`);
+                    if (gen !== genRef.current) return;
+                    hadError = true;
+                    onError(`${errorMessage(error, 'Authorization check failed')} — retrying…`);
+                    pollRef.current = setTimeout(tick, OPENAI_POLL_INTERVAL_MS * 3);
                 }
-            }, OPENAI_POLL_INTERVAL_MS);
+            };
+            pollRef.current = setTimeout(tick, OPENAI_POLL_INTERVAL_MS);
         } catch (error: unknown) {
             onError(errorMessage(error, 'Failed to start OpenAI OAuth'));
         } finally {
@@ -110,16 +121,16 @@ export function OpenAIConnectionForm({
         if (!session || !callback.trim()) return;
         setStarting(true);
         onError('');
+        stopPolling();
         try {
-            if (pollRef.current) clearInterval(pollRef.current);
-            pollRef.current = null;
             const poll = await api.pollOpenAIOAuth(session.sessionId, callback.trim());
             if (poll.status === 'success') {
-                onSuccess(`Connected! ${poll.email || poll.name || ''}`, pickResultId(poll));
                 clearSession();
+                onSuccess(`Connected${poll.email ? ` (${poll.email})` : ''}`, pickResultId(poll));
             } else {
-                onError(poll.error || 'Authorization failed');
-                clearSession();
+                // Keep the session so the user can fix the pasted URL and retry.
+                onError(poll.error || 'Authorization failed — check the callback URL and try again.');
+                setPollTimedOut(true);
             }
         } catch (error: unknown) {
             onError(errorMessage(error, 'Authorization failed'));
@@ -135,13 +146,13 @@ export function OpenAIConnectionForm({
             {mode === 'oauth' && !session && (
                 <div className="space-y-4">
                     <SetupIntro
-                        icon={<ExternalLink size={20} className="text-emerald-500" />}
+                        icon={<ExternalLink size={20} className="text-primary" />}
                         title="OpenAI OAuth"
                         description="Securely connect via the PKCE flow. No API key needed."
                     />
-                    <Button onClick={() => void startLogin()} disabled={starting} size="sm" className="gap-2 bg-emerald-600 hover:bg-emerald-700">
-                        <ExternalLink size={13} />
-                        Start Login
+                    <Button onClick={() => void startLogin()} disabled={starting} className="gap-2">
+                        {starting ? <Loader2 className="size-4 animate-spin" /> : <ExternalLink className="size-4" />}
+                        {starting ? 'Starting…' : 'Start login'}
                     </Button>
                 </div>
             )}

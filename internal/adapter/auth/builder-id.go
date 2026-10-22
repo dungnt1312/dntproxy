@@ -6,105 +6,47 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"regexp"
-	"strings"
-	"time"
-
-	"github.com/dungnt/dntproxy/internal/adapter/shared"
 )
 
-// KiroConfig holds Kiro OAuth constants.
+// Device-code login (RFC 8628) against AWS SSO OIDC.
+//
+// Kiro IDE itself signs in with authorization-code + PKCE (see kiro-idc-login.go).
+// Device code is kept as the fallback for browsers that cannot reach a loopback
+// listener on the dntproxy host (dntproxy on another machine, behind a proxy or
+// inside a container). Both flows yield the same clientId/clientSecret pair and
+// are refreshed through the same CreateToken(refresh_token) call.
+
+// KiroConfig holds the constants of the legacy device-code registration.
 var KiroConfig = struct {
-	SSOOIDCEndpoint   string
-	StartURL          string
-	ClientName        string
-	ClientType        string
-	Scopes            []string
-	GrantTypes        []string
-	IssuerURL         string
-	SocialAuthURL     string
-	SocialTokenURL    string
-	SocialRefreshURL  string
-	SocialRedirectURI string
+	StartURL   string
+	ClientName string
+	ClientType string
+	Scopes     []string
+	GrantTypes []string
+	IssuerURL  string
 }{
-	SSOOIDCEndpoint:   "https://oidc.us-east-1.amazonaws.com",
-	StartURL:          "https://view.awsapps.com/start",
-	ClientName:        "kiro-oauth-client",
-	ClientType:        "public",
-	Scopes:            []string{"codewhisperer:completions", "codewhisperer:analysis", "codewhisperer:conversations"},
-	GrantTypes:        []string{"urn:ietf:params:oauth:grant-type:device_code", "refresh_token"},
-	IssuerURL:         "https://identitycenter.amazonaws.com/ssoins-722374e8c3c8e6c6",
-	SocialAuthURL:     "https://prod.us-east-1.auth.desktop.kiro.dev",
-	SocialTokenURL:    "https://prod.us-east-1.auth.desktop.kiro.dev/oauth/token",
-	SocialRefreshURL:  "https://prod.us-east-1.auth.desktop.kiro.dev/refreshToken",
-	SocialRedirectURI: "kiro://kiro.kiroAgent/authenticate-success",
+	StartURL:   BuilderIDStartURL,
+	ClientName: "kiro-oauth-client",
+	ClientType: "public",
+	Scopes:     []string{"codewhisperer:completions", "codewhisperer:analysis", "codewhisperer:conversations"},
+	GrantTypes: []string{"urn:ietf:params:oauth:grant-type:device_code", "refresh_token"},
+	IssuerURL:  "https://identitycenter.amazonaws.com/ssoins-722374e8c3c8e6c6",
 }
 
-// RegisterClientResult holds the result of OIDC client registration.
+// RegisterClientResult holds the result of a device-code OIDC client registration.
 type RegisterClientResult struct {
 	ClientID              string `json:"clientId"`
 	ClientSecret          string `json:"clientSecret"`
 	ClientSecretExpiresAt int64  `json:"clientSecretExpiresAt"`
 }
 
-// DeviceAuthResult holds the result of device authorization.
-type DeviceAuthResult struct {
-	DeviceCode              string `json:"deviceCode"`
-	UserCode                string `json:"userCode"`
-	VerificationURI         string `json:"verificationUri"`
-	VerificationURIComplete string `json:"verificationUriComplete"`
-	ExpiresIn               int    `json:"expiresIn"`
-	Interval                int    `json:"interval"`
-}
-
-// TokenResult holds tokens from any auth flow.
-type TokenResult struct {
-	AccessToken  string `json:"accessToken"`
-	RefreshToken string `json:"refreshToken"`
-	ProfileArn   string `json:"profileArn,omitempty"`
-	ExpiresIn    int    `json:"expiresIn"`
-	TokenType    string `json:"tokenType,omitempty"`
-	// For Builder ID/IDC — persist for future refreshes
-	ClientID     string `json:"clientId,omitempty"`
-	ClientSecret string `json:"clientSecret,omitempty"`
-	Region       string `json:"region,omitempty"`
-	AuthMethod   string `json:"authMethod,omitempty"`
-}
-
-// PollResult holds the result of device code polling.
-type PollResult struct {
-	Success          bool
-	Tokens           *TokenResult
-	Error            string
-	ErrorDescription string
-	Pending          bool
-}
-
-var httpClient = shared.NewSafeHTTPClient(30 * time.Second)
-
-var awsRegionPattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$`)
-
-// NormalizeAWSRegion accepts empty (defaults to us-east-1) or a simple
-// AWS-style region label. Dots and slashes are rejected so the value cannot
-// change the OIDC hostname.
-func NormalizeAWSRegion(region string) (string, error) {
-	region = strings.ToLower(strings.TrimSpace(region))
-	if region == "" {
-		return "us-east-1", nil
-	}
-	if strings.ContainsAny(region, "./:@") || !awsRegionPattern.MatchString(region) {
-		return "", fmt.Errorf("invalid AWS region")
-	}
-	return region, nil
-}
-
-// RegisterClient registers an OIDC client with AWS SSO.
-func RegisterClient(region string) (*RegisterClientResult, error) {
+// registerDeviceClient registers an OIDC client for the device-code grant.
+func registerDeviceClient(region string) (*RegisterClientResult, error) {
 	normalized, err := NormalizeAWSRegion(region)
 	if err != nil {
 		return nil, err
 	}
-	endpoint := fmt.Sprintf("https://oidc.%s.amazonaws.com/client/register", normalized)
+	endpoint := oidcBaseURL(normalized) + "/client/register"
 
 	body := map[string]interface{}{
 		"clientName": KiroConfig.ClientName,
@@ -126,13 +68,18 @@ func RegisterClient(region string) (*RegisterClientResult, error) {
 	return &result, nil
 }
 
+// RegisterClient registers a device-code OIDC client with AWS SSO.
+func RegisterClient(region string) (*RegisterClientResult, error) {
+	return registerDeviceClient(region)
+}
+
 // StartDeviceAuthorization begins the device code flow.
 func StartDeviceAuthorization(clientID, clientSecret, startURL, region string) (*DeviceAuthResult, error) {
 	normalized, err := NormalizeAWSRegion(region)
 	if err != nil {
 		return nil, err
 	}
-	endpoint := fmt.Sprintf("https://oidc.%s.amazonaws.com/device_authorization", normalized)
+	endpoint := oidcBaseURL(normalized) + "/device_authorization"
 
 	body := map[string]interface{}{
 		"clientId":     clientID,
@@ -161,7 +108,7 @@ func PollDeviceToken(clientID, clientSecret, deviceCode, region string) (*PollRe
 	if err != nil {
 		return nil, err
 	}
-	endpoint := fmt.Sprintf("https://oidc.%s.amazonaws.com/token", normalized)
+	endpoint := oidcBaseURL(normalized) + "/token"
 
 	body := map[string]interface{}{
 		"clientId":     clientID,
@@ -208,85 +155,6 @@ func PollDeviceToken(clientID, clientSecret, deviceCode, region string) (*PollRe
 	}, nil
 }
 
-// RefreshTokenSSO refreshes a token using AWS SSO OIDC (Builder ID / IDC).
-func RefreshTokenSSO(refreshToken, clientID, clientSecret, region string) (*TokenResult, error) {
-	normalized, err := NormalizeAWSRegion(region)
-	if err != nil {
-		return nil, err
-	}
-	endpoint := fmt.Sprintf("https://oidc.%s.amazonaws.com/token", normalized)
-
-	body := map[string]interface{}{
-		"clientId":     clientID,
-		"clientSecret": clientSecret,
-		"refreshToken": refreshToken,
-		"grantType":    "refresh_token",
-	}
-
-	resp, err := postJSONStrict(endpoint, body, nil)
-	if err != nil {
-		return nil, fmt.Errorf("refresh SSO token: %w", err)
-	}
-
-	var data map[string]interface{}
-	if err := json.Unmarshal(resp, &data); err != nil {
-		return nil, fmt.Errorf("parse refresh response: %w", err)
-	}
-
-	accessToken, _ := data["accessToken"].(string)
-	newRefresh, _ := data["refreshToken"].(string)
-	if newRefresh == "" {
-		newRefresh = refreshToken
-	}
-	expiresIn := intFromJSON(data, "expiresIn")
-
-	return &TokenResult{
-		AccessToken:  accessToken,
-		RefreshToken: newRefresh,
-		ExpiresIn:    expiresIn,
-	}, nil
-}
-
-// RefreshTokenSocial refreshes a token using Kiro social auth endpoint.
-func RefreshTokenSocial(refreshToken string) (*TokenResult, error) {
-	body := map[string]interface{}{
-		"refreshToken": refreshToken,
-	}
-
-	headers := map[string]string{
-		"User-Agent": "KiroIDE-0.10.32-kiro-proxy",
-		"Accept":     "application/json, text/plain, */*",
-	}
-
-	resp, err := postJSONStrict(KiroConfig.SocialRefreshURL, body, headers)
-	if err != nil {
-		return nil, fmt.Errorf("refresh social token: %w", err)
-	}
-
-	var data map[string]interface{}
-	if err := json.Unmarshal(resp, &data); err != nil {
-		return nil, fmt.Errorf("parse social refresh response: %w", err)
-	}
-
-	accessToken, _ := data["accessToken"].(string)
-	newRefresh, _ := data["refreshToken"].(string)
-	if newRefresh == "" {
-		newRefresh = refreshToken
-	}
-	profileArn, _ := data["profileArn"].(string)
-	expiresIn := intFromJSON(data, "expiresIn")
-	if expiresIn == 0 {
-		expiresIn = 3600
-	}
-
-	return &TokenResult{
-		AccessToken:  accessToken,
-		RefreshToken: newRefresh,
-		ProfileArn:   profileArn,
-		ExpiresIn:    expiresIn,
-	}, nil
-}
-
 // postJSON sends a POST request with JSON body and returns the response body.
 // Returns error only on network/transport failures, NOT on HTTP 4xx/5xx.
 func postJSON(url string, body interface{}, extraHeaders map[string]string) ([]byte, int, error) {
@@ -328,16 +196,4 @@ func postJSONStrict(url string, body interface{}, extraHeaders map[string]string
 		return nil, fmt.Errorf("HTTP %d: %s", status, string(respBody))
 	}
 	return respBody, nil
-}
-
-func intFromJSON(data map[string]interface{}, key string) int {
-	if v, ok := data[key]; ok {
-		switch n := v.(type) {
-		case float64:
-			return int(n)
-		case int:
-			return n
-		}
-	}
-	return 0
 }

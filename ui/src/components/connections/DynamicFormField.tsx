@@ -15,18 +15,20 @@ type Props = {
 export function DynamicFormField({ field, value, onChange, className }: Props) {
   const id = useId();
   const isSecret = field.type === 'password' || field.secret;
-  const inputType = isSecret ? 'password' : field.type === 'number' ? 'number' : 'text';
+  const inputType = isSecret ? 'password' : field.type === 'number' ? 'number' : field.type === 'url' ? 'url' : 'text';
+  const helpId = field.helpText ? `${id}-help` : undefined;
+  const help = field.helpText ? <p id={helpId} className="text-xs text-muted-foreground">{field.helpText}</p> : null;
 
   const label = (
-    <label htmlFor={id} className="text-xs font-medium">
+    <label htmlFor={id} className="text-sm font-medium">
       {field.label}
-      {field.required ? <span className="text-destructive"> *</span> : null}
+      {field.required ? <span className="text-destructive" aria-hidden> *</span> : null}
     </label>
   );
 
   if (field.type === 'textarea') {
     return (
-      <div className="space-y-1">
+      <div className="space-y-1.5">
         {label}
         <Textarea
           id={id}
@@ -37,18 +39,21 @@ export function DynamicFormField({ field, value, onChange, className }: Props) {
           autoComplete="off"
           spellCheck={false}
           rows={3}
-          className={className ?? 'text-xs font-mono'}
+          required={field.required}
+          aria-describedby={helpId}
+          className={className ?? 'font-mono text-sm'}
         />
+        {help}
       </div>
     );
   }
 
   if (field.type === 'select') {
     return (
-      <div className="space-y-1">
+      <div className="space-y-1.5">
         {label}
         <Select value={value} onValueChange={onChange}>
-          <SelectTrigger id={id} className={className ?? 'w-full text-xs'}>
+          <SelectTrigger id={id} aria-describedby={helpId} className={className ?? 'w-full'}>
             <SelectValue placeholder={field.placeholder} />
           </SelectTrigger>
           <SelectContent>
@@ -57,13 +62,13 @@ export function DynamicFormField({ field, value, onChange, className }: Props) {
             ))}
           </SelectContent>
         </Select>
-        {field.helpText ? <p className="text-[11px] text-muted-foreground">{field.helpText}</p> : null}
+        {help}
       </div>
     );
   }
 
   return (
-    <div className="space-y-1">
+    <div className="space-y-1.5">
       {label}
       <Input
         id={id}
@@ -72,11 +77,13 @@ export function DynamicFormField({ field, value, onChange, className }: Props) {
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={field.placeholder}
-        autoComplete={isSecret ? 'off' : undefined}
+        autoComplete={isSecret ? 'new-password' : 'off'}
         spellCheck={isSecret || field.name === 'apiKey' ? false : undefined}
-        className={cn(className ?? (isSecret || field.name === 'apiKey' ? 'text-xs font-mono' : 'text-xs'))}
+        required={field.required}
+        aria-describedby={helpId}
+        className={cn(className ?? (isSecret || field.name === 'apiKey' || inputType === 'url' ? 'font-mono text-sm' : 'text-sm'))}
       />
-      {field.helpText ? <p className="text-[11px] text-muted-foreground">{field.helpText}</p> : null}
+      {help}
     </div>
   );
 }

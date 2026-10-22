@@ -1,8 +1,9 @@
-import { useMemo, useState } from 'react';
-import { ArrowRight, Loader2, Plus, X } from 'lucide-react';
+import { useId, useMemo, useState } from 'react';
+import { AlertTriangle, ArrowRight, CheckCircle2, Loader2, Plus, X, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '../../api';
-import { applyModelOps, type ModelOps } from './model-ops';
+import { applyModelOps, sameModels, type ModelOps } from './model-ops';
+import { errorMessage } from './add/helpers';
 import {
   Dialog,
   DialogContent,
@@ -13,44 +14,32 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { cn } from '@/lib/utils';
 import type { Connection } from '@/types/connections';
 
 /**
- * Model migration wizard — surgical updates (add / remove / rename) applied to
- * many connections at once. Unlike "apply exact list", each target keeps its
- * own list; only the declared operations touch it.
+ * Model migration — surgical add / remove / rename applied to many
+ * connections. Each target keeps its own list; only declared ops touch it,
+ * and only connections whose list actually changes are written.
  */
-
-interface MigrationPreviewLine {
-  conn: Connection;
-  before: string[];
-  after: string[];
-  conflicts: string[];
-}
 
 interface ModelMigrationModalProps {
   targets: Connection[];
-  /** Pre-seed the "remove" step, e.g. legacy ids found by the detector. */
-  prefillRemove?: string[];
-  busy?: boolean;
   onApplied?: () => void;
   onClose: () => void;
 }
 
-type TargetState = 'pending' | 'ok' | 'fail';
+type TargetResult = { ok: true } | { ok: false; error: string };
 
-export function ModelMigrationModal({ targets, prefillRemove = [], onApplied, onClose }: ModelMigrationModalProps) {
+const parseList = (text: string): string[] => text.split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
+
+export function ModelMigrationModal({ targets, onApplied, onClose }: ModelMigrationModalProps) {
+  const id = useId();
   const [addText, setAddText] = useState('');
-  const [removeText, setRemoveText] = useState(() => prefillRemove.join(', '));
+  const [removeText, setRemoveText] = useState('');
   const [renameRows, setRenameRows] = useState<Array<{ from: string; to: string }>>([]);
   const [applying, setApplying] = useState(false);
   const [progress, setProgress] = useState('');
-  const [results, setResults] = useState<Record<string, TargetState>>({});
-  const [doneIds, setDoneIds] = useState<Set<string>>(new Set());
-
-  const parseList = (text: string): string[] =>
-    text.split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
+  const [results, setResults] = useState<Record<string, TargetResult>>({});
 
   const ops: ModelOps = useMemo(
     () => ({
@@ -60,217 +49,174 @@ export function ModelMigrationModal({ targets, prefillRemove = [], onApplied, on
     }),
     [addText, removeText, renameRows],
   );
-
   const hasOps = ops.add.length + ops.remove.length + ops.renames.length > 0;
 
-  const preview = useMemo<MigrationPreviewLine[]>(() => {
+  const preview = useMemo(() => {
     if (!hasOps) return [];
+    const noop: ModelOps = { add: [], remove: [], renames: [] };
     return targets.map((conn) => {
-      const before = conn.supportedModels ?? [];
-      const { result, conflicts } = applyModelOps(before, ops, conn);
-      return { conn, before, after: result, conflicts };
+      // Normalise stored ids the same way the ops do, so prefixes never fake a diff.
+      const before = applyModelOps(conn.supportedModels ?? [], noop, conn).result;
+      const { result, conflicts } = applyModelOps(conn.supportedModels ?? [], ops, conn);
+      return { conn, before, after: result, conflicts, changed: !sameModels(before, result) };
     });
   }, [targets, ops, hasOps]);
 
-  const affectedCount = preview.filter((p) => JSON.stringify(p.before.slice().sort()) !== JSON.stringify(p.after.slice().sort())).length;
+  const changedLines = preview.filter((p) => p.changed);
   const conflictLines = preview.flatMap((p) => p.conflicts);
+  const doneCount = Object.keys(results).length;
+  const failCount = Object.values(results).filter((r) => !r.ok).length;
+  // After a run, "Apply" only retries what is still pending or failed.
+  const toApply = changedLines.filter((p) => !results[p.conn.id]?.ok);
 
   const handleApply = async () => {
     setApplying(true);
-    try {
-      let ok = 0;
-      let fails = 0;
-      for (let i = 0; i < targets.length; i++) {
-        const target = targets[i];
-        setProgress(`${i + 1}/${targets.length}`);
-        try {
-          const { result } = applyModelOps(target.supportedModels ?? [], ops, target);
-          await api.updateConnection(target.id, { supportedModels: result, setModels: true });
-          ok++;
-          setResults((prev) => ({ ...prev, [target.id]: 'ok' }));
-          setDoneIds((prev) => new Set(prev).add(target.id));
-        } catch {
-          fails++;
-          setResults((prev) => ({ ...prev, [target.id]: 'fail' }));
-        }
+    let ok = 0;
+    let fails = 0;
+    for (let i = 0; i < toApply.length; i++) {
+      const { conn, after } = toApply[i];
+      setProgress(`${i + 1}/${toApply.length}`);
+      try {
+        await api.updateConnection(conn.id, { supportedModels: after, setModels: true });
+        ok++;
+        setResults((prev) => ({ ...prev, [conn.id]: { ok: true } }));
+      } catch (e: unknown) {
+        fails++;
+        setResults((prev) => ({ ...prev, [conn.id]: { ok: false, error: errorMessage(e, 'Update failed') } }));
       }
-      if (fails > 0) toast.error(`Migration partially applied: ${ok}/${targets.length}. Review the list and retry.`);
-      else toast.success(`Migration applied to ${ok} connection(s)`);
-      onApplied?.();
-    } finally {
-      setApplying(false);
     }
+    setApplying(false);
+    setProgress('');
+    if (fails > 0) toast.error(`Migration: ${ok}/${toApply.length} applied, ${fails} failed`);
+    else toast.success(`Migration applied to ${ok} connection${ok === 1 ? '' : 's'}`);
+    onApplied?.();
   };
-
-  const failedTargets = targets.filter((t) => results[t.id] === 'fail');
-  const pendingOk = targets.filter((t) => results[t.id] === 'ok').length;
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open && !applying) onClose(); }}>
-      <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col">
+      <DialogContent className="flex max-h-[90vh] max-w-2xl flex-col">
         <DialogHeader>
-          <div>
-            <DialogTitle className="text-lg">Migrate models — {targets.length} connection</DialogTitle>
-            <DialogDescription className="text-xs mt-1">
-              Add / remove / rename models on each connection without overwriting its whole list.
-            </DialogDescription>
-          </div>
+          <DialogTitle className="text-lg">
+            Add / remove / rename models — {targets.length} connection{targets.length === 1 ? '' : 's'}
+          </DialogTitle>
+          <DialogDescription>Change individual models on each connection without replacing its whole list.</DialogDescription>
         </DialogHeader>
 
-        <div className="flex-1 space-y-4 overflow-y-auto py-2">
-          {/* Step 1 — operations */}
-          <section className="space-y-2">
-            <h3 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Operations</h3>
-
-            <div className="grid gap-2 sm:grid-cols-2">
-              <label className="space-y-1">
-                <span className="text-xs font-medium text-emerald-600">Add models</span>
-                <Input
-                  value={addText}
-                  onChange={(e) => setAddText(e.target.value)}
-                  disabled={applying}
-                  placeholder="claude-sonnet-4-5, haiku-4-5"
-                  className="h-8 font-mono text-xs"
-                />
-              </label>
-              <label className="space-y-1">
-                <span className="text-xs font-medium text-destructive">Remove models</span>
-                <Input
-                  value={removeText}
-                  onChange={(e) => setRemoveText(e.target.value)}
-                  disabled={applying}
-                  placeholder="claude-3-sonnet"
-                  className="h-8 font-mono text-xs"
-                />
-              </label>
+        <div className="flex-1 space-y-5 overflow-y-auto py-2">
+          <section className="space-y-3">
+            <h3 className="text-sm font-semibold">Operations</h3>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <label htmlFor={`${id}-add`} className="text-sm font-medium">Add models</label>
+                <Input id={`${id}-add`} value={addText} onChange={(e) => setAddText(e.target.value)} disabled={applying} placeholder="claude-sonnet-4-5, haiku-4-5" className="font-mono text-sm" />
+              </div>
+              <div className="space-y-1.5">
+                <label htmlFor={`${id}-remove`} className="text-sm font-medium">Remove models</label>
+                <Input id={`${id}-remove`} value={removeText} onChange={(e) => setRemoveText(e.target.value)} disabled={applying} placeholder="claude-3-sonnet" className="font-mono text-sm" />
+              </div>
             </div>
+            <p className="text-xs text-muted-foreground">Separate multiple models with commas. Provider prefixes are optional.</p>
 
-            {/* Rename rows */}
-            <div className="space-y-1.5">
-              {renameRows.map((row, idx) => (
-                <div key={idx} className="flex items-center gap-1.5">
-                  <Input
-                    value={row.from}
-                    onChange={(e) => setRenameRows((prev) => prev.map((r, i) => (i === idx ? { ...r, from: e.target.value } : r)))}
-                    disabled={applying}
-                    placeholder="old model"
-                    className="h-8 flex-1 font-mono text-xs"
-                  />
-                  <ArrowRight size={13} className="shrink-0 text-muted-foreground" />
-                  <Input
-                    value={row.to}
-                    onChange={(e) => setRenameRows((prev) => prev.map((r, i) => (i === idx ? { ...r, to: e.target.value } : r)))}
-                    disabled={applying}
-                    placeholder="new model"
-                    className="h-8 flex-1 font-mono text-xs"
-                  />
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 shrink-0"
-                    onClick={() => setRenameRows((prev) => prev.filter((_, i) => i !== idx))}
-                    aria-label="Remove rename row"
-                  >
-                    <X size={13} />
-                  </Button>
-                </div>
-              ))}
-              <button
-                type="button"
-                onClick={() => setRenameRows((prev) => [...prev, { from: '', to: '' }])}
-                disabled={applying}
-                className="flex items-center gap-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
-              >
-                <Plus size={12} /> Add rename pair
-              </button>
-            </div>
+            {renameRows.length > 0 && (
+              <fieldset className="space-y-2">
+                <legend className="mb-1 text-sm font-medium">Rename</legend>
+                {renameRows.map((row, idx) => (
+                  <div key={idx} className="flex items-center gap-2">
+                    <Input
+                      aria-label={`Rename ${idx + 1}: old model`}
+                      value={row.from}
+                      onChange={(e) => setRenameRows((prev) => prev.map((r, i) => (i === idx ? { ...r, from: e.target.value } : r)))}
+                      disabled={applying}
+                      placeholder="old model"
+                      className="flex-1 font-mono text-sm"
+                    />
+                    <ArrowRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                    <Input
+                      aria-label={`Rename ${idx + 1}: new model`}
+                      value={row.to}
+                      onChange={(e) => setRenameRows((prev) => prev.map((r, i) => (i === idx ? { ...r, to: e.target.value } : r)))}
+                      disabled={applying}
+                      placeholder="new model"
+                      className="flex-1 font-mono text-sm"
+                    />
+                    <Button variant="ghost" size="icon" className="size-9 shrink-0" onClick={() => setRenameRows((prev) => prev.filter((_, i) => i !== idx))} disabled={applying} aria-label={`Remove rename ${idx + 1}`}>
+                      <X className="size-4" />
+                    </Button>
+                  </div>
+                ))}
+              </fieldset>
+            )}
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setRenameRows((prev) => [...prev, { from: '', to: '' }])} disabled={applying}>
+              <Plus className="size-4" /> Add rename
+            </Button>
           </section>
 
-          {/* Conflicts */}
           {conflictLines.length > 0 && (
-            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-2.5 text-xs text-amber-700 dark:text-amber-300">
-              {conflictLines.slice(0, 3).map((c, i) => (
-                <p key={i}>⚠ {c}</p>
+            <div role="status" className="space-y-1 rounded-lg border border-warning/30 bg-warning/10 p-3 text-sm">
+              {conflictLines.slice(0, 4).map((c, i) => (
+                <p key={i} className="flex items-start gap-2">
+                  <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" /> {c}
+                </p>
               ))}
+              {conflictLines.length > 4 && <p className="pl-6 text-muted-foreground">+{conflictLines.length - 4} more</p>}
             </div>
           )}
 
-          {/* Step 2 — dry-run preview */}
-          {hasOps && (
+          {hasOps ? (
             <section className="space-y-2">
               <div className="flex items-center justify-between">
-                <h3 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Preview (dry-run)</h3>
-                <span className="text-xs tabular-nums text-muted-foreground">
-                  {affectedCount}/{targets.length} will change
+                <h3 className="text-sm font-semibold">Preview</h3>
+                <span className="text-sm tabular-nums text-muted-foreground">
+                  {changedLines.length}/{targets.length} will change
                 </span>
               </div>
-              <div className="max-h-56 space-y-1 overflow-y-auto rounded-lg border bg-muted/20 p-2">
-                {preview.slice(0, 50).map((line) => {
-                  const changed =
-                    JSON.stringify(line.before.slice().sort()) !== JSON.stringify(line.after.slice().sort());
-                  const state = results[line.conn.id];
+              <ul className="max-h-64 space-y-1 overflow-y-auto rounded-lg border bg-muted/20 p-2">
+                {preview.map((line) => {
+                  const r = results[line.conn.id];
+                  const added = line.after.filter((m) => !line.before.includes(m));
+                  const removed = line.before.filter((m) => !line.after.includes(m));
                   return (
-                    <div key={line.conn.id} className="rounded-md bg-background px-2 py-1.5 text-xs">
+                    <li key={line.conn.id} className="rounded-md bg-background px-3 py-2 text-sm">
                       <div className="flex items-center gap-2">
                         <span className="truncate font-medium">{line.conn.name}</span>
-                        {state === 'ok' && <span className="ml-auto shrink-0 text-[10px] text-emerald-600">✓ applied</span>}
-                        {state === 'fail' && <span className="ml-auto shrink-0 text-[10px] text-destructive">✗ failed</span>}
-                        {!changed && state !== 'ok' && (
-                          <span className="ml-auto shrink-0 text-[10px] text-muted-foreground/50">unchanged</span>
-                        )}
+                        <span className="ml-auto shrink-0 text-xs">
+                          {r?.ok && <span className="inline-flex items-center gap-1 text-success"><CheckCircle2 className="size-3.5" /> Applied</span>}
+                          {r && !r.ok && <span className="inline-flex items-center gap-1 text-destructive" title={r.error}><XCircle className="size-3.5" /> Failed</span>}
+                          {!r && !line.changed && <span className="text-muted-foreground">Unchanged</span>}
+                        </span>
                       </div>
-                      {changed && (
-                        <div className="mt-0.5 truncate font-mono text-[10px] leading-relaxed">
-                          {line.after
-                            .filter((m) => !line.before.includes(m))
-                            .slice(0, 4)
-                            .map((m) => (
-                              <span key={m} className="mr-2 text-emerald-600">+{m}</span>
-                            ))}
-                          {line.before
-                            .filter((m) => !line.after.includes(m))
-                            .slice(0, 4)
-                            .map((m) => (
-                              <span key={m} className="mr-2 line-through text-destructive/70">{m}</span>
-                            ))}
+                      {line.changed && (
+                        <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-xs">
+                          {added.map((m) => <span key={`+${m}`} className="text-success">+ {m}</span>)}
+                          {removed.map((m) => <span key={`-${m}`} className="text-destructive line-through">{m}</span>)}
                         </div>
                       )}
-                    </div>
+                      {r && !r.ok && <p className="mt-1 text-xs text-destructive">{r.error}</p>}
+                    </li>
                   );
                 })}
-                {preview.length > 50 && (
-                  <p className="px-2 pt-1 text-center text-[11px] text-muted-foreground">…and {preview.length - 50} more connection(s)</p>
-                )}
-              </div>
+              </ul>
             </section>
-          )}
-
-          {!hasOps && (
-            <p className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
-              Declare at least one operation to preview results.
-            </p>
+          ) : (
+            <p className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">Add at least one operation to see a preview.</p>
           )}
         </div>
 
-        <DialogFooter className="items-center justify-between sm:justify-between">
-          <span className={cn('text-xs tabular-nums text-muted-foreground', applying && 'inline-flex items-center gap-1.5')}>
+        <DialogFooter className="items-center sm:justify-between">
+          <span className="text-sm tabular-nums text-muted-foreground" aria-live="polite">
             {applying ? (
-              <>
-                <Loader2 size={12} className="animate-spin" /> Applying {progress}
-              </>
-            ) : doneIds.size > 0 ? (
-              `${pendingOk}/${targets.length} succeeded${failedTargets.length > 0 ? ` · ${failedTargets.length} failed` : ''}`
-            ) : (
-              ''
-            )}
+              <span className="inline-flex items-center gap-1.5"><Loader2 className="size-4 animate-spin" /> Applying {progress}</span>
+            ) : doneCount > 0 ? (
+              `${doneCount - failCount} applied${failCount > 0 ? ` · ${failCount} failed` : ''}`
+            ) : null}
           </span>
           <div className="flex gap-2">
             <Button variant="outline" onClick={onClose} disabled={applying}>
-              {doneIds.size > 0 ? 'Close' : 'Cancel'}
+              {doneCount > 0 ? 'Close' : 'Cancel'}
             </Button>
-            <Button onClick={handleApply} disabled={applying || !hasOps || targets.length === 0} className="gap-2">
-              {applying && <Loader2 size={14} className="animate-spin" />}
-              Apply to {affectedCount} connection(s)
+            <Button onClick={handleApply} disabled={applying || toApply.length === 0} className="gap-2">
+              {applying && <Loader2 className="size-4 animate-spin" />}
+              {failCount > 0 ? `Retry ${toApply.length} failed` : `Apply to ${toApply.length} connection${toApply.length === 1 ? '' : 's'}`}
             </Button>
           </div>
         </DialogFooter>

@@ -50,6 +50,7 @@ func ValidateAndImportToken(refreshToken string, clientID, clientSecret, region,
 			result.AuthMethod = normalizedMethod
 			result.ClientID = regResult.ClientID
 			result.ClientSecret = regResult.ClientSecret
+			result.ClientSecretExpiresAt = unixToRFC3339(regResult.ClientSecretExpiresAt)
 			result.Region = region
 			return result, nil
 		}

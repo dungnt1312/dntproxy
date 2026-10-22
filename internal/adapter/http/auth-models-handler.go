@@ -24,6 +24,11 @@ func apiFetchConnectionModels(store port.CredentialStore) gin.HandlerFunc {
 			return
 		}
 
+		if conn.Provider == "kiro" {
+			fetchKiroConnectionModels(c, store, conn)
+			return
+		}
+
 		if conn.Provider != "openai" && conn.Provider != "openai-compatible" {
 			// Fallback: return default models from provider config
 			cfg := domain.GetProviderConfig(conn.Provider)

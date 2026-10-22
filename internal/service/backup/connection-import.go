@@ -190,7 +190,12 @@ func convert9RouterConnection(target string, source domain.ProviderConnection) (
 			return domain.ProviderConnection{}, fmt.Errorf("kiro requires oauth or apikey, got %s", source.AuthType)
 		}
 		providerData := map[string]interface{}{}
-		for _, key := range []string{"authMethod", "clientId", "clientSecret", "provider", "region", "profileArn"} {
+		for _, key := range []string{
+			"authMethod", "clientId", "clientSecret", "provider", "region", "profileArn",
+			// Kiro login metadata: client registration expiry and the start URL it
+			// was registered for (see adapter/auth KiroCredential.ProviderData).
+			"clientSecretExpiresAt", "startUrl", "clientIdHash", "kiroProvider",
+		} {
 			if value, ok := source.ProviderSpecificData[key]; ok {
 				providerData[key] = value
 			}

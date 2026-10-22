@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, ArrowLeft, Check, Loader2 } from 'lucide-react';
+import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { api } from '@/api';
 import { ProviderLogoIcon } from './helpers';
@@ -50,6 +51,8 @@ export function AddConnectionModal({ open, onOpenChange, initialProvider, onCrea
     const [loading, setLoading] = useState(false);
     const [providerCounts, setProviderCounts] = useState<Record<string, number>>({});
     const accountNameRef = useRef('');
+    // Bumped per new setup so the name field starts empty for each connection.
+    const [setupRound, setSetupRound] = useState(0);
 
     // Reset state when the dialog opens — React's canonical "adjust state on
     // prop change during render" pattern instead of an effect.
@@ -125,8 +128,9 @@ export function AddConnectionModal({ open, onOpenChange, initialProvider, onCrea
         try {
             await api.updateConnection(incoming.id, { name: wanted });
             return { ...incoming, name: wanted };
-        } catch {
-            // Renaming is cosmetic — never block onboarding for it.
+        } catch (err: unknown) {
+            // Renaming is cosmetic — never block onboarding, but say so.
+            toast.warning(`Connected, but couldn't rename to “${wanted}”`, { description: errorMessage(err, 'Rename failed') });
             return incoming;
         }
     }, []);
@@ -170,10 +174,12 @@ export function AddConnectionModal({ open, onOpenChange, initialProvider, onCrea
                     <button
                         type="button"
                         onClick={handleBack}
-                        aria-label={step === 1 ? 'Close' : 'Back'}
+                        aria-label="Back"
+                        aria-hidden={step === 1}
+                        tabIndex={step === 1 ? -1 : undefined}
                         disabled={loading}
                         className={cn(
-                            'flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors',
+                            'flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors',
                             'hover:bg-muted hover:text-foreground',
                             step === 1 && 'invisible', // keeps the logo aligned across steps
                         )}
@@ -189,7 +195,7 @@ export function AddConnectionModal({ open, onOpenChange, initialProvider, onCrea
                                 <DialogTitle className="truncate text-sm font-semibold leading-tight">
                                     Connect {selected.name}
                                 </DialogTitle>
-                                <DialogDescription className="truncate text-[11px] leading-tight">
+                                <DialogDescription className="truncate text-xs leading-tight">
                                     {authFlowOptions([effectiveMethod])[0]?.label ?? effectiveMethod}
                                 </DialogDescription>
                             </div>
@@ -197,7 +203,7 @@ export function AddConnectionModal({ open, onOpenChange, initialProvider, onCrea
                     ) : (
                         <div className="min-w-0">
                             <DialogTitle className="truncate text-sm font-semibold leading-tight">Add connection</DialogTitle>
-                            <DialogDescription className="truncate text-[11px] leading-tight">
+                            <DialogDescription className="truncate text-xs leading-tight">
                                 Pick an account type and how to connect it.
                             </DialogDescription>
                         </div>
@@ -215,21 +221,21 @@ export function AddConnectionModal({ open, onOpenChange, initialProvider, onCrea
                                 <span
                                     aria-current={state === 'active' ? 'step' : undefined}
                                     className={cn(
-                                        'flex items-center gap-1.5 text-[11px] font-medium',
-                                        state === 'done' && 'text-emerald-600',
+                                        'flex items-center gap-1.5 text-xs font-medium',
+                                        state === 'done' && 'text-success',
                                         state === 'active' && 'text-foreground',
-                                        state === 'todo' && 'text-muted-foreground/50',
+                                        state === 'todo' && 'text-muted-foreground',
                                     )}
                                 >
                                     <span
                                         className={cn(
-                                            'flex h-4 w-4 items-center justify-center rounded-full border text-[9px] tabular-nums',
-                                            state === 'done' && 'border-emerald-500/40 bg-emerald-500/10 text-emerald-600',
+                                            'flex size-5 items-center justify-center rounded-full border text-xs tabular-nums',
+                                            state === 'done' && 'border-success/40 bg-success/10 text-success',
                                             state === 'active' && 'border-primary bg-primary text-primary-foreground',
                                             state === 'todo' && 'border-border',
                                         )}
                                     >
-                                        {state === 'done' ? <Check size={9} /> : n}
+                                        {state === 'done' ? <Check size={11} /> : n}
                                     </span>
                                     {label}
                                 </span>
@@ -241,8 +247,8 @@ export function AddConnectionModal({ open, onOpenChange, initialProvider, onCrea
                 {/* ── Body (scrollable, centered column) ────────────────────── */}
                 <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
                     {catalogError && !selected && (
-                        <div role="status" className="mx-auto mb-4 flex max-w-sm items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-muted-foreground">
-                            <AlertTriangle size={13} className="shrink-0 text-amber-500" />
+                        <div role="status" className="mx-auto mb-4 flex max-w-sm items-center gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-muted-foreground">
+                            <AlertTriangle size={14} className="shrink-0 text-warning" />
                             <span className="flex-1">Couldn't refresh the provider catalog — showing saved providers.</span>
                             <Button size="sm" variant="outline" className="h-6" onClick={() => void reload()}>
                                 Retry
@@ -255,6 +261,26 @@ export function AddConnectionModal({ open, onOpenChange, initialProvider, onCrea
                             <Loader2 className="h-5 w-5 animate-spin text-primary" />
                             Loading providers…
                         </Centered>
+                    ) : result && selected ? (
+                        <div className="mx-auto w-full max-w-sm">
+                            <ConnectionResultPanel
+                                providerName={selected.name}
+                                providerId={selected.id}
+                                result={result}
+                                onAddAnother={() => {
+                                    accountNameRef.current = '';
+                                    setSetupRound((n) => n + 1);
+                                    setResult(null);
+                                    // Refresh counts so the suggested name moves on (kr-02 → kr-03).
+                                    void api.getConnections().then((conns: Connection[]) => {
+                                        const counts: Record<string, number> = {};
+                                        for (const c of conns) counts[c.provider] = (counts[c.provider] ?? 0) + 1;
+                                        setProviderCounts(counts);
+                                    }).catch(() => {});
+                                }}
+                                onDone={() => onOpenChange(false)}
+                            />
+                        </div>
                     ) : !selected ? (
                         <ProviderPicker
                             dense
@@ -288,7 +314,7 @@ export function AddConnectionModal({ open, onOpenChange, initialProvider, onCrea
                                                     title={flow.description}
                                                     aria-pressed={active}
                                                     className={cn(
-                                                        'inline-flex h-8 cursor-pointer select-none items-center gap-1.5 rounded-lg border px-3 text-xs font-medium transition-colors',
+                                                        'inline-flex h-9 cursor-pointer select-none items-center gap-1.5 rounded-lg border px-3 text-sm font-medium transition-colors',
                                                         active
                                                             ? 'border-primary/40 bg-primary/10 text-primary ring-1 ring-primary/15'
                                                             : 'border-border bg-background text-muted-foreground hover:border-primary/25 hover:text-foreground',
@@ -304,7 +330,11 @@ export function AddConnectionModal({ open, onOpenChange, initialProvider, onCrea
                             )}
 
                             {/* Common account details */}
-                            <AccountNameSection provider={selected} nameRef={accountNameRef} />
+                            <AccountNameSection
+                                key={`${selected.id}-${setupRound}`}
+                                nameRef={accountNameRef}
+                                suggestion={`${getModelProviderId(selected.id) || selected.id}-${String((providerCounts[selected.id] ?? 0) + 1).padStart(2, '0')}`}
+                            />
 
                             {/* Per-provider form bodies */}
                             <div className="w-full border-t pt-5">
@@ -320,23 +350,11 @@ export function AddConnectionModal({ open, onOpenChange, initialProvider, onCrea
                             </div>
                         </div>
                     )}
-
-                    {result && selected && (
-                        <div className="mx-auto w-full max-w-sm">
-                            <ConnectionResultPanel
-                                providerName={selected.name}
-                                providerId={selected.id}
-                                result={result}
-                                onAddAnother={() => setResult(null)}
-                                onDone={() => onOpenChange(false)}
-                            />
-                        </div>
-                    )}
                 </div>
 
                 {/* ── Error strip ──────────────────────────────────────────── */}
                 {error && (
-                    <div role="alert" className="flex shrink-0 items-start gap-2 border-t border-destructive/20 bg-destructive/5 px-4 py-2.5 text-xs text-destructive">
+                    <div role="alert" className="flex shrink-0 items-start gap-2 border-t border-destructive/20 bg-destructive/5 px-4 py-2.5 text-sm text-destructive">
                         <AlertTriangle size={14} className="mt-px shrink-0" />
                         <span className="min-w-0 break-words">{error}</span>
                         <button
@@ -360,46 +378,18 @@ function Centered({ children }: { children: React.ReactNode }) {
     return <div className="flex h-full flex-col items-center justify-center gap-3 py-14 text-center text-sm text-muted-foreground">{children}</div>;
 }
 
-function SectionLabel({ children }: { children: React.ReactNode }) {
-    return <span className="block text-center text-[10px] font-bold uppercase tracking-wider text-muted-foreground">{children}</span>;
+function SectionLabel({ children, htmlFor }: { children: React.ReactNode; htmlFor?: string }) {
+    const Tag = htmlFor ? 'label' : 'span';
+    return (
+        <Tag htmlFor={htmlFor} className="block text-center text-sm font-medium text-muted-foreground">
+            {children}
+        </Tag>
+    );
 }
 
-async function suggestAccountName(provider: ProviderConfigMeta, counts: Record<string, number>): Promise<string> {
-    let prefix = provider.id;
-    try {
-        prefix = getModelProviderId(provider.id) || provider.id;
-    } catch {
-        // fall back to raw id
-    }
-    return `${prefix}-${String((counts[provider.id] ?? 0) + 1).padStart(2, '0')}`;
-}
-
-/** Owns its own input state; syncs the latest value up through nameRef. */
-function AccountNameSection({
-    provider,
-    nameRef,
-}: {
-    provider: ProviderConfigMeta;
-    nameRef: React.RefObject<string>;
-}) {
+/** Owns its own input state; syncs the latest value up through nameRef. Remounted per provider. */
+function AccountNameSection({ nameRef, suggestion }: { nameRef: React.RefObject<string>; suggestion: string }) {
     const [value, setValue] = useState('');
-    const [suggestion, setSuggestion] = useState('');
-
-    useEffect(() => {
-        let alive = true;
-        void api
-            .getConnections()
-            .then((conns: Connection[]) => {
-                if (!alive) return;
-                const counts: Record<string, number> = {};
-                for (const c of conns) counts[c.provider] = (counts[c.provider] ?? 0) + 1;
-                void suggestAccountName(provider, counts).then((s) => alive && setSuggestion(s));
-            })
-            .catch(() => {});
-        return () => {
-            alive = false;
-        };
-    }, [provider]);
 
     useEffect(() => {
         nameRef.current = value;
@@ -407,14 +397,15 @@ function AccountNameSection({
 
     return (
         <section className="w-full space-y-1.5">
-            <SectionLabel>Connection name</SectionLabel>
+            <SectionLabel htmlFor="add-connection-name">Connection name (optional)</SectionLabel>
             <Input
+                id="add-connection-name"
                 autoComplete="off"
                 data-1p-ignore
                 value={value}
                 onChange={(event) => setValue(event.target.value)}
-                placeholder={`${suggestion || `${provider.id}-01`} (optional)`}
-                className="mx-auto block h-8 max-w-[260px] text-center text-sm"
+                placeholder={suggestion}
+                className="mx-auto block h-9 max-w-[280px] text-center"
             />
         </section>
     );
@@ -457,7 +448,7 @@ function SetupForm({
                 <QwenConnectionForm provider={provider} mode={method} loading={loading} onCreate={onCreate} onSuccess={onSuccess} onError={onError} onBusyChange={noopBusy} />
             )}
             {provider.id === 'commandcode' && (
-                <CommandCodeConnectionForm loading={loading} onCreate={onCreate} onSuccess={(message) => onSuccess(message)} onError={onError} onBusyChange={noopBusy} />
+                <CommandCodeConnectionForm loading={loading} onCreate={onCreate} onSuccess={onSuccess} onError={onError} onBusyChange={noopBusy} />
             )}
             {usesGenericApiKeyForm(provider) && (
                 <ApiKeyConnectionForm key={provider.id} provider={provider} loading={loading} onSubmit={onCreate} />

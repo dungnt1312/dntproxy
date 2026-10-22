@@ -82,22 +82,6 @@ export const api = {
     request('/connections', { method: 'POST', body: JSON.stringify(data) }),
   importConnection: (data: { refreshToken: string; clientId?: string; clientSecret?: string; region?: string; authMethod?: string }) =>
     request('/connections/import', { method: 'POST', body: JSON.stringify(data) }),
-  addOpenAIConnection: (data: { name?: string; apiKey: string; supportedModels?: string[] }) =>
-    request('/connections/add-openai', { method: 'POST', body: JSON.stringify(data) }),
-  addCustomConnection: (data: { name?: string; apiKey?: string; baseUrl: string; routePrefix?: string; modelPrefix?: string; supportedModels?: string[] }) =>
-    request('/connections/add-custom', { method: 'POST', body: JSON.stringify(data) }),
-  addGLMConnection: (data: { name?: string; apiKey: string; baseUrl?: string; supportedModels?: string[] }) =>
-    request('/connections/add-glm', { method: 'POST', body: JSON.stringify(data) }),
-  addMiniMaxConnection: (data: { name?: string; apiKey: string; baseUrl?: string; supportedModels?: string[] }) =>
-    request('/connections/add-minimax', { method: 'POST', body: JSON.stringify(data) }),
-  addQwenConnection: (data: { name?: string; apiKey: string; baseUrl?: string; supportedModels?: string[] }) =>
-    request('/connections/add-qwen', { method: 'POST', body: JSON.stringify(data) }),
-  addAnthropicConnection: (data: { name?: string; apiKey: string; baseUrl?: string; supportedModels?: string[] }) =>
-    request('/connections/add-anthropic', { method: 'POST', body: JSON.stringify(data) }),
-  addGeminiConnection: (data: { name?: string; apiKey: string; baseUrl?: string; supportedModels?: string[] }) =>
-    request('/connections/add-gemini', { method: 'POST', body: JSON.stringify(data) }),
-  addClineConnection: (data: { name?: string; apiKey: string; baseUrl?: string; supportedModels?: string[] }) =>
-    request('/connections/add-cline', { method: 'POST', body: JSON.stringify(data) }),
   deleteConnection: (id: string) => request(`/connections/${id}`, { method: 'DELETE' }),
   testConnection: (id: string) => request(`/connections/${id}/test`, { method: 'POST' }),
   updateConnection: (id: string, data: Record<string, unknown>) =>
@@ -118,6 +102,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ ...data, mode }),
     }) as Promise<ConnectionImportResult>,
+  exportConnections: (connectionIds: string[]) =>
+    request('/connections/export-multiple', {
+      method: 'POST',
+      body: JSON.stringify({ connectionIds }),
+    }) as Promise<unknown>,
 
   // Kiro Auth Flows
   startBuilderID: () => request('/auth/kiro/start-builderid', { method: 'POST' }),

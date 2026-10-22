@@ -1,8 +1,9 @@
-import type { ReactNode } from 'react';
-import { AlertTriangle, Copy, ExternalLink, Loader2 } from 'lucide-react';
+import { useId, type ReactNode } from 'react';
+import { Copy, ExternalLink, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { copyText } from './helpers';
 
 type Props = {
     title: string;
@@ -21,6 +22,7 @@ type Props = {
     children?: ReactNode;
 };
 
+/** OAuth sign-in step: open/copy the sign-in URL, then paste the callback to finish. */
 export function OAuthWaitingPanel({
     title,
     authUrl,
@@ -34,39 +36,38 @@ export function OAuthWaitingPanel({
     onSubmit,
     onCancel,
     loading = false,
-    submitLabel = 'Submit',
+    submitLabel = 'Finish',
     children,
 }: Props) {
+    const id = useId();
     return (
-        <div className="space-y-4 rounded-lg border bg-muted/40 p-5 text-left">
-            <div className="space-y-2 text-center">
-                {waiting && <Loader2 size={24} className="mx-auto mb-1 animate-spin text-primary" />}
-                <p className="text-sm font-medium">{title}</p>
+        <div className="space-y-4 rounded-xl border bg-muted/40 p-5 text-left">
+            <div className="space-y-3 text-center">
+                <p className="flex items-center justify-center gap-2 text-sm font-medium" aria-live="polite">
+                    {waiting && <Loader2 className="size-4 animate-spin text-muted-foreground" />}
+                    {title}
+                </p>
                 <div className="flex flex-wrap items-center justify-center gap-2">
-                    <Button asChild size="sm" className="gap-2">
+                    <Button asChild className="gap-2">
                         <a href={authUrl} target="_blank" rel="noopener noreferrer">
-                            <ExternalLink size={13} /> Open sign-in page
+                            <ExternalLink className="size-4" /> Open sign-in page
                         </a>
                     </Button>
                     <Button
                         type="button"
                         variant="outline"
-                        size="sm"
                         className="gap-1.5"
-                        onClick={() => {
-                            void navigator.clipboard?.writeText(authUrl);
-                            toast.success('Sign-in URL copied');
+                        onClick={async () => {
+                            if (await copyText(authUrl)) toast.success('Sign-in URL copied');
+                            else toast.error('Could not copy the URL');
                         }}
-                        title="Copy URL (paste into another browser if needed)"
+                        title="Copy URL to open in another browser"
                     >
-                        <Copy size={13} /> Copy URL
+                        <Copy className="size-4" /> Copy URL
                     </Button>
                 </div>
-                <p className="break-all text-[10px] text-muted-foreground/70" title={authUrl}>
-                    {authUrl.length > 90 ? `${authUrl.slice(0, 90)}…` : authUrl}
-                </p>
                 {expectedRedirect && (
-                    <p className="break-all text-[10px] text-muted-foreground">
+                    <p className="break-all text-xs text-muted-foreground">
                         Expected redirect: <code className="rounded bg-muted px-1">{expectedRedirect}</code>
                     </p>
                 )}
@@ -74,34 +75,40 @@ export function OAuthWaitingPanel({
 
             {children}
 
-            <div className="space-y-1">
-                <label htmlFor="oauth-callback-url" className="flex items-center gap-1 text-xs font-medium">
-                    {callbackHint && <AlertTriangle size={10} className="text-muted-foreground" />}
+            <form
+                className="space-y-1.5"
+                onSubmit={(e) => {
+                    e.preventDefault();
+                    if (!loading && callbackValue.trim()) onSubmit();
+                }}
+            >
+                <label htmlFor={`${id}-cb`} className="text-sm font-medium">
                     {callbackLabel}
                 </label>
-                {callbackHint && <p className="text-[10px] text-muted-foreground">{callbackHint}</p>}
+                {callbackHint && (
+                    <p id={`${id}-hint`} className="text-xs text-muted-foreground">
+                        {callbackHint}
+                    </p>
+                )}
                 <div className="flex gap-2">
                     <Input
-                        id="oauth-callback-url"
+                        id={`${id}-cb`}
                         autoComplete="off"
                         spellCheck={false}
                         value={callbackValue}
                         onChange={(event) => onCallbackChange(event.target.value)}
                         placeholder={callbackPlaceholder}
-                        className="font-mono text-xs"
+                        aria-describedby={callbackHint ? `${id}-hint` : undefined}
+                        className="font-mono text-sm"
                     />
-                    <Button
-                        type="button"
-                        onClick={onSubmit}
-                        disabled={loading || !callbackValue.trim()}
-                        size="sm"
-                    >
-                        {loading ? <Loader2 size={12} className="animate-spin" /> : submitLabel}
+                    <Button type="submit" disabled={loading || !callbackValue.trim()} className="gap-1.5">
+                        {loading && <Loader2 className="size-4 animate-spin" />}
+                        {submitLabel}
                     </Button>
                 </div>
-            </div>
+            </form>
 
-            <Button type="button" variant="outline" size="sm" className="w-full" onClick={onCancel}>
+            <Button type="button" variant="outline" className="w-full" onClick={onCancel}>
                 Cancel
             </Button>
         </div>

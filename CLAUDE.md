@@ -118,11 +118,16 @@ OpenAI request → model resolve → combo expand → account select →
 - JSON DB with file locking + atomic writes
 
 ### Phase 2: Auth Flows — DONE
-- AWS Builder ID (device code flow)
-- AWS IAM Identity Center/IDC Enterprise (device code with custom startUrl/region)
-- Google/GitHub social login (PKCE + manual callback)
+- AWS Builder ID / IAM Identity Center: Kiro's own flow (RegisterClient → /authorize + PKCE → 127.0.0.1 callback → CreateToken). Falls back to device code when the browser cannot reach dntproxy's loopback (non-loopback caller or `X-Forwarded-For`); force with `KIRO_LOGIN_FLOW=auth-code|device-code`
+- Google/GitHub social login via the Kiro auth portal (`app.kiro.dev/signin`), completed by pasting the callback URL
 - Import token (manual refresh token with auto-register)
-- Auto token refresh before expiry (5min buffer, integrated into account selector)
+- Auto token refresh (ported from kiro-shared): refresh inside 10 min of expiry, 5s→60s backoff per connection, IdC client-registration expiry check, adopts a newer token written by another worker. Overrides: `KIRO_AUTH_ENDPOINT`, `KIRO_AUTH_PORTAL_URL`, `KIRO_IDE_VERSION`, `KIRO_MACHINE_ID`
+- Dashboard API contract for these flows is unchanged (see `auth-kiro-handler_test.go`)
+
+### Kiro model fetch — DONE
+- Models are synced **only on the operator's action**; there is no background sync and nothing writes `supportedModels` except an explicit Save.
+- `POST /api/connections/:id/fetch-models` is live for Kiro (`ListAvailableModels`: `management.<region>.kiro.dev/List-Available-Models`, Q surface as fallback and primary for API keys, follows `nextToken`, 10-page cap, one token refresh on 401/403). It is read-only (a refreshed token is persisted, the model list never is). Response keeps the `{models: []}` shape; on failure it degrades to the static defaults with `source: "provider-config"` and a `note`. It never forwards an upstream 401/403 (the dashboard would log the operator out).
+- Dashboard: **Edit models → Sync from provider** loads the list into the selection; the operator reviews it and presses Save (Cancel discards). Same behaviour in the post-create Verify panel ("Detect models" → "Save detected models").
 
 ### Phase 3: Dashboard / Management API — DONE
 - React dashboard + `/api/*` for configuration (connections, combos, aliases, keys, etc.)

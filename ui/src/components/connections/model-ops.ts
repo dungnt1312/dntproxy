@@ -1,4 +1,4 @@
-import { stripModelForConnection } from './BulkModelsModal';
+import { stripModelForConnection } from './model-prefix';
 import type { Connection } from '@/types/connections';
 
 /**
@@ -30,8 +30,9 @@ export function applyModelOps(
     ops.renames.map((r) => [stripModelForConnection(r.from, conn), stripModelForConnection(r.to, conn)]),
   );
   for (const r of ops.renames) {
-    if (!models.includes(stripModelForConnection(r.from, conn)) && !removeSet.has(stripModelForConnection(r.from, conn))) {
-      conflicts.push(`"${r.from}" is not in the current list`);
+    const from = stripModelForConnection(r.from, conn);
+    if (!models.includes(from) && !removeSet.has(from)) {
+      conflicts.push(`${conn.name}: "${r.from}" is not in its model list`);
     }
   }
 
@@ -40,7 +41,13 @@ export function applyModelOps(
   for (const m of ops.add.map((a) => stripModelForConnection(a, conn))) {
     if (m && !models.includes(m)) models.push(m);
   }
-  if (ops.add.some((a) => !a.trim())) conflicts.push('An added-model line is empty');
 
   return { result: [...new Set(models)], conflicts };
+}
+
+/** Order-insensitive equality for stored model lists. */
+export function sameModels(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  const set = new Set(a);
+  return b.every((m) => set.has(m));
 }

@@ -189,7 +189,7 @@ func modelSurfaces(conn *domain.ProviderConnection) []modelSurface {
 	q := modelSurface{
 		name:      "q",
 		base:      qEndpoint(region) + "/ListAvailableModels",
-		userAgent: "AWS-SDK-JS/3.0.0 kiro-ide/1.0.0",
+		userAgent: kiro.SDKUserAgent,
 	}
 	switch {
 	case apiKey:

@@ -10,13 +10,15 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/dungnt/dntproxy/internal/adapter/kiro"
 )
 
-// Constants below mirror the Kiro IDE auth stack (kiro-shared, v1.0.437).
+// Constants below mirror the Kiro IDE auth stack (ported from kiro-shared v1.0.437).
 const (
 	// DefaultKiroIDEVersion is reported in the auth service User-Agent
 	// (KiroIDE-<version>-<machineId>). Override with KIRO_IDE_VERSION.
-	DefaultKiroIDEVersion = "1.0.437"
+	DefaultKiroIDEVersion = kiro.IDEVersion
 
 	BuilderIDStartURL   = "https://view.awsapps.com/start"
 	InternalSSOStartURL = "https://amzn.awsapps.com/start"

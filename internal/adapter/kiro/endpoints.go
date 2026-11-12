@@ -29,6 +29,16 @@ const (
 
 	// DefaultRegion is used whenever a connection stores no explicit region.
 	DefaultRegion = "us-east-1"
+
+	// IDEVersion is the Kiro IDE release dntproxy identifies as (latest stable
+	// on prod.download.desktop.kiro.dev, released 2026-11-10). It only feeds
+	// the User-Agent strings; protocol behaviour still follows the release the
+	// auth/stream code was ported from.
+	IDEVersion = "1.4.154"
+
+	// SDKUserAgent is sent as User-Agent / X-Amz-User-Agent on CodeWhisperer, Q
+	// and runtime calls.
+	SDKUserAgent = "aws-sdk-js/3.0.0 kiro-ide/" + IDEVersion
 )
 
 // awsRegionPattern guards the region against being used to build arbitrary

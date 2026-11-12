@@ -47,8 +47,8 @@ func ValidateKiroAPIKey(apiKey, region string) (*KiroAPIKeyResult, error) {
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("TokenType", "API_KEY")
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "AWS-SDK-JS/3.0.0 kiro-ide/1.0.0")
-	req.Header.Set("X-Amz-User-Agent", "aws-sdk-js/3.0.0 kiro-ide/1.0.0")
+	req.Header.Set("User-Agent", kiro.SDKUserAgent)
+	req.Header.Set("X-Amz-User-Agent", kiro.SDKUserAgent)
 
 	client := &http.Client{Timeout: 20 * time.Second}
 	resp, err := client.Do(req)

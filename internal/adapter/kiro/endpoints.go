@@ -2,6 +2,7 @@ package kiro
 
 import (
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 
@@ -35,11 +36,23 @@ const (
 	// the User-Agent strings; protocol behaviour still follows the release the
 	// auth/stream code was ported from.
 	IDEVersion = "1.4.154"
-
-	// SDKUserAgent is sent as User-Agent / X-Amz-User-Agent on CodeWhisperer, Q
-	// and runtime calls.
-	SDKUserAgent = "aws-sdk-js/3.0.0 kiro-ide/" + IDEVersion
 )
+
+// SDKUserAgent is sent as User-Agent / X-Amz-User-Agent on CodeWhisperer, Q and
+// runtime calls. The backend gates on the "KiroIDE-<version>" token (the same
+// form the IDE uses, KiroIDE-<version>-<machineId>): the older "kiro-ide/x.y.z"
+// form is rejected with UnsupportedClientVersionException.
+// KIRO_IDE_VERSION overrides the version.
+func SDKUserAgent() string {
+	return "aws-sdk-js/3.0.0 KiroIDE-" + ideVersion() + "-" + MachineID()
+}
+
+func ideVersion() string {
+	if v := strings.TrimSpace(os.Getenv("KIRO_IDE_VERSION")); v != "" {
+		return v
+	}
+	return IDEVersion
+}
 
 // awsRegionPattern guards the region against being used to build arbitrary
 // hostnames from user input.

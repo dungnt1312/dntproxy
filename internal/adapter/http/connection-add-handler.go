@@ -279,6 +279,9 @@ func apiImportConnection(store port.CredentialStore) gin.HandlerFunc {
 		}
 
 		resolveKiroEmail(c, &conn)
+		// Imported IdC tokens carry no profileArn; without it every request
+		// fails with "profileArn is required for this request".
+		resolveKiroProfileArn(c, &conn)
 
 		if err := store.Update(func(cfg *domain.AppConfig) {
 			conn.Name = auth.KiroConnectionName(&conn, cfg.ProviderConnections)

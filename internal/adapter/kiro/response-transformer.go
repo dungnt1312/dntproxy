@@ -147,6 +147,17 @@ func (t *ResponseTransformer) TransformFrame(frame *EventFrame) [][]byte {
 	case "messageStopEvent":
 		t.stopReceived = true
 
+	case "metadataEvent":
+		// Current Kiro ends a turn with metadataEvent {"stopReason":"END_TURN"}
+		// instead of messageStopEvent. Treat a stop reason as the terminal
+		// signal, otherwise buffered responses are flagged as truncated.
+		var payload struct {
+			StopReason string `json:"stopReason"`
+		}
+		if err := frame.ParsePayloadAs(&payload); err == nil && payload.StopReason != "" {
+			t.stopReceived = true
+		}
+
 	case "contextUsageEvent":
 		t.handleContextUsage(frame)
 

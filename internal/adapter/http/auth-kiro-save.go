@@ -3,6 +3,7 @@ package http
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -64,6 +65,16 @@ func resolveKiroEmail(c *gin.Context, conn *domain.ProviderConnection) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
 	defer cancel()
 	auth.ResolveKiroEmail(ctx, conn)
+}
+
+// resolveKiroProfileArn fills profileArn for an IdC connection that has none
+// (imported tokens). Best effort and bounded, like resolveKiroEmail.
+func resolveKiroProfileArn(c *gin.Context, conn *domain.ProviderConnection) {
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
+	defer cancel()
+	if _, err := auth.ResolveConnectionProfileArn(ctx, conn); err != nil {
+		log.Printf("[KIRO] profileArn not resolved for %s: %v", conn.Name, err)
+	}
 }
 
 // loginFlowMode returns "auth-code" or "device-code" for a Builder ID / IDC

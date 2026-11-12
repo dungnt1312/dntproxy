@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/dungnt/dntproxy/internal/adapter/shared"
+	"github.com/dungnt/dntproxy/internal/domain"
+	"github.com/dungnt/dntproxy/internal/port"
 )
 
 // profilesHTTP mirrors the 10s requestTimeout Kiro uses for ListAvailableProfiles.
@@ -138,6 +140,78 @@ func ListAvailableProfiles(ctx context.Context, accessToken, provider, idcRegion
 		all = append(all, r...)
 	}
 	return all
+}
+
+// connNeedsProfileArn reports a Kiro IdC connection (SSO_OIDC token) that has
+// no profileArn. CodeWhisperer rejects its requests with "profileArn is
+// required for this request". Builder ID keeps its existing behaviour.
+func connNeedsProfileArn(conn *domain.ProviderConnection) bool {
+	if conn == nil || conn.Provider != "kiro" || connString(conn, "profileArn") != "" {
+		return false
+	}
+	if connString(conn, "authMethod") == "builder-id" {
+		return false
+	}
+	return modelsTokenType(conn) == "SSO_OIDC"
+}
+
+// ResolveConnectionProfileArn sets profileArn on an IdC connection that lacks
+// one (e.g. an imported token) when the account has exactly one profile, the
+// case Kiro selects silently. It returns whether conn was changed.
+func ResolveConnectionProfileArn(ctx context.Context, conn *domain.ProviderConnection) (bool, error) {
+	if !connNeedsProfileArn(conn) {
+		return false, nil
+	}
+	profiles := ListAvailableProfiles(ctx, conn.AccessToken, ProviderEnterprise, connString(conn, "region"))
+	switch len(profiles) {
+	case 0:
+		return false, fmt.Errorf("no Kiro profile available for this account")
+	case 1:
+		if conn.ProviderSpecificData == nil {
+			conn.ProviderSpecificData = map[string]interface{}{}
+		}
+		conn.ProviderSpecificData["profileArn"] = profiles[0].ARN
+		return true, nil
+	}
+	return false, fmt.Errorf("%d Kiro profiles available; none selected", len(profiles))
+}
+
+// BackfillKiroProfileArns fills profileArn for existing IdC connections that
+// lack one. Returns how many connections were updated.
+func BackfillKiroProfileArns(ctx context.Context, store port.CredentialStore) int {
+	cfg, err := store.Load()
+	if err != nil || cfg == nil {
+		return 0
+	}
+	updated := 0
+	for i := range cfg.ProviderConnections {
+		conn := cfg.ProviderConnections[i]
+		if !conn.IsActive || !connNeedsProfileArn(&conn) {
+			continue
+		}
+		if ok, err := ResolveConnectionProfileArn(ctx, &conn); err != nil || !ok {
+			continue
+		}
+		arn := connString(&conn, "profileArn")
+		_ = store.Update(func(cfg *domain.AppConfig) {
+			for j := range cfg.ProviderConnections {
+				c := &cfg.ProviderConnections[j]
+				if c.ID != conn.ID || connString(c, "profileArn") != "" {
+					continue
+				}
+				if c.ProviderSpecificData == nil {
+					c.ProviderSpecificData = map[string]interface{}{}
+				}
+				c.ProviderSpecificData["profileArn"] = arn
+				updated++
+				return
+			}
+		})
+		if ctx.Err() != nil {
+			break
+		}
+	}
+	return updated
 }
 
 // ResolveProfileArn mirrors handleProfiles for Enterprise/Internal IdC. With

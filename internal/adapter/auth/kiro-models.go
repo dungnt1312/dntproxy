@@ -189,7 +189,7 @@ func modelSurfaces(conn *domain.ProviderConnection) []modelSurface {
 	q := modelSurface{
 		name:      "q",
 		base:      qEndpoint(region) + "/ListAvailableModels",
-		userAgent: kiro.SDKUserAgent,
+		userAgent: kiro.SDKUserAgent(),
 	}
 	switch {
 	case apiKey:

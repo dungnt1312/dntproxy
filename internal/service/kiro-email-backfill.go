@@ -31,6 +31,10 @@ func BackfillKiroEmailsOnce(store port.CredentialStore, done <-chan struct{}) {
 		case <-ctx.Done():
 		}
 	}()
+	// profileArn first: without it an IdC connection cannot serve any request.
+	if n := auth.BackfillKiroProfileArns(ctx, store); n > 0 {
+		log.Printf("[KIRO] filled profileArn for %d connection(s)", n)
+	}
 	if n := auth.BackfillKiroAccountEmails(ctx, store); n > 0 {
 		log.Printf("[KIRO] filled account email for %d connection(s)", n)
 	}

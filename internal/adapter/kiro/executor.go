@@ -41,8 +41,8 @@ func buildKiroRequest(ctx context.Context, url string, payloadBytes []byte, cred
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/vnd.amazon.eventstream")
-	req.Header.Set("User-Agent", SDKUserAgent)
-	req.Header.Set("X-Amz-User-Agent", SDKUserAgent)
+	req.Header.Set("User-Agent", SDKUserAgent())
+	req.Header.Set("X-Amz-User-Agent", SDKUserAgent())
 	req.Header.Set("Amz-Sdk-Request", fmt.Sprintf("attempt=%d; max=%d", attempt, kiroMaxAttempts))
 	req.Header.Set("Amz-Sdk-Invocation-Id", uuid.New().String())
 

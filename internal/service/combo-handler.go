@@ -90,9 +90,7 @@ func (ch *ComboHandler) HandleCombo(
 		}
 
 		if result.RetryAfter != "" {
-			if earliestRetry == "" || result.RetryAfter < earliestRetry {
-				earliestRetry = result.RetryAfter
-			}
+			earliestRetry = earlierRetryAfter(earliestRetry, result.RetryAfter)
 		}
 
 		if result.Terminal || (!result.AllowFallback && !shouldComboFallback(result.StatusCode)) {

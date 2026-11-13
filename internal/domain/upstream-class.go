@@ -22,6 +22,13 @@ func ClassifyUpstream(status int, errorText string) UpstreamClass {
 	if isHardQuotaExhaustion(lower) {
 		return UpstreamQuota
 	}
+	// A suspended/banned account is likewise definitive regardless of status.
+	// Some providers (GLM/Zhipu sends business errors as 400) report a ban with
+	// a client-error status, so checking this after the non-fallback gate would
+	// leave a banned account in rotation instead of sidelining it.
+	if isSuspensionError(lower) {
+		return UpstreamSuspended
+	}
 	if IsNonFallbackStatus(status) {
 		return UpstreamNonFallback
 	}
@@ -33,9 +40,6 @@ func ClassifyUpstream(status int, errorText string) UpstreamClass {
 	}
 	if status == 403 && isModelEntitlementError(lower) {
 		return UpstreamModelEntitlement
-	}
-	if isSuspensionError(lower) {
-		return UpstreamSuspended
 	}
 	if isAuthRevokedError(lower) {
 		return UpstreamAuth

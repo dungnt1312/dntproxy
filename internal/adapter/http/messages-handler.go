@@ -134,6 +134,9 @@ func messagesHandler(chatService port.ChatService, store port.CredentialStore, c
 		result := chatService.HandleChat(openaiBody, antReq.Model, requestID, policy, meta)
 
 		if result.Stream == nil {
+			// Surface the router's earliest-recovery hint the same way the OpenAI
+			// chat route does, so Anthropic clients back off accurately.
+			writeRetryAfterHeader(c, result.RetryAfter)
 			writeAnthropicError(c, result.StatusCode, "api_error", result.Error)
 			return
 		}

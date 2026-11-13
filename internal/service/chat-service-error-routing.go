@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/dungnt/dntproxy/internal/domain"
 	"github.com/dungnt/dntproxy/internal/port"
@@ -42,6 +43,39 @@ func retryAfterFromError(errMsg string) string {
 	return ""
 }
 
+// selectionRetryAfter extracts the earliest-recovery hint from a selection
+// error, or "" when the error is not about a temporary cooldown.
+func selectionRetryAfter(err error) string {
+	var selErr *AccountSelectionError
+	if errors.As(err, &selErr) {
+		return selErr.RetryAfter
+	}
+	return ""
+}
+
+// earlierRetryAfter returns the sooner of two RFC3339 hints; unparseable values
+// fall through to whichever parses, and "" when neither does.
+func earlierRetryAfter(a, b string) string {
+	if a == "" {
+		return b
+	}
+	if b == "" {
+		return a
+	}
+	ta, errA := time.Parse(time.RFC3339, a)
+	tb, errB := time.Parse(time.RFC3339, b)
+	switch {
+	case errA != nil:
+		return b
+	case errB != nil:
+		return a
+	case tb.Before(ta):
+		return b
+	default:
+		return a
+	}
+}
+
 // mapSelectionErrorToChatResult maps AccountSelectionError to a ChatResult for
 // legacy callers that return port.ChatResult directly.
 func mapSelectionErrorToChatResult(err error) *port.ChatResult {
@@ -58,7 +92,7 @@ func mapSelectionErrorToChatResult(err error) *port.ChatResult {
 	case SelectionErrUnsupportedModel:
 		return &port.ChatResult{StatusCode: http.StatusBadRequest, Error: selErr.Error()}
 	case SelectionErrRateLimited, SelectionErrModelLocked:
-		return &port.ChatResult{StatusCode: http.StatusTooManyRequests, Error: selErr.Error()}
+		return &port.ChatResult{StatusCode: http.StatusTooManyRequests, Error: selErr.Error(), RetryAfter: selErr.RetryAfter}
 	default:
 		return &port.ChatResult{StatusCode: http.StatusServiceUnavailable, Error: selErr.Error()}
 	}

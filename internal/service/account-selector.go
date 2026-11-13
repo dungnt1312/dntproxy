@@ -56,6 +56,10 @@ type AccountSelectionError struct {
 	Kind     AccountSelectionErrorKind
 	Provider string
 	Model    string
+	// RetryAfter is the earliest moment a rejected connection becomes usable
+	// again (RFC3339), when the rejection is only a cooldown. It lets the caller
+	// answer with a meaningful Retry-After instead of an open-ended 429.
+	RetryAfter string
 }
 
 func (e *AccountSelectionError) Error() string {
@@ -184,18 +188,20 @@ func (s *AccountSelector) selectPinnedConnection(
 		// Check if rate limited
 		if domain.IsAccountUnavailable(conn.RateLimitedUntil) {
 			return nil, &AccountSelectionError{
-				Kind:     SelectionErrRateLimited,
-				Provider: provider,
-				Model:    model,
+				Kind:       SelectionErrRateLimited,
+				Provider:   provider,
+				Model:      model,
+				RetryAfter: conn.RateLimitedUntil,
 			}
 		}
 
 		// Check if model locked
-		if domain.IsModelLockActive(conn.ModelLocks, model) {
+		if lockUntil := domain.ModelLockExpiry(conn.ModelLocks, model); lockUntil != "" {
 			return nil, &AccountSelectionError{
-				Kind:     SelectionErrModelLocked,
-				Provider: provider,
-				Model:    model,
+				Kind:       SelectionErrModelLocked,
+				Provider:   provider,
+				Model:      model,
+				RetryAfter: lockUntil,
 			}
 		}
 
@@ -271,6 +277,29 @@ func (s *AccountSelector) SelectCredentials(
 	rateLimitedSupportedCount := 0
 	lockedSupportedCount := 0
 	nonExcludedCount := 0
+	// earliestRetry tracks when a rejected connection becomes usable again, so a
+	// fully cooling pool can answer with a real Retry-After instead of an
+	// open-ended "come back later".
+	earliestRetry := ""
+	earliestRetryAt := time.Time{}
+	noteRetry := func(until string) {
+		if until == "" {
+			return
+		}
+		t, err := time.Parse(time.RFC3339, until)
+		if err != nil {
+			// Corrupt timestamps count as unavailable elsewhere; keep the raw
+			// value so the caller at least sees a hint.
+			if earliestRetry == "" {
+				earliestRetry = until
+			}
+			return
+		}
+		if earliestRetryAt.IsZero() || t.Before(earliestRetryAt) {
+			earliestRetry = until
+			earliestRetryAt = t
+		}
+	}
 
 	for _, conn := range connections {
 		// Skip excluded connections (already failed in this request)
@@ -306,12 +335,14 @@ func (s *AccountSelector) SelectCredentials(
 		// Skip rate-limited connections
 		if domain.IsAccountUnavailable(conn.RateLimitedUntil) {
 			rateLimitedSupportedCount++
+			noteRetry(conn.RateLimitedUntil)
 			continue
 		}
 
 		// Skip model-locked connections
-		if domain.IsModelLockActive(conn.ModelLocks, model) {
+		if lockUntil := domain.ModelLockExpiry(conn.ModelLocks, model); lockUntil != "" {
 			lockedSupportedCount++
+			noteRetry(lockUntil)
 			continue
 		}
 
@@ -345,16 +376,18 @@ func (s *AccountSelector) SelectCredentials(
 		}
 		if rateLimitedSupportedCount == supportedCount {
 			return nil, &AccountSelectionError{
-				Kind:     SelectionErrRateLimited,
-				Provider: provider,
-				Model:    model,
+				Kind:       SelectionErrRateLimited,
+				Provider:   provider,
+				Model:      model,
+				RetryAfter: earliestRetry,
 			}
 		}
 		if lockedSupportedCount == supportedCount {
 			return nil, &AccountSelectionError{
-				Kind:     SelectionErrModelLocked,
-				Provider: provider,
-				Model:    model,
+				Kind:       SelectionErrModelLocked,
+				Provider:   provider,
+				Model:      model,
+				RetryAfter: earliestRetry,
 			}
 		}
 		return nil, &AccountSelectionError{
@@ -639,6 +672,28 @@ func (s *AccountSelector) MarkUnavailable(connectionID string, status int, error
 		if !fb.ShouldFallback {
 			return
 		}
+
+		// A weak failure must not overwrite a strong one. Once an account is
+		// sidelined for an exhausted balance, a suspension, or a revoked grant,
+		// a later transient blip (recorded by a request that was already in
+		// flight) must not replace that reason with a 2-second model lock — the
+		// account would be back in rotation within seconds.
+		if domain.IsStickyAccountCooldown(conn.LastError) && domain.IsAccountUnavailable(conn.RateLimitedUntil) {
+			if !domain.IsStickyAccountCooldown(errorText) {
+				if settings.ModelLockOn() && model != "" && fb.CooldownMs > 0 {
+					lockModel(conn, model, domain.CooldownUntil(fb.CooldownMs))
+				}
+				return
+			}
+			// Both are account-level: keep whichever runs longer.
+			if existing, err := time.Parse(time.RFC3339, conn.RateLimitedUntil); err == nil &&
+				existing.After(time.Now().Add(time.Duration(fb.CooldownMs)*time.Millisecond)) {
+				if settings.ModelLockOn() && model != "" {
+					lockModel(conn, model, conn.RateLimitedUntil)
+				}
+				return
+			}
+		}
 		if domain.ClassifyUpstream(status, errorText) == domain.UpstreamTransient && settings.TransientCooldownSeconds > 0 {
 			fb.CooldownMs = settings.TransientCooldownSeconds * 1000
 			// An explicit operator override is an account-level circuit breaker.
@@ -656,16 +711,27 @@ func (s *AccountSelector) MarkUnavailable(connectionID string, status int, error
 			conn.LastErrorAt = time.Now().UTC().Format(time.RFC3339)
 
 			if settings.ModelLockOn() && model != "" {
-				if conn.ModelLocks == nil {
-					conn.ModelLocks = make(map[string]string)
-				}
-				conn.ModelLocks[model] = until
+				lockModel(conn, model, until)
 			}
 		}
 	})
 }
 
+// lockModel records a per-model lock, creating the map on first use.
+func lockModel(conn *domain.ProviderConnection, model, until string) {
+	if conn.ModelLocks == nil {
+		conn.ModelLocks = make(map[string]string)
+	}
+	conn.ModelLocks[model] = until
+}
+
 // ClearError resets a connection's error state after a successful request.
+//
+// A success does not prove every previous failure was spurious: with concurrent
+// requests, a slow success can land after another request recorded a hard quota
+// exhaustion or a suspension. Clearing that account-level cooldown would put an
+// exhausted account straight back into rotation, so sticky failures keep their
+// cooldown and only the per-model lock of the model that just worked is cleared.
 func (s *AccountSelector) ClearError(connectionID string, model string) error {
 	return s.store.Update(func(cfg *domain.AppConfig) {
 		var conn *domain.ProviderConnection
@@ -679,10 +745,15 @@ func (s *AccountSelector) ClearError(connectionID string, model string) error {
 			return
 		}
 
-		conn.RateLimitedUntil = ""
-		conn.BackoffLevel = 0
-		conn.LastError = ""
-		conn.LastErrorAt = ""
+		stickyCooldown := domain.IsStickyAccountCooldown(conn.LastError) &&
+			domain.IsAccountUnavailable(conn.RateLimitedUntil)
+
+		if !stickyCooldown {
+			conn.RateLimitedUntil = ""
+			conn.BackoffLevel = 0
+			conn.LastError = ""
+			conn.LastErrorAt = ""
+		}
 
 		if model != "" && conn.ModelLocks != nil {
 			delete(conn.ModelLocks, model)

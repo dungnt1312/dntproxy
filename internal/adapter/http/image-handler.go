@@ -2,6 +2,7 @@ package http
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -94,11 +95,7 @@ func imageGenerationsHandler(store port.CredentialStore, imageProviders port.Ima
 		tenantID := GetTenantID(c)
 		creds, selErr := selectImageCredentials(c, store, provider, cleanModel, imageModel, pinnedConnID, tenantID)
 		if selErr != nil {
-			if strings.Contains(strings.ToLower(selErr.Error()), "not allowed by api key policy") {
-				c.JSON(http.StatusForbidden, gin.H{"error": gin.H{"message": selErr.Error(), "type": "invalid_request_error"}})
-			} else {
-				c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{"message": fmt.Sprintf("No available accounts: %v", selErr), "type": "server_error"}})
-			}
+			writeImageSelectionError(c, selErr)
 			return
 		}
 
@@ -115,18 +112,20 @@ func imageGenerationsHandler(store port.CredentialStore, imageProviders port.Ima
 				c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"message": fmt.Sprintf("Streaming image generation not supported for model: %s", imageModel), "type": "invalid_request_error"}})
 				return
 			}
-			handleStreamingImageGeneration(c, imageProvider, imageRequest, responseFormat)
+			handleStreamingImageGeneration(c, store, imageProvider, imageRequest, responseFormat)
 			return
 		}
 
 		result, statusCode, execErr := imageProvider.Generate(c.Request.Context(), imageRequest)
 		if execErr != nil {
+			markImageFailure(store, creds, cleanModel, statusCode, execErr)
 			if statusCode == 0 {
 				statusCode = http.StatusBadGateway
 			}
 			c.JSON(statusCode, gin.H{"error": gin.H{"message": execErr.Error(), "type": imageExecutionErrorType(statusCode)}})
 			return
 		}
+		clearImageFailure(store, creds, cleanModel)
 
 		resp, err := openai.BuildOpenAIImageResponse(result, time.Now().Unix(), responseFormat)
 		if err != nil {
@@ -146,8 +145,55 @@ func imageExecutionErrorType(statusCode int) string {
 	return "api_error"
 }
 
+// writeImageSelectionError answers a failed credential selection. A pool that is
+// only cooling down is a 429 with the earliest recovery hint, not a 503: the
+// caller can retry as soon as the hint says instead of guessing.
+func writeImageSelectionError(c *gin.Context, selErr error) {
+	if strings.Contains(strings.ToLower(selErr.Error()), "not allowed by api key policy") {
+		c.JSON(http.StatusForbidden, gin.H{"error": gin.H{"message": selErr.Error(), "type": "invalid_request_error"}})
+		return
+	}
+	var selectionErr *service.AccountSelectionError
+	if errors.As(selErr, &selectionErr) &&
+		(selectionErr.Kind == service.SelectionErrRateLimited || selectionErr.Kind == service.SelectionErrModelLocked) {
+		writeRetryAfterHeader(c, selectionErr.RetryAfter)
+		c.JSON(http.StatusTooManyRequests, gin.H{"error": gin.H{"message": selErr.Error(), "type": "rate_limit_error"}})
+		return
+	}
+	c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{"message": fmt.Sprintf("No available accounts: %v", selErr), "type": "server_error"}})
+}
+
+// markImageFailure records an image-route failure on the connection that was
+// selected, so the next request routes around a broken account. Image routes
+// resolve credentials directly and bypass ChatService, which is what normally
+// records failures; without this an account that always fails (spent credit,
+// revoked key, banned account) kept being picked for every following request.
+func markImageFailure(store port.CredentialStore, creds *domain.Credentials, model string, statusCode int, err error) {
+	if store == nil || creds == nil || creds.ConnectionID == "" {
+		return
+	}
+	status := statusCode
+	if status <= 0 {
+		status = http.StatusBadGateway
+	}
+	var message string
+	if err != nil {
+		message = err.Error()
+	}
+	_ = service.NewAccountSelector(store).MarkUnavailable(creds.ConnectionID, status, message, model)
+}
+
+// clearImageFailure drops a stale cooldown after a successful image request,
+// mirroring what ChatService does for chat completions.
+func clearImageFailure(store port.CredentialStore, creds *domain.Credentials, model string) {
+	if store == nil || creds == nil || creds.ConnectionID == "" {
+		return
+	}
+	_ = service.NewAccountSelector(store).ClearError(creds.ConnectionID, model)
+}
+
 // handleStreamingImageGeneration handles streaming image generation with SSE.
-func handleStreamingImageGeneration(c *gin.Context, imageProvider port.ImageProvider, request port.ImageRequest, responseFormat string) {
+func handleStreamingImageGeneration(c *gin.Context, store port.CredentialStore, imageProvider port.ImageProvider, request port.ImageRequest, responseFormat string) {
 	streamingProvider, ok := imageProvider.(port.StreamingImageProvider)
 	if !ok {
 		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"message": "Streaming image generation is not available for this provider", "type": "invalid_request_error"}})
@@ -155,12 +201,14 @@ func handleStreamingImageGeneration(c *gin.Context, imageProvider port.ImageProv
 	}
 	events, statusCode, err := streamingProvider.StreamGenerate(c.Request.Context(), request)
 	if err != nil {
+		markImageFailure(store, request.Credentials, request.Model, statusCode, err)
 		if statusCode == 0 {
 			statusCode = http.StatusBadGateway
 		}
 		c.JSON(statusCode, gin.H{"error": gin.H{"message": err.Error(), "type": imageExecutionErrorType(statusCode)}})
 		return
 	}
+	clearImageFailure(store, request.Credentials, request.Model)
 
 	// Set SSE headers
 	c.Header("Content-Type", "text/event-stream")
@@ -265,11 +313,7 @@ func imageEditsHandler(store port.CredentialStore, imageProviders port.ImageProv
 			tenantID := GetTenantID(c)
 			creds, selErr := selectImageCredentials(c, store, provider, cleanModel, imageModel, pinnedConnID, tenantID)
 			if selErr != nil {
-				if strings.Contains(strings.ToLower(selErr.Error()), "not allowed by api key policy") {
-					c.JSON(http.StatusForbidden, gin.H{"error": gin.H{"message": selErr.Error(), "type": "invalid_request_error"}})
-				} else {
-					c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{"message": fmt.Sprintf("No available accounts: %v", selErr), "type": "server_error"}})
-				}
+				writeImageSelectionError(c, selErr)
 				return
 			}
 
@@ -290,12 +334,14 @@ func imageEditsHandler(store port.CredentialStore, imageProviders port.ImageProv
 				Logger:      reqlog,
 			})
 			if execErr != nil {
+				markImageFailure(store, creds, cleanModel, statusCode, execErr)
 				if statusCode == 0 {
 					statusCode = http.StatusBadGateway
 				}
 				c.JSON(statusCode, gin.H{"error": gin.H{"message": execErr.Error(), "type": imageExecutionErrorType(statusCode)}})
 				return
 			}
+			clearImageFailure(store, creds, cleanModel)
 
 			resp, err := openai.BuildOpenAIImageResponse(result, time.Now().Unix(), responseFormat)
 			if err != nil {
@@ -347,11 +393,7 @@ func imageEditsHandler(store port.CredentialStore, imageProviders port.ImageProv
 		tenantID := GetTenantID(c)
 		creds, selErr := selectImageCredentials(c, store, provider, cleanModel, imageModel, pinnedConnID, tenantID)
 		if selErr != nil {
-			if strings.Contains(strings.ToLower(selErr.Error()), "not allowed by api key policy") {
-				c.JSON(http.StatusForbidden, gin.H{"error": gin.H{"message": selErr.Error(), "type": "invalid_request_error"}})
-			} else {
-				c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{"message": fmt.Sprintf("No available accounts: %v", selErr), "type": "server_error"}})
-			}
+			writeImageSelectionError(c, selErr)
 			return
 		}
 
@@ -372,12 +414,14 @@ func imageEditsHandler(store port.CredentialStore, imageProviders port.ImageProv
 			Logger:      reqlog,
 		})
 		if execErr != nil {
+			markImageFailure(store, creds, cleanModel, statusCode, execErr)
 			if statusCode == 0 {
 				statusCode = http.StatusBadGateway
 			}
 			c.JSON(statusCode, gin.H{"error": gin.H{"message": execErr.Error(), "type": imageExecutionErrorType(statusCode)}})
 			return
 		}
+		clearImageFailure(store, creds, cleanModel)
 
 		resp, err := openai.BuildOpenAIImageResponse(result, time.Now().Unix(), responseFormat)
 		if err != nil {

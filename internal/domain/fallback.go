@@ -3,6 +3,7 @@ package domain
 import (
 	"fmt"
 	"math"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -174,6 +175,12 @@ func isSuspensionError(lower string) bool {
 		"account suspended",
 		"account is suspended",
 		"unusual user activity",
+		// Zhipu/GLM bans the whole account and reports it as 403 with a Chinese
+		// message. This used to be listed as a model-entitlement hint, which
+		// locked only the model and left a banned account serving other models.
+		"封禁",
+		"被冻结",
+		"账号被禁",
 	}
 	for _, hint := range hints {
 		if strings.Contains(lower, hint) {
@@ -232,8 +239,23 @@ func isHardQuotaExhaustion(lower string) bool {
 		"out of credits",
 		"insufficient credits",
 		"insufficient_quota",
+		"insufficient balance",
+		"credit balance",
+		"no available resource package",
+		"please recharge",
 		"limit reached",
 		"limit exceeded",
+		// GLM/Zhipu reports an empty credit balance as a plain 400 BAD_REQUEST
+		// with a Chinese message. Without these hints the request was treated as
+		// a client error: no failover, no cooldown, so every following request
+		// picked the same broke account again.
+		"余额不足",
+		"欠费",
+		"无可用资源包",
+		"请充值",
+		"额度已用尽",
+		"额度用尽",
+		"资源包已用完",
 	}
 	for _, hint := range hints {
 		if strings.Contains(lower, hint) {
@@ -250,19 +272,8 @@ func isHardQuotaExhaustion(lower string) bool {
 // default tier, cool down until then so the account does not re-enter rotation
 // hourly for a multi-day window. Still clamped by MaxCooldownSeconds downstream.
 func hardQuotaCooldownMs(lower string) int {
-	const marker = "resets at "
-	idx := strings.LastIndex(lower, marker)
-	if idx < 0 {
-		return CooldownQuotaExhausted
-	}
-	rest := lower[idx+len(marker):]
-	if cut := strings.IndexAny(rest, " \n\t"); cut >= 0 {
-		rest = rest[:cut]
-	}
-	rest = strings.TrimRight(rest, ".,;:)")
-	// CheckFallbackError lowercases the message; RFC3339 wants uppercase T/Z.
-	t, err := time.Parse(time.RFC3339, strings.ToUpper(rest))
-	if err != nil {
+	t, ok := ExtractResetInstant(lower)
+	if !ok {
 		return CooldownQuotaExhausted
 	}
 	ms := int(time.Until(t).Milliseconds())
@@ -272,6 +283,49 @@ func hardQuotaCooldownMs(lower string) int {
 	return ms
 }
 
+// resetTimestampRe matches the timestamp shapes upstreams embed in quota
+// messages: RFC3339 ("2026-08-25T07:21:09.207Z"), a space-separated naive form
+// ("2026-10-26 20:04:25" — GLM/Zhipu), and optional numeric offsets.
+var resetTimestampRe = regexp.MustCompile(
+	`\d{4}-\d{2}-\d{2}[t ]\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?(?:z|[+-]\d{2}:?\d{2})?`)
+
+// providerNaiveZone is the zone assumed for a reset timestamp that carries no
+// offset. Providers that emit naive timestamps (GLM/Zhipu) are Chinese and
+// report Beijing time; assuming +08 keeps the cooldown aligned with the window
+// instead of cooling for the wrong number of hours.
+var providerNaiveZone = time.FixedZone("UTC+8", 8*60*60)
+
+// ExtractResetInstant reports when a quota window resets according to a hint in
+// the error text, if any. It accepts the RFC3339 form used by Command Code and
+// the space-separated naive form used by GLM ("Your limit will reset at
+// 2026-10-26 20:04:25", "额度将在 2026-10-26 20:04:25 重置"). It deliberately
+// scans for a timestamp shape instead of matching one exact marker phrase,
+// because providers phrase the hint differently ("reset at" vs "resets at") and
+// some wrap it in another language.
+func ExtractResetInstant(errorText string) (time.Time, bool) {
+	lower := strings.ToLower(errorText)
+	for _, match := range resetTimestampRe.FindAllString(lower, -1) {
+		// CheckFallbackError lowercases the message; RFC3339 wants uppercase T/Z.
+		normalized := strings.ToUpper(match)
+		for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
+			if t, err := time.Parse(layout, normalized); err == nil {
+				return t, true
+			}
+		}
+		for _, layout := range []string{
+			"2006-01-02T15:04:05",
+			"2006-01-02T15:04",
+			"2006-01-02 15:04:05",
+			"2006-01-02 15:04",
+		} {
+			if t, err := time.ParseInLocation(layout, normalized, providerNaiveZone); err == nil {
+				return t, true
+			}
+		}
+	}
+	return time.Time{}, false
+}
+
 func isModelEntitlementError(lower string) bool {
 	entitlementHints := []string{
 		"model_not_entitled",
@@ -279,7 +333,6 @@ func isModelEntitlementError(lower string) bool {
 		"not subscribed",
 		"unavailable model",
 		"未订阅",
-		"封禁",
 	}
 	for _, hint := range entitlementHints {
 		if strings.Contains(lower, hint) {
@@ -287,6 +340,37 @@ func isModelEntitlementError(lower string) bool {
 		}
 	}
 	return false
+}
+
+// IsStickyAccountCooldown reports whether a recorded error describes a state
+// that a single later success cannot clear: an exhausted quota/credit balance, a
+// suspended/banned account, or a revoked credential. All three need operator
+// action (top up, appeal, re-auth), so routing must keep the account sidelined
+// until the cooldown expires instead of trusting one lucky request.
+func IsStickyAccountCooldown(errorText string) bool {
+	if strings.TrimSpace(errorText) == "" {
+		return false
+	}
+	lower := strings.ToLower(errorText)
+	if isSuspensionError(lower) || isAuthRevokedError(lower) {
+		return true
+	}
+	if !isHardQuotaExhaustion(lower) {
+		return false
+	}
+	// A plain short-term limiter recovers on its own after seconds, so it must
+	// stay clearable. Only phrase that sounds like an exhausted balance/quota
+	// window is worth protecting from a later success.
+	for _, hint := range []string{
+		"rate limit", "ratelimit", "too many requests", "concurrency", "并发",
+	} {
+		if strings.Contains(lower, hint) &&
+			!strings.Contains(lower, "balance") &&
+			!strings.Contains(lower, "余额") {
+			return false
+		}
+	}
+	return true
 }
 
 // IsAccountUnavailable checks if a cooldown timestamp is still active.
@@ -303,25 +387,34 @@ func IsAccountUnavailable(rateLimitedUntil string) bool {
 	return t.After(time.Now())
 }
 
-// IsModelLockActive checks if a model lock on a connection is still active.
+// IsModelLockActive reports whether a per-model (or global "__all") lock is
+// currently active for model.
 // Corrupt timestamps are treated as active (safe default).
 func IsModelLockActive(locks map[string]string, model string) bool {
+	return ModelLockExpiry(locks, model) != ""
+}
+
+// ModelLockExpiry returns the expiry timestamp of the active lock covering
+// model, or "" when the model is not locked. A corrupt timestamp counts as
+// active (fail closed) and is returned as-is. Exported so callers can report
+// when the model becomes usable again.
+func ModelLockExpiry(locks map[string]string, model string) string {
 	if locks == nil {
-		return false
+		return ""
 	}
 	// Check specific model lock
 	if expiry, ok := locks[model]; ok {
 		if t, err := time.Parse(time.RFC3339, expiry); err != nil || t.After(time.Now()) {
-			return true
+			return expiry
 		}
 	}
 	// Check global lock
 	if expiry, ok := locks["__all"]; ok {
 		if t, err := time.Parse(time.RFC3339, expiry); err != nil || t.After(time.Now()) {
-			return true
+			return expiry
 		}
 	}
-	return false
+	return ""
 }
 
 // CooldownUntil returns an ISO timestamp cooldownMs from now.

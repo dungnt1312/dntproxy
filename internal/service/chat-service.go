@@ -274,7 +274,7 @@ func (s *ChatService) executeOnProvider(body []byte, qualifiedModel string, requ
 					OK:            false,
 					StatusCode:    statusCode,
 					Error:         message,
-					RetryAfter:    retryAfterFromError(lastExecErr),
+					RetryAfter:    earlierRetryAfter(retryAfterFromError(lastExecErr), selectionRetryAfter(err)),
 					AllowFallback: shouldFallbackToNextAccount(lastExecStatus, lastExecErr),
 				}, nil
 			}
@@ -421,7 +421,12 @@ func mapSelectionErrorToComboResult(err error) *ComboResult {
 	case SelectionErrUnsupportedModel:
 		return &ComboResult{OK: false, StatusCode: http.StatusBadRequest, Error: selErr.Error(), AllowFallback: true}
 	case SelectionErrRateLimited, SelectionErrModelLocked:
-		return &ComboResult{OK: false, StatusCode: http.StatusTooManyRequests, Error: selErr.Error()}
+		return &ComboResult{
+			OK:         false,
+			StatusCode: http.StatusTooManyRequests,
+			Error:      selErr.Error(),
+			RetryAfter: selErr.RetryAfter,
+		}
 	default:
 		return &ComboResult{OK: false, StatusCode: http.StatusServiceUnavailable, Error: selErr.Error()}
 	}
